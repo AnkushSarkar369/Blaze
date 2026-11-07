@@ -13,7 +13,6 @@ body { margin: 0; min-width: 720px; min-height: 420px; }
 button, input { font: inherit; color: inherit; }
 button { cursor: pointer; }
 .app-shell { height: 100vh; min-height: 420px; background: #101113; overflow: hidden; }
-.timeline-ruler, .tool-kicker, .tool-primary, .tool-tabs, .timeline-toolbar, .media-meta { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; letter-spacing: .55px; }
 .workspace-grid { height: 100vh; min-height: 420px; display: grid; grid-template-columns: minmax(0, 1fr) 6px minmax(0, 1fr); grid-template-rows: minmax(0, 58fr) 6px minmax(0, 42fr); }
 .quadrant { min-width: 0; min-height: 0; background: #111214; overflow: hidden; }
 .preview-quadrant { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; }
@@ -69,18 +68,10 @@ h2 { font-size: 15px; font-weight: 600; letter-spacing: -.3px; margin: 0 0 8px; 
 .timeline-zoom { min-width: 34px; text-align: right; color: #a2a4a9; }
 .timeline-viewport { position: relative; flex: 1; min-height: 100px; overflow: auto hidden; scrollbar-width: thin; scrollbar-color: #3a3c42 #17181a; }
 .timeline-canvas { position: relative; display: flex; flex-direction: column; min-width: 100%; min-height: 100%; height: 100%; background: #131416; }
-.timeline-ruler { position: relative; flex: 0 0 27px; height: 27px; border-bottom: 1px solid #303238; cursor: crosshair; }
-.ruler-tick { position: absolute; top: 0; height: 100%; border-left: 1px solid #34363b; color: #73767d; font-size: 8px; letter-spacing: 0; }
-.ruler-tick span { position: absolute; top: 5px; left: 5px; white-space: nowrap; }
-.ruler-tick i { position: absolute; left: -1px; bottom: 0; height: 6px; border-left: 1px solid #55585e; }
-.keyframe-track { position: relative; flex: 0 0 34px; height: 34px; border-bottom: 1px solid #282a2e; background: #17191b; cursor: crosshair; }
-.track-label { position: absolute; z-index: 2; left: 8px; top: 50%; transform: translateY(-50%); color: #777b80; font: 7px Consolas, monospace; letter-spacing: .6px; pointer-events: none; }
-.keyframe-lane { position: absolute; inset: 0; }
-.keyframe-lane i { position: absolute; top: 7px; bottom: 7px; width: 2px; margin-left: -1px; border-radius: 1px; background: #d9a45f; opacity: .8; pointer-events: none; }
-.track-empty { position: absolute; left: 52px; top: 50%; transform: translateY(-50%); color: #565a60; font: 8px Consolas, monospace; pointer-events: none; }
+.track-empty { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: #565a60; font: 8px Consolas, monospace; pointer-events: none; }
 .waveform-track { position: relative; flex: 1 1 88px; min-height: 88px; background: #141719; cursor: crosshair; }
 .waveform-canvas { position: sticky; left: 0; display: block; height: 100%; }
-.cut-marker { position: absolute; z-index: 5; top: 27px; bottom: 0; width: 1px; background: var(--accent); pointer-events: none; }
+.cut-marker { position: absolute; z-index: 5; top: 0; bottom: 0; width: 1px; background: var(--accent); pointer-events: none; }
 .cut-marker::before { content: ""; position: absolute; top: 0; left: -3px; width: 7px; height: 7px; background: var(--accent); transform: rotate(45deg); }
 .playhead { position: absolute; z-index: 10; top: 0; bottom: 0; width: 1px; pointer-events: none; }
 .playhead-cap { position: absolute; top: 0; left: -5px; width: 11px; height: 12px; background: var(--accent); clip-path: polygon(0 0, 100% 0, 100% 65%, 50% 100%, 0 65%); }

@@ -316,14 +316,6 @@ function App() {
       : [...existing, nextCut].sort((a, b) => a - b));
   }
 
-  const baseRulerStep = zoom >= 6 ? 0.5 : zoom >= 3 ? 1 : zoom >= 1.2 ? 2 : zoom >= 0.6 ? 5 : 10;
-  const rulerStep = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800]
-    .find((step) => step >= Math.max(baseRulerStep, duration / 300)) ?? 3600;
-  const rulerTicks = duration
-    ? Array.from({ length: Math.ceil(duration / rulerStep) + 1 }, (_, index) => index * rulerStep)
-        .filter((tick) => tick <= duration)
-    : Array.from({ length: 9 }, (_, index) => index * 5);
-
   return (
     <main className="app-shell">
       <input
@@ -495,28 +487,7 @@ function App() {
 
           <div className="timeline-viewport" ref={timelineViewport}>
             <div className="timeline-canvas" style={{ width: contentWidth }}>
-              {videoUrl && (
-                <div className="timeline-ruler" onClick={seekFromPointer}>
-                  {rulerTicks.map((tick) => (
-                    <div className="ruler-tick" key={tick} style={{ left: tick * pixelsPerSecond }}>
-                      <span>{formatTime(tick)}</span><i />
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="keyframe-track" onClick={seekFromPointer}>
-                <span className="track-label">VIDEO</span>
-                <div className="keyframe-lane">
-                  {keyframes.map((time, index) => (
-                    <i key={index} style={{ left: time * pixelsPerSecond }} title={formatTime(time)} />
-                  ))}
-                  {!keyframes.length && videoUrl && <span className="track-empty">Keyframes will appear here</span>}
-                </div>
-              </div>
-
               <div className="waveform-track" onClick={seekFromPointer}>
-                <span className="track-label">AUDIO</span>
                 {waveform ? (
                   <canvas
                     ref={waveformCanvas}
