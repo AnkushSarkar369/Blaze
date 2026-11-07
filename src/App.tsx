@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type WheelEvent } from "react";
+import type React from "react";
 
 type ToolTab = "blaze" | "precise" | "export";
 
@@ -20,10 +21,42 @@ function App() {
   const [activeTab, setActiveTab] = useState<ToolTab>("blaze");
   const [cuts, setCuts] = useState<number[]>([]);
   const [timelineWidth, setTimelineWidth] = useState(1000);
+  const [previewWidth, setPreviewWidth] = useState(50);
+  const [topHeight, setTopHeight] = useState(58);
+  const [draggingDivider, setDraggingDivider] = useState<"vertical" | "horizontal" | null>(null);
 
   const mode = activeTab === "precise" ? "precise" : "blaze";
   const pixelsPerSecond = 72 * zoom;
   const contentWidth = Math.max(timelineWidth, duration * pixelsPerSecond + 40);
+  const workspaceStyle = {
+    gridTemplateColumns: `minmax(0, ${previewWidth}fr) 6px minmax(0, ${100 - previewWidth}fr)`,
+    gridTemplateRows: `${topHeight}fr 6px ${100 - topHeight}fr`,
+  } as React.CSSProperties;
+
+  function startDividerDrag(kind: "vertical" | "horizontal", event: React.PointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDraggingDivider(kind);
+  }
+
+  function moveDivider(event: React.PointerEvent<HTMLDivElement>) {
+    if (!draggingDivider) return;
+    const grid = event.currentTarget.closest(".workspace-grid");
+    if (!grid) return;
+    const rect = grid.getBoundingClientRect();
+    if (draggingDivider === "vertical") {
+      const percentage = ((event.clientX - rect.left) / rect.width) * 100;
+      setPreviewWidth(Math.min(80, Math.max(20, percentage)));
+    } else {
+      const percentage = ((event.clientY - rect.top) / rect.height) * 100;
+      setTopHeight(Math.min(82, Math.max(30, percentage)));
+    }
+  }
+
+  function stopDividerDrag(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    setDraggingDivider(null);
+  }
 
   // Placeholder waveform for interface design; actual audio decoding comes next.
   const waveform = useMemo(
@@ -109,7 +142,7 @@ function App() {
 
   return (
     <main className="app-shell">
-      <section className="workspace-grid">
+      <section className={`workspace-grid${draggingDivider ? " is-resizing" : ""}`} style={workspaceStyle}>
         <section className="quadrant preview-quadrant">
           {videoUrl ? (
             <video ref={videoRef} className="video-preview" src={videoUrl} controls playsInline
@@ -124,6 +157,8 @@ function App() {
             </div>
           )}
         </section>
+
+        <div className="resize-divider vertical-divider" role="separator" aria-label="Resize video preview and tools panels" aria-orientation="vertical" onPointerDown={(event) => startDividerDrag("vertical", event)} onPointerMove={moveDivider} onPointerUp={stopDividerDrag} onPointerCancel={stopDividerDrag} />
 
         <section className="quadrant tools-quadrant">
           <nav className="tool-tabs" aria-label="Editing modes">
@@ -153,6 +188,8 @@ function App() {
             </>}
           </div>
         </section>
+
+        <div className="resize-divider horizontal-divider" role="separator" aria-label="Resize timeline and upper panels" aria-orientation="horizontal" onPointerDown={(event) => startDividerDrag("horizontal", event)} onPointerMove={moveDivider} onPointerUp={stopDividerDrag} onPointerCancel={stopDividerDrag} />
 
         <section className="quadrant timeline-quadrant">
           <div className="timeline-viewport" ref={timelineViewport} onWheel={handleTimelineWheel}>
