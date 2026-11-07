@@ -14,7 +14,6 @@ function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const timelineViewport = useRef<HTMLDivElement>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [videoName, setVideoName] = useState("");
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [zoom, setZoom] = useState(1);
@@ -54,7 +53,6 @@ function App() {
       if (oldUrl) URL.revokeObjectURL(oldUrl);
       return URL.createObjectURL(file);
     });
-    setVideoName(file.name);
     setDuration(0);
     setCurrentTime(0);
     setCuts([]);
@@ -111,11 +109,6 @@ function App() {
 
   return (
     <main className="app-shell">
-      <header className="topbar">
-        <div className="brand"><div className="brand-mark">B</div><span>blaze</span><span className="version">0.1.0</span></div>
-        <div className="topbar-right"><span className="status-dot" /><span className="status-label">LOCAL WORKSPACE</span></div>
-      </header>
-
       <section className="workspace-grid">
         <section className="quadrant preview-quadrant">
           {videoUrl ? (
@@ -162,18 +155,15 @@ function App() {
         </section>
 
         <section className="quadrant timeline-quadrant">
-          <div className="timeline-meta"><span className="timecode">{formatTime(currentTime)} <span className="time-divider">/</span> {formatTime(duration)}</span>
-            <div className="timeline-zoom"><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom((z) => Math.max(0.25, z / 1.2))} aria-label="Zoom out">−</button><button onClick={() => setZoom((z) => Math.min(12, z * 1.2))} aria-label="Zoom in">+</button></div>
-          </div>
           <div className="timeline-viewport" ref={timelineViewport} onWheel={handleTimelineWheel}>
             <div className="timeline-canvas" style={{ width: contentWidth }}>
-              <div className="timeline-ruler" onClick={seekFromPointer}>
+              {videoUrl && <div className="timeline-ruler" onClick={seekFromPointer}>
                 {rulerTicks.map((tick) => <div className="ruler-tick" key={tick} style={{ left: tick * pixelsPerSecond }}><span>{formatTime(tick)}</span><i /></div>)}
-              </div>
+              </div>}
               <div className="waveform-track" onClick={seekFromPointer}>
                 {videoUrl ? <div className="waveform-clip" style={{ width: Math.max(4, duration * pixelsPerSecond) }}>
                   <div className="waveform-bars">{waveform.map((height, i) => <i key={i} style={{ height }} />)}</div>
-                </div> : <span className="waveform-empty">Import a video to display its audio waveform.</span>}
+                </div> : null}
               </div>
               {mode === "blaze" && videoUrl && <div className="keyframe-layer" style={{ width: contentWidth }}>{Array.from({ length: Math.floor(duration / 1.5) + 1 }, (_, i) =>
                 <i key={i} style={{ left: i * 1.5 * pixelsPerSecond }} />)}</div>}
@@ -181,7 +171,6 @@ function App() {
               <div className="playhead" style={{ left: currentTime * pixelsPerSecond }}><div className="playhead-cap" /><div className="playhead-line" /></div>
             </div>
           </div>
-          <div className="timeline-footer"><span>CTRL + SCROLL TO ZOOM</span><span>ALT + SCROLL TO PAN</span><span>{mode === "blaze" ? "KEYFRAME SNAPPING ON" : "KEYFRAME SNAPPING OFF"}</span></div>
         </section>
       </section>
     </main>
