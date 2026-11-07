@@ -175,7 +175,7 @@ function App() {
                   <div className="waveform-bars">{waveform.map((height, i) => <i key={i} style={{ height }} />)}</div>
                 </div> : <span className="waveform-empty">Import a video to display its audio waveform.</span>}
               </div>
-              {mode === "blaze" && videoUrl && <div className="keyframe-layer">{Array.from({ length: Math.floor(duration / 1.5) + 1 }, (_, i) =>
+              {mode === "blaze" && videoUrl && <div className="keyframe-layer" style={{ width: contentWidth }}>{Array.from({ length: Math.floor(duration / 1.5) + 1 }, (_, i) =>
                 <i key={i} style={{ left: i * 1.5 * pixelsPerSecond }} />)}</div>}
               {cuts.map((cut, i) => <div className="cut-marker" key={`${cut}-${i}`} style={{ left: cut * pixelsPerSecond }} title={`Cut at ${formatTime(cut)}`} />)}
               <div className="playhead" style={{ left: currentTime * pixelsPerSecond }}><div className="playhead-cap" /><div className="playhead-line" /></div>
