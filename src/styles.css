@@ -1,7 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap');
-
 :root {
-  font-family: 'DM Sans', sans-serif;
+  font-family: Inter, 'Segoe UI', sans-serif;
   color: #f0f0ed;
   background: #101113;
   font-synthesis: none;
@@ -29,7 +27,7 @@ button { font: inherit; }
   font-size: 16px; font-weight: 800;
 }
 .version, .status-label, .section-label, .eyebrow, .format-note, .workspace-footer {
-  font-family: 'DM Mono', monospace; letter-spacing: 1px;
+  font-family: 'DejaVu Sans Mono', monospace; letter-spacing: 1px;
 }
 .version { color: #65676d; font-size: 10px; font-weight: 400; margin-left: 2px; }
 .topbar-right { display: flex; align-items: center; gap: 9px; }
