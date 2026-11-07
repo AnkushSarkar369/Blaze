@@ -41,6 +41,13 @@ fn resolve_tool(app: &tauri::AppHandle, tool: &str) -> Result<PathBuf, String> {
         candidates.push(resources.join(&filename));
     }
 
+    // In development, media tools are prepared in the repository-level BIN/.
+    if let Some(manifest_dir) = option_env!("CARGO_MANIFEST_DIR") {
+        candidates.push(
+            PathBuf::from(manifest_dir).join("..").join("BIN").join(&filename),
+        );
+    }
+
     let home = env::var_os("HOME")
         .or_else(|| env::var_os("USERPROFILE"))
         .map(PathBuf::from);

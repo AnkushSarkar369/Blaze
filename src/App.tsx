@@ -150,6 +150,7 @@ function App() {
       fileInput.current?.click();
       return;
     }
+    let token = loadToken.current;
     try {
       const selected = await open({
         title: "Import footage",
@@ -161,7 +162,7 @@ function App() {
       });
       if (typeof selected !== "string") return;
 
-      const token = ++loadToken.current;
+      token = ++loadToken.current;
       videoRef.current?.pause();
       setIsPlaying(false);
       setMediaPath(selected);
@@ -209,9 +210,9 @@ function App() {
           : `Keyframe scan: ${String(keyframeResult.reason)}`);
       }
     } catch (error) {
-      setAnalysisError(String(error));
+      if (token === loadToken.current) setAnalysisError(String(error));
     } finally {
-      setAnalysisLoading(false);
+      if (token === loadToken.current) setAnalysisLoading(false);
     }
   }
 

@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.ankushsarkar.blaze",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "node scripts/prepare-media-tools.mjs && npm run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build && node scripts/prepare-media-tools.mjs",
     "frontendDist": "../dist"
@@ -24,15 +24,21 @@
     "security": {
       "assetProtocol": {
         "enable": true,
-        "scope": []
+        "scope": [
+          "**"
+        ]
       },
       "csp": null
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["appimage"],
-    "icon": ["icons/icon.png"],
+    "targets": [
+      "appimage"
+    ],
+    "icon": [
+      "icons/icon.png"
+    ],
     "resources": {
       "../BIN/": "BIN/"
     },

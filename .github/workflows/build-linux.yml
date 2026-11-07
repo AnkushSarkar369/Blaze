@@ -2,7 +2,7 @@ name: Build Linux AppImage
 
 on:
   push:
-    branches: [main, app-v0.1]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -28,22 +28,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - name: Prepare FFmpeg and FFprobe
-        run: |
-          mkdir -p "$HOME/bin" "$HOME/bin/lib" "$RUNNER_TEMP/ffmpeg"
-          curl -L --fail --retry 3 \
-            "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-07-12-47/ffmpeg-n9.0.2-48-gd4070a14ce-linux64-lgpl-shared-9.0.tar.xz" \
-            -o "$RUNNER_TEMP/ffmpeg.tar.xz"
-          tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C "$RUNNER_TEMP/ffmpeg"
-          find "$RUNNER_TEMP/ffmpeg" -type f -name ffmpeg -exec install -m 755 {} "$HOME/bin/ffmpeg" \;
-          find "$RUNNER_TEMP/ffmpeg" -type f -name ffprobe -exec install -m 755 {} "$HOME/bin/ffprobe" \;
-          find "$RUNNER_TEMP/ffmpeg" -name '*.so*' -exec cp -a {} "$HOME/bin/lib/" \;
-          LD_LIBRARY_PATH="$HOME/bin/lib" "$HOME/bin/ffmpeg" -version
-          LD_LIBRARY_PATH="$HOME/bin/lib" "$HOME/bin/ffprobe" -version
+          cache: npm
 
       - name: Install frontend dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build Blaze AppImage
         run: npm run tauri -- build --bundles appimage
