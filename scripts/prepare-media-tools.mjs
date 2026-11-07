@@ -51,17 +51,38 @@ if (windows) {
   }
 }
 
+const toolEnvironment = { ...process.env };
+if (process.platform === "linux") {
+  toolEnvironment.LD_LIBRARY_PATH = [
+    path.join(targetDirectory, "lib"),
+    targetDirectory,
+    process.env.LD_LIBRARY_PATH,
+  ].filter(Boolean).join(path.delimiter);
+}
+if (process.platform === "darwin") {
+  toolEnvironment.DYLD_LIBRARY_PATH = [
+    path.join(targetDirectory, "lib"),
+    targetDirectory,
+    process.env.DYLD_LIBRARY_PATH,
+  ].filter(Boolean).join(path.delimiter);
+}
+if (windows) {
+  toolEnvironment.PATH = [targetDirectory, process.env.PATH].filter(Boolean).join(path.delimiter);
+}
+
 let version;
 try {
   const ffmpeg = path.join(targetDirectory, executableNames[0]);
   version = execFileSync(ffmpeg, ["-version"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
+    env: toolEnvironment,
   }).split("\n")[0];
 
   const license = execFileSync(ffmpeg, ["-L"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
+    env: toolEnvironment,
   });
   if (!/Lesser General Public License/i.test(license)) {
     throw new Error("The selected FFmpeg build is not an LGPL build.");
@@ -69,6 +90,7 @@ try {
 
   execFileSync(path.join(targetDirectory, executableNames[1]), ["-version"], {
     stdio: "ignore",
+    env: toolEnvironment,
   });
 } catch (error) {
   throw new Error(`FFmpeg/FFprobe validation failed: ${error.message}`);
