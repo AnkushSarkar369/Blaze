@@ -1,4 +1,5 @@
 import {
+  access,
   chmod,
   cp,
   mkdir,
@@ -36,9 +37,21 @@ const environment = () => ({
   ].filter(Boolean).join(path.delimiter),
 });
 
-function validateTools() {
+async function validateTools() {
   const ffmpeg = path.join(targetDirectory, "ffmpeg");
   const ffprobe = path.join(targetDirectory, "ffprobe");
+
+  // Tauri bundles these files as resources. Reject dangling symlinks even
+  // when the system loader can find a compatible library elsewhere.
+  for (const library of [
+    "libavformat.so.63",
+    "libavcodec.so.63",
+    "libavutil.so.61",
+    "libswscale.so.10",
+    "libswresample.so.7",
+  ]) {
+    await access(path.join(targetDirectory, "lib", library));
+  }
 
   execFileSync(ffmpeg, ["-version"], {
     encoding: "utf8",
@@ -70,7 +83,7 @@ function validateTools() {
 
 let version;
 try {
-  version = validateTools();
+  version = await validateTools();
   console.log(`Using existing media tools: ${version}`);
 } catch {
   console.log("Preparing Blaze's pinned FFmpeg/FFprobe build...");
@@ -131,7 +144,7 @@ try {
       throw new Error(`Failed to copy FFmpeg shared libraries from ${sourceLib}: ${error.message}`);
     }
 
-    version = validateTools();
+    version = await validateTools();
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
