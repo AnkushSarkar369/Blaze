@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type React from "react";
 import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { drawWaveform, parseWaveform, type WaveformData } from "./waveform";
 
 type ToolTab = "blaze" | "precise" | "export";
 
@@ -12,6 +13,7 @@ interface MediaInfo {
   fps: number | null;
   video_codec: string | null;
   audio_codec: string | null;
+  audio_channels: number | null;
   has_audio: boolean;
 }
 
@@ -32,6 +34,7 @@ function App() {
   const fileInput = useRef<HTMLInputElement>(null);
   const browserObjectUrl = useRef<string | null>(null);
   const timelineViewport = useRef<HTMLDivElement>(null);
+  const waveformCanvas = useRef<HTMLCanvasElement>(null);
   const loadToken = useRef(0);
 
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -39,7 +42,7 @@ function App() {
   const [mediaInfo, setMediaInfo] = useState<MediaInfo | null>(null);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
-  const [waveform, setWaveform] = useState<number[]>([]);
+  const [waveform, setWaveform] = useState<WaveformData | null>(null);
   const [keyframes, setKeyframes] = useState<number[]>([]);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
@@ -88,6 +91,32 @@ function App() {
       viewport.scrollLeft = Math.max(0, playheadX - viewport.clientWidth * 0.72);
     }
   }, [currentTime, isPlaying, pixelsPerSecond]);
+
+  useEffect(() => {
+    const canvas = waveformCanvas.current;
+    const viewport = timelineViewport.current;
+    if (!canvas || !viewport || !waveform) return;
+    let frame = 0;
+    const render = () => {
+      frame = 0;
+      drawWaveform(canvas, waveform, {
+        scrollLeft: viewport.scrollLeft,
+        pixelsPerSecond,
+      });
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(render);
+    };
+    render();
+    viewport.addEventListener("scroll", schedule, { passive: true });
+    const observer = new ResizeObserver(schedule);
+    observer.observe(canvas);
+    return () => {
+      viewport.removeEventListener("scroll", schedule);
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [waveform, pixelsPerSecond, timelineWidth]);
 
   // React registers onWheel as a passive listener, which makes preventDefault()
   // a no-op. Attach natively so Ctrl+scroll zooms the timeline, not the page.
@@ -147,7 +176,7 @@ function App() {
     setMediaInfo(null);
     setDuration(0);
     setCurrentTime(0);
-    setWaveform([]);
+    setWaveform(null);
     setKeyframes([]);
     setCuts([]);
     setZoom(1);
@@ -179,7 +208,7 @@ function App() {
       setMediaInfo(null);
       setDuration(0);
       setCurrentTime(0);
-      setWaveform([]);
+      setWaveform(null);
       setKeyframes([]);
       setCuts([]);
       setZoom(1);
@@ -194,12 +223,11 @@ function App() {
 
       const [waveResult, keyframeResult] = await Promise.allSettled([
         info.has_audio
-          ? invoke<number[]>("generate_waveform", {
+          ? invoke<ArrayBuffer>("generate_waveform", {
               path: selected,
-              duration: info.duration,
-              bars: 1800,
-            })
-          : Promise.resolve([]),
+              channels: info.audio_channels ?? 2,
+            }).then(parseWaveform)
+          : Promise.resolve(null),
         invoke<number[]>("detect_keyframes", { path: selected }),
       ]);
 
@@ -489,24 +517,20 @@ function App() {
 
               <div className="waveform-track" onClick={seekFromPointer}>
                 <span className="track-label">AUDIO</span>
-                {videoUrl ? (
-                  <div className="waveform-clip" style={{ width: Math.max(4, duration * pixelsPerSecond) }}>
-                    {waveform.length > 0 ? (
-                      <div className="waveform-bars">
-                        {waveform.map((peak, index) => (
-                          <i key={index} style={{ height: `${Math.max(2, peak * 64)}px` }} />
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="track-empty">
-                        {mediaInfo && !mediaInfo.has_audio
-                          ? "No audio stream"
-                          : analysisLoading ? "Generating waveform…" : "Waveform unavailable"}
-                      </span>
-                    )}
-                  </div>
+                {waveform ? (
+                  <canvas
+                    ref={waveformCanvas}
+                    className="waveform-canvas"
+                    style={{ width: timelineWidth }}
+                  />
                 ) : (
-                  <span className="track-empty">Import footage to view its waveform</span>
+                  <span className="track-empty">
+                    {!videoUrl
+                      ? "Import footage to view its waveform"
+                      : mediaInfo && !mediaInfo.has_audio
+                        ? "No audio stream"
+                        : analysisLoading ? "Generating waveform…" : "Waveform unavailable"}
+                  </span>
                 )}
               </div>
 

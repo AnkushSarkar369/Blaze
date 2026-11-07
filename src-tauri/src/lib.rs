@@ -1,8 +1,10 @@
+mod peaks;
+
 use serde::Serialize;
 use serde_json::Value;
 use std::{
     env,
-    io::{BufReader, Read},
+    io::Read,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -16,6 +18,7 @@ struct MediaInfo {
     fps: Option<f64>,
     video_codec: Option<String>,
     audio_codec: Option<String>,
+    audio_channels: Option<u32>,
     has_audio: bool,
 }
 
@@ -145,7 +148,7 @@ fn probe_media_sync(app: &tauri::AppHandle, path: &str) -> Result<MediaInfo, Str
             "-v",
             "error",
             "-show_entries",
-            "format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate,duration",
+            "format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate,duration,channels",
             "-of",
             "json",
             path,
@@ -185,6 +188,9 @@ fn probe_media_sync(app: &tauri::AppHandle, path: &str) -> Result<MediaInfo, Str
         fps: parse_rate(video.get("avg_frame_rate")),
         video_codec: video["codec_name"].as_str().map(str::to_string),
         audio_codec: audio.and_then(|stream| stream["codec_name"].as_str()).map(str::to_string),
+        audio_channels: audio
+            .and_then(|stream| stream["channels"].as_u64())
+            .map(|value| value as u32),
         has_audio: audio.is_some(),
     })
 }
@@ -235,21 +241,17 @@ async fn detect_keyframes(app: tauri::AppHandle, path: String) -> Result<Vec<f64
 fn generate_waveform_sync(
     app: &tauri::AppHandle,
     path: &str,
-    duration: f64,
-    bars: usize,
-) -> Result<Vec<f32>, String> {
-    if !duration.is_finite() || duration <= 0.0 {
-        return Err("Cannot generate a waveform for an invalid duration.".to_string());
-    }
-
-    let bars = bars.clamp(200, 3000);
-    let total_samples = (duration * 8000.0).ceil() as u64;
-    let samples_per_bucket = ((total_samples + bars as u64 - 1) / bars as u64).max(1);
-    let mut peaks = vec![0.0_f32; bars];
+    channels: usize,
+) -> Result<Vec<u8>, String> {
+    // Mono stays mono; anything wider is mixed down to a stereo pair.
+    let channels = channels.clamp(1, 2);
+    let channel_arg = channels.to_string();
+    let rate_arg = peaks::SAMPLE_RATE.to_string();
 
     let mut child = tool_command(app, "ffmpeg")?
         .args([
             "-hide_banner",
+            "-nostdin",
             "-loglevel",
             "error",
             "-i",
@@ -258,9 +260,9 @@ fn generate_waveform_sync(
             "0:a:0",
             "-vn",
             "-ac",
-            "1",
+            channel_arg.as_str(),
             "-ar",
-            "8000",
+            rate_arg.as_str(),
             "-f",
             "s16le",
             "pipe:1",
@@ -270,45 +272,23 @@ fn generate_waveform_sync(
         .spawn()
         .map_err(|error| format!("Could not start FFmpeg: {error}"))?;
 
-    let stdout = child.stdout.take().ok_or_else(|| "Could not read FFmpeg audio output.".to_string())?;
-    let mut reader = BufReader::new(stdout);
-    let mut buffer = [0_u8; 64 * 1024];
-    let mut pending_byte: Option<u8> = None;
-    let mut sample_index = 0_u64;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Could not read FFmpeg audio output.".to_string())?;
+    let mut builder = peaks::PeakBuilder::new(channels);
+    let mut buffer = vec![0_u8; 256 * 1024];
 
     loop {
-        let count = reader
-            .read(&mut buffer)
-            .map_err(|error| format!("Could not read decoded audio: {error}"))?;
-        if count == 0 {
-            break;
-        }
-
-        let mut index = 0;
-        if let Some(first_byte) = pending_byte.take() {
-            if count > 0 {
-                let sample = i16::from_le_bytes([first_byte, buffer[0]]);
-                let bucket = (sample_index / samples_per_bucket) as usize;
-                if bucket < bars {
-                    peaks[bucket] = peaks[bucket].max(sample.unsigned_abs() as f32 / 32768.0);
-                }
-                sample_index += 1;
-                index = 1;
+        match stdout.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(count) => builder.push_bytes(&buffer[..count]),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("Could not read decoded audio: {error}"));
             }
-        }
-
-        while index + 1 < count {
-            let sample = i16::from_le_bytes([buffer[index], buffer[index + 1]]);
-            let bucket = (sample_index / samples_per_bucket) as usize;
-            if bucket < bars {
-                peaks[bucket] = peaks[bucket].max(sample.unsigned_abs() as f32 / 32768.0);
-            }
-            sample_index += 1;
-            index += 2;
-        }
-
-        if index < count {
-            pending_byte = Some(buffer[index]);
         }
     }
 
@@ -320,21 +300,26 @@ fn generate_waveform_sync(
         return Err("FFmpeg could not decode an audio stream from this file.".to_string());
     }
 
-    Ok(peaks)
+    let peaks = builder.finish();
+    if peaks.blocks() == 0 {
+        return Err("The audio stream contains no samples.".to_string());
+    }
+
+    Ok(peaks.to_bytes())
 }
 
+/// Returns the raw peak summary (see `peaks.rs` for the layout). The frontend
+/// receives it as an `ArrayBuffer`, which avoids JSON-encoding millions of numbers.
 #[tauri::command]
 async fn generate_waveform(
     app: tauri::AppHandle,
     path: String,
-    duration: f64,
-    bars: usize,
-) -> Result<Vec<f32>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        generate_waveform_sync(&app, &path, duration, bars)
-    })
-    .await
-    .map_err(|error| format!("Waveform task failed: {error}"))?
+    channels: usize,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || generate_waveform_sync(&app, &path, channels))
+        .await
+        .map_err(|error| format!("Waveform task failed: {error}"))?
+        .map(tauri::ipc::Response::new)
 }
 
 fn initialize_data_directory(data: &Path) -> Result<(), String> {
