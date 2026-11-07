@@ -29,6 +29,10 @@
     "active": true,
     "targets": ["appimage"],
     "icon": ["icons/icon.png"],
+    "externalBin": [
+      "binaries/ffmpeg",
+      "binaries/ffprobe"
+    ],
     "category": "Video",
     "shortDescription": "Clean your footage up.",
     "longDescription": "A fast, local-first video utility for cleaning up raw footage."
