@@ -5,7 +5,6 @@ import {
   mkdtemp,
   readdir,
   rm,
-  stat,
   writeFile,
 } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
