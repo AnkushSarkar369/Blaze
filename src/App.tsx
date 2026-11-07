@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type WheelEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import type React from "react";
 import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -88,6 +88,15 @@ function App() {
       viewport.scrollLeft = Math.max(0, playheadX - viewport.clientWidth * 0.72);
     }
   }, [currentTime, isPlaying, pixelsPerSecond]);
+
+  // React registers onWheel as a passive listener, which makes preventDefault()
+  // a no-op. Attach natively so Ctrl+scroll zooms the timeline, not the page.
+  useEffect(() => {
+    const viewport = timelineViewport.current;
+    if (!viewport) return;
+    viewport.addEventListener("wheel", handleTimelineWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", handleTimelineWheel);
+  }, [zoom]);
 
   useEffect(() => {
     function handleKeyboard(event: KeyboardEvent) {
@@ -232,7 +241,7 @@ function App() {
     setCurrentTime(safeTime);
   }
 
-  function handleTimelineWheel(event: WheelEvent<HTMLDivElement>) {
+  function handleTimelineWheel(event: WheelEvent) {
     if (event.ctrlKey) {
       event.preventDefault();
       const viewport = timelineViewport.current;
@@ -456,7 +465,7 @@ function App() {
             <span className="timeline-zoom">{Math.round(zoom * 100)}%</span>
           </div>
 
-          <div className="timeline-viewport" ref={timelineViewport} onWheel={handleTimelineWheel}>
+          <div className="timeline-viewport" ref={timelineViewport}>
             <div className="timeline-canvas" style={{ width: contentWidth }}>
               {videoUrl && (
                 <div className="timeline-ruler" onClick={seekFromPointer}>
