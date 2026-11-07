@@ -1,0 +1,16 @@
+[package]
+name = "blaze"
+version = "0.1.0"
+description = "Blaze — Clean your footage up."
+authors = ["Ankush Sarkar"]
+edition = "2021"
+
+[lib]
+name = "blaze_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
