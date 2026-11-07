@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type WheelEvent } from "react";
 import type React from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
 type ToolTab = "blaze" | "precise" | "export";
@@ -29,6 +29,8 @@ function formatTime(seconds: number) {
 
 function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const browserObjectUrl = useRef<string | null>(null);
   const timelineViewport = useRef<HTMLDivElement>(null);
   const loadToken = useRef(0);
 
@@ -72,6 +74,10 @@ function App() {
   useEffect(() => {
     if (videoRef.current) videoRef.current.volume = volume;
   }, [volume, videoUrl]);
+
+  useEffect(() => () => {
+    if (browserObjectUrl.current) URL.revokeObjectURL(browserObjectUrl.current);
+  }, []);
 
   useEffect(() => {
     if (!isPlaying || !timelineViewport.current) return;
@@ -122,7 +128,28 @@ function App() {
     setDraggingDivider(null);
   }
 
+  function importBrowserVideo(file?: File) {
+    if (!file) return;
+    if (browserObjectUrl.current) URL.revokeObjectURL(browserObjectUrl.current);
+    const objectUrl = URL.createObjectURL(file);
+    browserObjectUrl.current = objectUrl;
+    setVideoUrl(objectUrl);
+    setMediaPath(file.name);
+    setMediaInfo(null);
+    setDuration(0);
+    setCurrentTime(0);
+    setWaveform([]);
+    setKeyframes([]);
+    setCuts([]);
+    setZoom(1);
+    setAnalysisError("Browser preview only. FFmpeg analysis is available in the desktop app.");
+  }
+
   async function importVideo() {
+    if (!isTauri()) {
+      fileInput.current?.click();
+      return;
+    }
     try {
       const selected = await open({
         title: "Import footage",
@@ -261,6 +288,16 @@ function App() {
 
   return (
     <main className="app-shell">
+      <input
+        ref={fileInput}
+        className="hidden-input"
+        type="file"
+        accept="video/*"
+        onChange={(event) => {
+          importBrowserVideo(event.target.files?.[0]);
+          event.target.value = "";
+        }}
+      />
       <section className={`workspace-grid${draggingDivider ? " is-resizing" : ""}`} style={workspaceStyle}>
         <section className="quadrant preview-quadrant">
           <div className="preview-stage">
