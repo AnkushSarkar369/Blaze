@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type WheelEvent } from "react";
 
+type ToolTab = "blaze" | "precise" | "export";
+
 function formatTime(seconds: number) {
   if (!Number.isFinite(seconds)) return "00:00.00";
   const minutes = Math.floor(seconds / 60);
@@ -16,15 +18,15 @@ function App() {
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [zoom, setZoom] = useState(1);
-  const [showKeyframes, setShowKeyframes] = useState(true);
-  const [mode, setMode] = useState<"blaze" | "precise">("blaze");
+  const [activeTab, setActiveTab] = useState<ToolTab>("blaze");
   const [cuts, setCuts] = useState<number[]>([]);
   const [timelineWidth, setTimelineWidth] = useState(1000);
 
+  const mode = activeTab === "precise" ? "precise" : "blaze";
   const pixelsPerSecond = 72 * zoom;
-  const contentWidth = Math.max(timelineWidth, duration * pixelsPerSecond + 80);
+  const contentWidth = Math.max(timelineWidth, duration * pixelsPerSecond + 40);
 
-  // Temporary visual waveform for layout work. Real audio analysis will replace this.
+  // Placeholder waveform for interface design; actual audio decoding comes next.
   const waveform = useMemo(
     () => Array.from({ length: 520 }, (_, i) => {
       const envelope = 0.28 + 0.72 * Math.abs(Math.sin(i * 0.013) * Math.cos(i * 0.0037));
@@ -42,10 +44,8 @@ function App() {
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (videoUrl) URL.revokeObjectURL(videoUrl);
-    };
+  useEffect(() => () => {
+    if (videoUrl) URL.revokeObjectURL(videoUrl);
   }, [videoUrl]);
 
   function importVideo(file?: File) {
@@ -94,9 +94,14 @@ function App() {
 
   function addCut() {
     if (!duration) return;
-    const keyframeInterval = 1.5; // Temporary design-time keyframe spacing; real values come from media analysis.\n    const nextCut = mode === "blaze" ? Math.round(currentTime / keyframeInterval) * keyframeInterval : currentTime;
+    // Temporary stand-in for detected keyframe timestamps. Real keyframes will come from media analysis.
+    const detectedKeyframes = Array.from({ length: Math.floor(duration / 1.5) + 1 }, (_, i) => i * 1.5);
+    const nearestKeyframe = detectedKeyframes.reduce((nearest, point) =>
+      Math.abs(point - currentTime) < Math.abs(nearest - currentTime) ? point : nearest, detectedKeyframes[0] ?? 0);
+    const nextCut = mode === "blaze" ? nearestKeyframe : currentTime;
     if (nextCut <= 0 || nextCut >= duration) return;
-    setCuts((existing) => [...existing, nextCut].sort((a, b) => a - b));
+    setCuts((existing) => existing.some((cut) => Math.abs(cut - nextCut) < 0.001)
+      ? existing : [...existing, nextCut].sort((a, b) => a - b));
   }
 
   const rulerStep = zoom >= 5 ? 0.5 : zoom >= 2 ? 1 : zoom >= 0.8 ? 5 : 10;
@@ -107,38 +112,20 @@ function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div className="brand">
-          <div className="brand-mark">B</div>
-          <span>blaze</span>
-          <span className="version">0.1.0</span>
-        </div>
-        <div className="topbar-right">
-          <span className="status-dot" />
-          <span className="status-label">LOCAL WORKSPACE</span>
-        </div>
+        <div className="brand"><div className="brand-mark">B</div><span>blaze</span><span className="version">0.1.0</span></div>
+        <div className="topbar-right"><span className="status-dot" /><span className="status-label">LOCAL WORKSPACE</span></div>
       </header>
 
       <section className="workspace-grid">
         <section className="quadrant preview-quadrant">
-          <div className="panel-heading">
-            <span className="panel-label">VIDEO PREVIEW</span>
-            {videoName && <span className="file-name" title={videoName}>{videoName}</span>}
-          </div>
           {videoUrl ? (
-            <video
-              ref={videoRef}
-              className="video-preview"
-              src={videoUrl}
-              controls
-              playsInline
+            <video ref={videoRef} className="video-preview" src={videoUrl} controls playsInline
               onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
-              onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
-            />
+              onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} />
           ) : (
             <div className="import-empty">
               <div className="import-symbol"><svg viewBox="0 0 48 48" role="presentation"><path d="M24 32V8m0 0-9 9m9-9 9 9" /><path d="M9 29v9a2 2 0 0 0 2 2h26a2 2 0 0 0 2-2v-9" /></svg></div>
-              <h2>Bring in your footage</h2>
-              <p>Select a video file to begin.</p>
+              <h2>Bring in your footage</h2><p>Select a video file to begin.</p>
               <button className="primary-button" onClick={() => fileInput.current?.click()}>Import video</button>
               <input ref={fileInput} className="hidden-input" type="file" accept="video/*" onChange={(event) => importVideo(event.target.files?.[0])} />
             </div>
@@ -146,59 +133,55 @@ function App() {
         </section>
 
         <section className="quadrant tools-quadrant">
-          <div className="panel-heading"><span className="panel-label">TOOLS & MODES</span></div>
-          <div className="tools-empty">
-            <span>TOOLS WILL APPEAR HERE</span>
-            <p>We'll design this panel after the timeline is established.</p>
+          <nav className="tool-tabs" aria-label="Editing modes">
+            <button className={activeTab === "blaze" ? "active" : ""} onClick={() => setActiveTab("blaze")}>BLAZE MODE</button>
+            <button className={activeTab === "precise" ? "active" : ""} onClick={() => setActiveTab("precise")}>PRECISE MODE</button>
+            <button className={activeTab === "export" ? "active" : ""} onClick={() => setActiveTab("export")}>EXPORT</button>
+          </nav>
+          <div className="tool-panel">
+            {activeTab === "blaze" && <>
+              <div className="tool-kicker">FAST · KEYFRAME-ALIGNED</div>
+              <h2>Blaze Mode</h2>
+              <p>Cuts automatically snap to detected video keyframes for stream-copy export where possible.</p>
+              <button className="tool-primary" onClick={addCut} disabled={!videoUrl}>ADD CUT AT PLAYHEAD</button>
+            </>}
+            {activeTab === "precise" && <>
+              <div className="tool-kicker">FRAME-ACCURATE · RE-ENCODE</div>
+              <h2>Precise Mode</h2>
+              <p>Place cuts at the exact playhead position. Export will re-encode where required.</p>
+              <button className="tool-primary" onClick={addCut} disabled={!videoUrl}>ADD PRECISE CUT</button>
+            </>}
+            {activeTab === "export" && <>
+              <div className="tool-kicker">OUTPUT</div>
+              <h2>Export</h2>
+              <p>{cuts.length} cut point{cuts.length === 1 ? "" : "s"} · {mode === "blaze" ? "Blaze" : "Precise"} mode</p>
+              <button className="tool-primary" disabled={!videoUrl}>EXPORT VIDEO</button>
+              <span className="tool-note">Export engine not connected yet.</span>
+            </>}
           </div>
         </section>
 
         <section className="quadrant timeline-quadrant">
-          <div className="panel-heading timeline-heading">
-            <div className="timeline-title"><span className="panel-label">TIMELINE</span><span className="timeline-track-count">VIDEO + AUDIO</span></div>
-            <span className="timecode">{formatTime(currentTime)} <span className="time-divider">/</span> {formatTime(duration)}</span>
+          <div className="timeline-meta"><span className="timecode">{formatTime(currentTime)} <span className="time-divider">/</span> {formatTime(duration)}</span>
+            <div className="timeline-zoom"><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom((z) => Math.max(0.25, z / 1.2))} aria-label="Zoom out">−</button><button onClick={() => setZoom((z) => Math.min(12, z * 1.2))} aria-label="Zoom in">+</button></div>
           </div>
-          <div className="timeline-toolbar">
-            <div className="timeline-toolbar-left">
-              <button className="timeline-action cut-action" onClick={addCut} disabled={!videoUrl} title="Add a cut at the playhead"><span className="cut-icon">⌁</span> CUT</button>
-              <span className="toolbar-separator" />
-              <button className={`timeline-action ${showKeyframes ? "active" : ""}`} onClick={() => setShowKeyframes(!showKeyframes)} aria-pressed={showKeyframes}>KEYFRAMES <span className="toggle-indicator" /></button>
-              <span className="toolbar-separator" />
-              <div className="mode-switch" role="group" aria-label="Cutting mode">
-                <button className={mode === "blaze" ? "selected" : ""} onClick={() => setMode("blaze")}>BLAZE</button>
-                <button className={mode === "precise" ? "selected" : ""} onClick={() => setMode("precise")}>PRECISE</button>
-              </div>
-            </div>
-            <div className="timeline-toolbar-right">
-              <span className="zoom-value">{Math.round(zoom * 100)}%</span>
-              <button className="zoom-button" onClick={() => setZoom((z) => Math.max(0.25, z / 1.2))} aria-label="Zoom out">−</button>
-              <button className="zoom-button" onClick={() => setZoom((z) => Math.min(12, z * 1.2))} aria-label="Zoom in">+</button>
-            </div>
-          </div>
-
           <div className="timeline-viewport" ref={timelineViewport} onWheel={handleTimelineWheel}>
             <div className="timeline-canvas" style={{ width: contentWidth }}>
               <div className="timeline-ruler" onClick={seekFromPointer}>
                 {rulerTicks.map((tick) => <div className="ruler-tick" key={tick} style={{ left: tick * pixelsPerSecond }}><span>{formatTime(tick)}</span><i /></div>)}
               </div>
-              <div className="track-row video-track" onClick={seekFromPointer}>
-                <div className="track-label"><span className="track-icon">▣</span><span>VIDEO</span></div>
-                <div className="track-lane">
-                  {videoUrl ? <div className="clip-block" style={{ width: Math.max(4, duration * pixelsPerSecond) }}><span className="clip-name">{videoName}</span><div className="clip-thumbnails">{Array.from({ length: Math.min(36, Math.max(4, Math.ceil(duration / 2))) }, (_, i) => <span key={i} />)}</div></div> : <span className="track-empty-label">Import footage to populate the timeline</span>}
-                </div>
+              <div className="waveform-track" onClick={seekFromPointer}>
+                {videoUrl ? <div className="waveform-clip" style={{ width: Math.max(4, duration * pixelsPerSecond) }}>
+                  <div className="waveform-bars">{waveform.map((height, i) => <i key={i} style={{ height }} />)}</div>
+                </div> : <span className="waveform-empty">Import a video to display its audio waveform.</span>}
               </div>
-              <div className="track-row audio-track" onClick={seekFromPointer}>
-                <div className="track-label"><span className="track-icon audio-icon">≋</span><span>AUDIO</span></div>
-                <div className="track-lane">
-                  {videoUrl ? <div className="waveform-clip" style={{ width: Math.max(4, duration * pixelsPerSecond) }}><div className="waveform-bars">{waveform.map((height, i) => <i key={i} style={{ height }} />)}</div></div> : <span className="track-empty-label">Audio waveform appears here</span>}
-                </div>
-              </div>
-              {showKeyframes && videoUrl && <div className="keyframe-layer" style={{ width: contentWidth - 80, left: 80 }}>{Array.from({ length: Math.floor(duration / 1.5) + 1 }, (_, i) => <i key={i} style={{ left: i * 1.5 * pixelsPerSecond }} />)}</div>}
-              {cuts.map((cut, i) => <div className="cut-marker" key={`${cut}-${i}`} style={{ left: 80 + cut * pixelsPerSecond }} title={`Cut at ${formatTime(cut)}`} />)}
-              <div className="playhead" style={{ left: 80 + currentTime * pixelsPerSecond }}><div className="playhead-cap" /><div className="playhead-line" /></div>
+              {mode === "blaze" && videoUrl && <div className="keyframe-layer">{Array.from({ length: Math.floor(duration / 1.5) + 1 }, (_, i) =>
+                <i key={i} style={{ left: i * 1.5 * pixelsPerSecond }} />)}</div>}
+              {cuts.map((cut, i) => <div className="cut-marker" key={`${cut}-${i}`} style={{ left: cut * pixelsPerSecond }} title={`Cut at ${formatTime(cut)}`} />)}
+              <div className="playhead" style={{ left: currentTime * pixelsPerSecond }}><div className="playhead-cap" /><div className="playhead-line" /></div>
             </div>
           </div>
-          <div className="timeline-footer"><span>CTRL + SCROLL TO ZOOM</span><span>ALT + SCROLL TO PAN</span><span>{mode === "blaze" ? "KEYFRAME-ALIGNED CUTTING" : "FRAME-ACCURATE CUTTING"}</span></div>
+          <div className="timeline-footer"><span>CTRL + SCROLL TO ZOOM</span><span>ALT + SCROLL TO PAN</span><span>{mode === "blaze" ? "KEYFRAME SNAPPING ON" : "KEYFRAME SNAPPING OFF"}</span></div>
         </section>
       </section>
     </main>
