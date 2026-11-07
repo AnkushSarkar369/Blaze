@@ -125,10 +125,10 @@ try {
     try {
       await cp(sourceLib, path.join(targetDirectory, "lib"), {
         recursive: true,
-        dereference: false,
+        dereference: true,
       });
-    } catch {
-      // Some static distributions do not ship a separate library directory.
+    } catch (error) {
+      throw new Error(`Failed to copy FFmpeg shared libraries from ${sourceLib}: ${error.message}`);
     }
 
     version = validateTools();
