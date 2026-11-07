@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type WheelEvent } from "react";
 
 function formatTime(seconds: number) {
   if (!Number.isFinite(seconds)) return "00:00.00";
@@ -62,7 +62,7 @@ function App() {
     if (timelineViewport.current) timelineViewport.current.scrollLeft = 0;
   }
 
-  function handleTimelineWheel(event: React.WheelEvent<HTMLDivElement>) {
+  function handleTimelineWheel(event: WheelEvent<HTMLDivElement>) {
     if (event.ctrlKey) {
       event.preventDefault();
       const viewport = timelineViewport.current;
@@ -94,7 +94,7 @@ function App() {
 
   function addCut() {
     if (!duration) return;
-    const nextCut = mode === "blaze" ? Math.round(currentTime) : currentTime;
+    const keyframeInterval = 1.5; // Temporary design-time keyframe spacing; real values come from media analysis.\n    const nextCut = mode === "blaze" ? Math.round(currentTime / keyframeInterval) * keyframeInterval : currentTime;
     if (nextCut <= 0 || nextCut >= duration) return;
     setCuts((existing) => [...existing, nextCut].sort((a, b) => a - b));
   }
