@@ -228,9 +228,10 @@ function App() {
   }
 
   function seekFromPointer(event: React.MouseEvent<HTMLDivElement>) {
-    if (!duration || !timelineViewport.current) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - rect.left + timelineViewport.current.scrollLeft;
+    const viewport = timelineViewport.current;
+    if (!duration || !viewport) return;
+    const rect = viewport.getBoundingClientRect();
+    const x = event.clientX - rect.left + viewport.scrollLeft;
     seekVideo(x / pixelsPerSecond);
   }
 
@@ -250,7 +251,9 @@ function App() {
       : [...existing, nextCut].sort((a, b) => a - b));
   }
 
-  const rulerStep = zoom >= 6 ? 0.5 : zoom >= 3 ? 1 : zoom >= 1.2 ? 2 : zoom >= 0.6 ? 5 : 10;
+  const baseRulerStep = zoom >= 6 ? 0.5 : zoom >= 3 ? 1 : zoom >= 1.2 ? 2 : zoom >= 0.6 ? 5 : 10;
+  const rulerStep = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800]
+    .find((step) => step >= Math.max(baseRulerStep, duration / 300)) ?? 3600;
   const rulerTicks = duration
     ? Array.from({ length: Math.ceil(duration / rulerStep) + 1 }, (_, index) => index * rulerStep)
         .filter((tick) => tick <= duration)
