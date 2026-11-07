@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+cd "$(dirname "$0")"
+
+ptyxis -- bash -c '
+    python3 cuts.py Video.mov cuts.txt
+    echo
+    echo "Press Enter to close..."
+    read
+'
