@@ -241,11 +241,28 @@ impl MediaEngine {
     }
 
     pub fn generate_waveform(&self, path: &str, channels: usize) -> Result<Vec<u8>, String> {
+        self.generate_waveform_with_progress(path, channels, 0.0, |_| {})
+    }
+
+    /// Generates waveform peaks while reporting decoded-audio progress from 0.0 to 1.0.
+    pub fn generate_waveform_with_progress(
+        &self,
+        path: &str,
+        channels: usize,
+        duration_seconds: f64,
+        mut on_progress: impl FnMut(f32),
+    ) -> Result<Vec<u8>, String> {
         // Preserve the decoded channel count. PeakBuilder merges every channel
         // into one envelope without downmixing or phase cancellation.
         let channels = channels.clamp(1, 32);
         let channel_arg = channels.to_string();
         let rate_arg = peaks::SAMPLE_RATE.to_string();
+        let expected_bytes = if duration_seconds.is_finite() && duration_seconds > 0.0 {
+            (duration_seconds * peaks::SAMPLE_RATE as f64 * channels as f64 * 2.0)
+                .max(1.0) as u64
+        } else {
+            0
+        };
 
         let mut child = self
             .command("ffmpeg")?
@@ -278,11 +295,26 @@ impl MediaEngine {
             .ok_or_else(|| "Could not read FFmpeg audio output.".to_string())?;
         let mut builder = peaks::PeakBuilder::new(channels);
         let mut buffer = vec![0_u8; 256 * 1024];
+        let mut decoded_bytes = 0_u64;
+        let mut last_reported = 0_u32;
 
         loop {
             match stdout.read(&mut buffer) {
                 Ok(0) => break,
-                Ok(count) => builder.push_bytes(&buffer[..count]),
+                Ok(count) => {
+                    builder.push_bytes(&buffer[..count]);
+                    decoded_bytes = decoded_bytes.saturating_add(count as u64);
+
+                    if expected_bytes > 0 {
+                        let fraction = (decoded_bytes as f64 / expected_bytes as f64)
+                            .clamp(0.0, 0.99) as f32;
+                        let percent = (fraction * 100.0) as u32;
+                        if percent > last_reported {
+                            last_reported = percent;
+                            on_progress(fraction);
+                        }
+                    }
+                }
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(error) => {
                     let _ = child.kill();
@@ -294,7 +326,7 @@ impl MediaEngine {
 
         let status = child
             .wait()
-            .map_err(|error| format!("Could not finish FFmpeg audio analysis: {error}"))?;
+            .map_err(|error| format!("Could not finish audio analysis: {error}"))?;
 
         if !status.success() {
             return Err("FFmpeg could not decode an audio stream from this file.".to_string());
@@ -305,6 +337,7 @@ impl MediaEngine {
             return Err("The audio stream contains no samples.".to_string());
         }
 
+        on_progress(1.0);
         Ok(peaks.to_bytes())
     }
 
