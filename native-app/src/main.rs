@@ -108,9 +108,9 @@ impl eframe::App for BlazeApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::TopBottomPanel::top("toolbar")
-            .exact_height(48.0)
-            .show_inside(ui, |ui| {
+        egui::Panel::top("toolbar")
+            .exact_size(48.0)
+            .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.heading(egui::RichText::new("BLAZE").strong().size(18.0));
                     ui.separator();
@@ -125,11 +125,29 @@ impl eframe::App for BlazeApp {
                 });
             });
 
-        egui::TopBottomPanel::bottom("timeline")
+        egui::Panel::bottom("status")
+            .exact_size(24.0)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(&self.status).small().weak());
+                    if let Some(info) = &self.media_info {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let audio = if info.has_audio {
+                                format!("Audio · {} ch", info.audio_channels.unwrap_or(0))
+                            } else {
+                                "No audio stream".to_owned()
+                            };
+                            ui.label(egui::RichText::new(audio).small().weak());
+                        });
+                    }
+                });
+            });
+
+        egui::Panel::bottom("timeline")
             .resizable(true)
-            .default_height(220.0)
-            .min_height(140.0)
-            .show_inside(ui, |ui| {
+            .default_size(220.0)
+            .min_size(140.0)
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.heading("Timeline");
                     ui.separator();
@@ -159,11 +177,11 @@ impl eframe::App for BlazeApp {
                 );
             });
 
-        egui::SidePanel::right("tools")
+        egui::Panel::right("tools")
             .resizable(true)
-            .default_width(310.0)
-            .min_width(240.0)
-            .show_inside(ui, |ui| {
+            .default_size(310.0)
+            .min_size(240.0)
+            .show(ui, |ui| {
                 ui.heading("Tools");
                 ui.separator();
                 ui.add_space(8.0);
@@ -176,9 +194,11 @@ impl eframe::App for BlazeApp {
                 );
             });
 
+
+
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(egui::Color32::from_rgb(14, 15, 17)))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(18.0);
                     ui.label(egui::RichText::new("PREVIEW").small().weak());
@@ -221,23 +241,7 @@ impl eframe::App for BlazeApp {
                 });
             });
 
-        egui::TopBottomPanel::top("status")
-            .exact_height(24.0)
-            .show_inside(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(&self.status).small().weak());
-                    if let Some(info) = &self.media_info {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let audio = if info.has_audio {
-                                format!("Audio · {} ch", info.audio_channels.unwrap_or(0))
-                            } else {
-                                "No audio stream".to_owned()
-                            };
-                            ui.label(egui::RichText::new(audio).small().weak());
-                        });
-                    }
-                });
-            });
+
     }
 }
 
