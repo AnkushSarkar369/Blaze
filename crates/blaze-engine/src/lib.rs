@@ -294,7 +294,7 @@ impl MediaEngine {
             .take()
             .ok_or_else(|| "Could not read FFmpeg audio output.".to_string())?;
         let mut builder = peaks::PeakBuilder::new(channels);
-        let mut buffer = vec![0_u8; 256 * 1024];
+        let mut buffer = vec![0_u8; 16 * 1024];
         let mut decoded_bytes = 0_u64;
         let mut last_reported = 0_u32;
 
