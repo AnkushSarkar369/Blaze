@@ -26,15 +26,6 @@ enum EditingMode {
     Precise,
 }
 
-impl EditingMode {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Blaze => "Blaze Mode",
-            Self::Precise => "Precise Mode",
-        }
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ToolTab {
     ModeSelector,
@@ -691,22 +682,6 @@ impl eframe::App for BlazeApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        // Persistent in-app title ribbon; the native window title is set separately.
-        let header_width = ui.available_width();
-        ui.allocate_ui_with_layout(
-            egui::vec2(header_width, 30.0),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.add_space(12.0);
-                ui.label(
-                    egui::RichText::new("Blaze — Ankush Sarkar")
-                        .strong()
-                        .size(14.0),
-                );
-            },
-        );
-        ui.separator();
-
         // Make panel splitters easier to grab without changing their saved sizes.
         ui.style_mut().interaction.resize_grab_radius_side = 10.0;
         let root_rect = ui.available_rect_before_wrap();
@@ -729,9 +704,6 @@ impl eframe::App for BlazeApp {
                 self.pending_preview_fit = false;
             }
         }
-
-        let mut timeline_split_rect = None;
-        let mut tools_split_rect = None;
 
         let timeline_panel = egui::Panel::bottom("timeline")
             .resizable(true)
@@ -1057,7 +1029,7 @@ impl eframe::App for BlazeApp {
                 // Keep the panel's requested height after a resize.
                 ui.allocate_space(ui.available_size());
             });
-        timeline_split_rect = Some(timeline_panel.response.rect);
+        let timeline_split_rect = timeline_panel.response.rect;
 
         let tools_panel = egui::Panel::right("tools")
             .resizable(true)
@@ -1408,7 +1380,7 @@ impl eframe::App for BlazeApp {
                 // allowing its contents to shrink it to their intrinsic width.
                 ui.allocate_space(ui.available_size());
             });
-        tools_split_rect = Some(tools_panel.response.rect);
+        let tools_split_rect = tools_panel.response.rect;
 
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(egui::Color32::from_rgb(16, 17, 18)))
@@ -1630,7 +1602,7 @@ impl eframe::App for BlazeApp {
         // The underlying splitter remains responsible for the actual drag.
         let handle_fill = egui::Color32::from_rgb(42, 45, 48);
         let handle_mark = egui::Color32::from_rgb(126, 130, 134);
-        if let Some(rect) = tools_split_rect {
+        { let rect = tools_split_rect;
             let handle = egui::Rect::from_center_size(
                 egui::pos2(rect.left(), rect.center().y),
                 egui::vec2(10.0, 62.0),
@@ -1682,7 +1654,7 @@ impl eframe::App for BlazeApp {
                 );
             }
         }
-        if let Some(rect) = timeline_split_rect {
+        { let rect = timeline_split_rect;
             let handle = egui::Rect::from_center_size(
                 egui::pos2(rect.center().x, rect.top()),
                 egui::vec2(62.0, 10.0),
@@ -1872,19 +1844,6 @@ fn paint_player_icon(
                 color,
             );
         }
-    }
-}
-
-fn format_time(seconds: f64) -> String {
-    let total = seconds.max(0.0) as u64;
-    let hours = total / 3600;
-    let minutes = (total % 3600) / 60;
-    let seconds = total % 60;
-
-    if hours > 0 {
-        format!("{hours:02}:{minutes:02}:{seconds:02}")
-    } else {
-        format!("{minutes:02}:{seconds:02}")
     }
 }
 
