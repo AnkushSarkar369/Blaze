@@ -1381,8 +1381,11 @@ impl eframe::App for BlazeApp {
                                             egui::vec2(track_width, 4.0),
                                         );
 
-                                        let finish_seek = seek_response.drag_stopped() || seek_response.clicked();
-                                        if seek_response.dragged() || finish_seek {
+                                        let drag_stopped = seek_response.drag_stopped();
+                                        let clicked = seek_response.clicked();
+                                        let dragging = seek_response.dragged();
+
+                                        if dragging || drag_stopped || clicked {
                                             if let Some(pointer) = seek_response.interact_pointer_pos() {
                                                 let progress = ((pointer.x - track.left()) / track.width())
                                                     .clamp(0.0, 1.0) as f64;
@@ -1396,19 +1399,19 @@ impl eframe::App for BlazeApp {
                                                     .clamp(0.0, (duration - visible_duration).max(0.0));
                                             }
 
-                                            if seek_response.dragged() {
-                                                self.seeking = true;
-                                            } else {
+                                            if drag_stopped || clicked {
                                                 self.seeking = false;
                                                 if let Err(error) = self.playback.seek(self.playback_position) {
                                                     eprintln!("Blaze: {error}");
                                                 }
+                                            } else {
+                                                self.seeking = true;
                                             }
                                         }
 
                                         let progress =
                                             (self.playback_position / duration).clamp(0.0, 1.0) as f32;
-                                        let thumb_x = egui::lerp(track.x_range(), progress);
+                                        let thumb_x = track.left() + track.width() * progress;
                                         let track_center = track.center().y;
                                         let painter = ui.painter();
                                         painter.rect_filled(
