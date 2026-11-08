@@ -332,9 +332,10 @@ impl eframe::App for BlazeApp {
                 }
 
                 if can_seek {
+                    let timeline_offset = self.timeline_offset;
                     let pointer_time = |position: egui::Pos2| {
                         let progress = ((position.x - lane.left()) / lane.width()).clamp(0.0, 1.0);
-                        self.timeline_offset + progress as f64 * visible_duration
+                        timeline_offset + progress as f64 * visible_duration
                     };
 
                     if response.dragged() {
