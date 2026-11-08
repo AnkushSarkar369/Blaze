@@ -748,10 +748,11 @@ impl eframe::App for BlazeApp {
                     egui::Sense::hover()
                 };
                 let response = ui.allocate_rect(lane, sense);
+                let ruler_response = ui.allocate_rect(ruler, sense);
 
                 // Ctrl+wheel zooms; ordinary wheel input pans the timeline
                 // horizontally. Horizontal trackpad input is also supported.
-                if can_seek && response.hovered() {
+                if can_seek && (response.hovered() || ruler_response.hovered()) {
                     let (scroll, zoom_delta) = ui.input(|input| {
                         (input.smooth_scroll_delta, input.zoom_delta())
                     });
@@ -1011,6 +1012,31 @@ impl eframe::App for BlazeApp {
                         }
                     } else if response.clicked() {
                         if let Some(position) = response.interact_pointer_pos() {
+                            self.playback_position = pointer_time(position);
+                            if let Err(error) = self.playback.seek(self.playback_position) {
+                                eprintln!("Blaze: {error}");
+                            }
+                        }
+                    }
+
+                    // The ruler shares the waveform's time mapping and can be
+                    // clicked or dragged to seek to the corresponding position.
+                    if ruler_response.dragged() {
+                        self.seeking = true;
+                        if let Some(position) = ruler_response.interact_pointer_pos() {
+                            self.playback_position = pointer_time(position);
+                        }
+                    }
+                    if ruler_response.drag_stopped() {
+                        if let Some(position) = ruler_response.interact_pointer_pos() {
+                            self.playback_position = pointer_time(position);
+                        }
+                        self.seeking = false;
+                        if let Err(error) = self.playback.seek(self.playback_position) {
+                            eprintln!("Blaze: {error}");
+                        }
+                    } else if ruler_response.clicked() {
+                        if let Some(position) = ruler_response.interact_pointer_pos() {
                             self.playback_position = pointer_time(position);
                             if let Err(error) = self.playback.seek(self.playback_position) {
                                 eprintln!("Blaze: {error}");
@@ -1545,8 +1571,7 @@ impl eframe::App for BlazeApp {
                                             [time_width, 26.0],
                                             egui::Label::new(
                                                 egui::RichText::new(time_label)
-                                                    .monospace()
-                                                    .size(13.5),
+                                                    .proportional(13.5),
                                             ),
                                         );
 
@@ -1562,7 +1587,7 @@ impl eframe::App for BlazeApp {
                                             egui::Color32::from_rgb(126, 48, 44)
                                         });
                                         if ui
-                                            .add_sized([skip_button_width, 26.0], skip_button)
+                                            .add_sized([skip_button_width, 32.0], skip_button)
                                             .on_hover_text(
                                                 "Automatically skip selected regions during playback",
                                             )
@@ -1823,7 +1848,7 @@ fn format_time_millis(seconds: f64) -> String {
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Blaze")
+            .with_title("Blaze — Ankush Sarkar")
             .with_inner_size([1180.0, 760.0])
             .with_min_inner_size([820.0, 580.0]),
         renderer: eframe::Renderer::Glow,
@@ -1831,7 +1856,7 @@ fn main() -> eframe::Result {
     };
 
     eframe::run_native(
-        "Blaze",
+        "Blaze — Ankush Sarkar",
         options,
         Box::new(|cc| {
             let app = BlazeApp::new(cc)?;
