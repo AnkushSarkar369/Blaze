@@ -6,6 +6,9 @@ use std::{
 };
 
 use blaze_engine::{MediaEngine, MediaInfo};
+use blaze_engine::silence::{
+    DetectionLevel, PaddingPreset, SilenceDetectionConfig, SilenceInterval,
+};
 // Silence detection UI integration follows.
 use eframe::egui;
 use playback::Playback;
@@ -72,6 +75,7 @@ struct EditRegion {
 }
 
 type ProbeResult = (u64, Result<(PathBuf, MediaInfo), String>);
+type SilenceResult = (u64, Result<Vec<SilenceInterval>, String>);
 enum WaveformMessage {
     Progress { generation: u64, fraction: f32 },
     Complete { generation: u64, result: Result<Vec<u8>, String> },
@@ -91,6 +95,22 @@ struct BlazeApp {
     waveform_tx: Sender<WaveformMessage>,
     waveform_rx: Receiver<WaveformMessage>,
     waveform_progress: Option<f32>,
+    silence_tx: Sender<SilenceResult>,
+    silence_rx: Receiver<SilenceResult>,
+    silence_generation: u64,
+    silence_running: bool,
+    detection_level: usize,
+    padding_level: usize,
+    minimum_silence_ms: u32,
+    custom_detection_open: bool,
+    custom_padding_open: bool,
+    detection_custom_enabled: bool,
+    padding_custom_enabled: bool,
+    custom_padding_before_ms: u32,
+    custom_padding_after_ms: u32,
+    custom_threshold_db: f64,
+    custom_peak_gate_enabled: bool,
+    custom_peak_ceiling_dbfs: f64,
     timeline_zoom: f32,
     timeline_offset: f64,
     edit_regions: Vec<EditRegion>,
@@ -119,6 +139,7 @@ impl BlazeApp {
         let playback = Playback::new(cc)?;
         let (probe_tx, probe_rx) = mpsc::channel();
         let (waveform_tx, waveform_rx) = mpsc::channel();
+        let (silence_tx, silence_rx) = mpsc::channel();
 
         Ok(Self {
             playback,
@@ -134,6 +155,22 @@ impl BlazeApp {
             waveform_tx,
             waveform_rx,
             waveform_progress: None,
+            silence_tx,
+            silence_rx,
+            silence_generation: 0,
+            silence_running: false,
+            detection_level: 2,
+            padding_level: 1,
+            minimum_silence_ms: 300,
+            custom_detection_open: false,
+            custom_padding_open: false,
+            detection_custom_enabled: false,
+            padding_custom_enabled: false,
+            custom_padding_before_ms: 60,
+            custom_padding_after_ms: 60,
+            custom_threshold_db: 22.0,
+            custom_peak_gate_enabled: false,
+            custom_peak_ceiling_dbfs: -35.0,
             timeline_zoom: 1.0,
             timeline_offset: 0.0,
             edit_regions: Vec::new(),
@@ -143,6 +180,69 @@ impl BlazeApp {
             show_help: !has_seen_first_run_help(),
             first_run_help_seen: has_seen_first_run_help(),
         })
+    }
+
+    fn start_silence_detection(&mut self, ctx: &egui::Context) {
+        let Some(path) = self.selected_path.clone() else { return; };
+        if self.silence_running { return; }
+
+        self.silence_generation = self.silence_generation.wrapping_add(1);
+        let generation = self.silence_generation;
+        self.silence_running = true;
+
+        let level = match self.detection_level {
+            0 => DetectionLevel::Comfortable,
+            1 => DetectionLevel::Optimal,
+            2 => DetectionLevel::Default,
+            3 => DetectionLevel::Tight,
+            _ => DetectionLevel::Aggressive,
+        };
+        let preset_padding = match self.padding_level {
+            0 => PaddingPreset::Comfortable.milliseconds(),
+            2 => PaddingPreset::Tight.milliseconds(),
+            _ => PaddingPreset::Normal.milliseconds(),
+        };
+        let (padding_before_ms, padding_after_ms) = if self.padding_custom_enabled {
+            (self.custom_padding_before_ms, self.custom_padding_after_ms)
+        } else {
+            (preset_padding, preset_padding)
+        };
+        let config = SilenceDetectionConfig {
+            level,
+            padding_before_ms,
+            padding_after_ms,
+            minimum_duration_ms: self.minimum_silence_ms,
+            threshold_below_baseline_db: self.detection_custom_enabled.then_some(self.custom_threshold_db),
+            peak_ceiling_dbfs: (self.detection_custom_enabled && self.custom_peak_gate_enabled)
+                .then_some(self.custom_peak_ceiling_dbfs),
+        };
+        let tx = self.silence_tx.clone();
+        let repaint = ctx.clone();
+        std::thread::spawn(move || {
+            let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
+            let engine = MediaEngine::new([tools]);
+            let result = blaze_engine::silence::detect_silence(&engine, &path.to_string_lossy(), config);
+            let _ = tx.send((generation, result));
+            repaint.request_repaint();
+        });
+    }
+
+    fn poll_silence(&mut self) {
+        while let Ok((generation, result)) = self.silence_rx.try_recv() {
+            if generation != self.silence_generation { continue; }
+            self.silence_running = false;
+            match result {
+                Ok(intervals) => {
+                    // Rescan replaces the current region set with fresh detections.
+                    self.edit_regions = intervals.into_iter()
+                        .filter(|interval| interval.end > interval.start)
+                        .map(|interval| EditRegion { start: interval.start, end: interval.end })
+                        .collect();
+                    self.pending_region_start = None;
+                }
+                Err(error) => eprintln!("Blaze: silence detection failed: {error}"),
+            }
+        }
     }
 
     fn media_duration(&self) -> f64 {
@@ -285,6 +385,7 @@ impl eframe::App for BlazeApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_probe(ctx);
         self.poll_waveform();
+        self.poll_silence();
 
         // Global transport shortcut: handle Space at the app level rather
         // than inside a particular panel, so it works regardless of focus
@@ -650,6 +751,107 @@ impl eframe::App for BlazeApp {
                 ui.separator();
                 ui.add_space(8.0);
                 ui.label(self.active_tool_tab.description());
+
+                if self.active_tool_tab == ToolTab::PreciseMode {
+                    ui.add_space(18.0);
+                    ui.strong("Detection Level");
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Slider::new(&mut self.detection_level, 0..=4).step_by(1.0).show_value(false));
+                        if ui.small_button("Custom").clicked() {
+                            self.detection_custom_enabled = true;
+                            self.custom_detection_open = true;
+                        }
+                    });
+                    egui::Grid::new("detection_level_labels")
+                        .num_columns(5)
+                        .min_col_width(ui.available_width() / 5.0)
+                        .show(ui, |ui| {
+                            for (index, label) in ["Comfortable", "Optimal", "Default", "Tight", "Aggressive"].iter().enumerate() {
+                                ui.label(egui::RichText::new(*label).size(10.0).color(
+                                    if self.detection_level == index { ui.visuals().strong_text_color() } else { ui.visuals().weak_text_color() }
+                                ));
+                            }
+                            ui.end_row();
+                        });
+
+                    ui.add_space(18.0);
+                    ui.strong("Padding");
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Slider::new(&mut self.padding_level, 0..=2).step_by(1.0).show_value(false));
+                        if ui.small_button("Custom").clicked() {
+                            self.padding_custom_enabled = true;
+                            self.custom_padding_open = true;
+                        }
+                    });
+                    egui::Grid::new("padding_level_labels")
+                        .num_columns(3)
+                        .min_col_width(ui.available_width() / 3.0)
+                        .show(ui, |ui| {
+                            for (index, label) in ["Comfortable", "Normal", "Tight"].iter().enumerate() {
+                                ui.label(egui::RichText::new(*label).size(10.0).color(
+                                    if self.padding_level == index { ui.visuals().strong_text_color() } else { ui.visuals().weak_text_color() }
+                                ));
+                            }
+                            ui.end_row();
+                        });
+
+                    ui.add_space(18.0);
+                    ui.horizontal(|ui| {
+                        ui.strong("Minimum Silence Duration");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add(egui::DragValue::new(&mut self.minimum_silence_ms)
+                                .range(10..=10_000)
+                                .suffix(" ms")
+                                .speed(10));
+                        });
+                    });
+                    ui.small("Default is 300 ms.");
+
+                    ui.add_space(20.0);
+                    let can_detect = self.selected_path.is_some()
+                        && self.media_info.as_ref().is_some_and(|info| info.has_audio)
+                        && !self.silence_running;
+                    if ui.add_enabled(
+                        can_detect,
+                        egui::Button::new(if self.silence_running { "Analysing Audio…" } else { "Detect Silence" })
+                            .min_size(egui::vec2(ui.available_width(), 36.0)),
+                    ).clicked() {
+                        self.start_silence_detection(ui.ctx());
+                    }
+                    if self.silence_running {
+                        ui.add_space(6.0);
+                        ui.spinner();
+                        ui.small("Analysing audio. A rescan replaces existing regions.");
+                    }
+
+                    if self.custom_detection_open {
+                        egui::Window::new("Detection Level · Custom")
+                            .collapsible(false)
+                            .resizable(false)
+                            .open(&mut self.custom_detection_open)
+                            .show(ui.ctx(), |ui| {
+                                ui.label("Threshold below adaptive programme baseline");
+                                ui.add(egui::Slider::new(&mut self.custom_threshold_db, 3.0..=60.0).suffix(" dB"));
+                                ui.small("Custom threshold overrides the selected detection preset.");
+                                ui.checkbox(&mut self.custom_peak_gate_enabled, "Also apply peak ceiling");
+                                if self.custom_peak_gate_enabled {
+                                    ui.add(egui::Slider::new(&mut self.custom_peak_ceiling_dbfs, -90.0..=0.0).suffix(" dBFS"));
+                                }
+                            });
+                    }
+                    if self.custom_padding_open {
+                        egui::Window::new("Padding · Custom")
+                            .collapsible(false)
+                            .resizable(false)
+                            .open(&mut self.custom_padding_open)
+                            .show(ui.ctx(), |ui| {
+                                ui.label("Padding before detected silence");
+                                ui.add(egui::DragValue::new(&mut self.custom_padding_before_ms).range(0..=2000).suffix(" ms"));
+                                ui.label("Padding after detected silence");
+                                ui.add(egui::DragValue::new(&mut self.custom_padding_after_ms).range(0..=2000).suffix(" ms"));
+                            });
+                    }
+                }
             });
 
         egui::CentralPanel::default()
