@@ -1649,7 +1649,7 @@ impl eframe::App for BlazeApp {
         // Keep the compact visual grips centered on the real splitter edges.
         let handle_fill = egui::Color32::from_rgb(42, 45, 48);
         let handle_mark = egui::Color32::from_rgb(126, 130, 134);
-        if let Some(rect) = tools_split_rect {
+        { let rect = tools_split_rect;
             let handle = egui::Rect::from_center_size(
                 egui::pos2(rect.left(), rect.center().y),
                 egui::vec2(10.0, 62.0),
@@ -1668,7 +1668,7 @@ impl eframe::App for BlazeApp {
                 );
             }
         }
-        if let Some(rect) = timeline_split_rect {
+        { let rect = timeline_split_rect;
             let handle = egui::Rect::from_center_size(
                 egui::pos2(rect.center().x, rect.top()),
                 egui::vec2(62.0, 10.0),
