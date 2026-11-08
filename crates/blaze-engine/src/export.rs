@@ -396,17 +396,24 @@ fn build_fcpxml(
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE fcpxml>\n<fcpxml version=\"1.10\"><resources>\n");
     out.push_str(&format!("<format id=\"r1\" name=\"{format_name}\" frameDuration=\"{}/{}s\" width=\"{width}\" height=\"{height}\"/>\n",
         rate.denominator, rate.numerator));
-    out.push_str(&format!("<asset id=\"r2\" name=\"{name_xml}\" src=\"{path_url}\" start=\"0s\" duration=\"{}\" hasVideo=\"1\" hasAudio=\"{}\" format=\"r1\"",
+    out.push_str(&format!("<asset id=\"r2\" name=\"{name_xml}\" start=\"0s\" duration=\"{}\" hasVideo=\"1\" hasAudio=\"{}\" format=\"r1\"",
         frame_time(seconds_to_frames(info.duration, rate), rate), if info.has_audio { "1" } else { "0" }));
     if info.has_audio {
-        out.push_str(&format!(" audioSources=\"1\" audioChannels=\"{channels}\" audioRate=\"{sample_rate}\"/>\n"));
-    } else { out.push_str("/>\n"); }
+        out.push_str(&format!(" audioSources=\"1\" audioChannels=\"{channels}\" audioRate=\"{sample_rate}\">\n<media-rep kind=\"original-media\" src=\"{path_url}\"/>\n</asset>\n"));
+    } else {
+        out.push_str(&format!(">\n<media-rep kind=\"original-media\" src=\"{path_url}\"/>\n</asset>\n"));
+    }
 
     out.push_str(&format!("</resources><library><event name=\"Blaze Edit\"><project name=\"{stem_xml}\"><sequence format=\"r1\" duration=\"{}\" tcStart=\"0s\" tcFormat=\"NDF\"",
         frame_time(total_frames, rate)));
     if info.has_audio {
         let layout = if channels == 1 { "mono" } else if channels == 2 { "stereo" } else { "surround" };
-        out.push_str(&format!(" audioLayout=\"{layout}\" audioRate=\"{}k\"", if sample_rate % 1000 == 0 { format!(\"{}\", sample_rate / 1000) } else { format!(\"{:.1}\", sample_rate as f64 / 1000.0) }));
+        let audio_rate = if sample_rate % 1000 == 0 {
+            format!("{}k", sample_rate / 1000)
+        } else {
+            format!("{:.1}k", sample_rate as f64 / 1000.0)
+        };
+        out.push_str(&format!(" audioLayout=\"{layout}\" audioRate=\"{audio_rate}\""));
     }
     out.push_str("><spine>\n");
     for (i, segment) in segments.iter().enumerate() {
