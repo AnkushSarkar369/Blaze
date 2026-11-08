@@ -52,12 +52,8 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
         eprintln!("Skipping real-FFmpeg integration test: ffprobe is not on PATH");
         return;
     };
-    let tool_dir = ffmpeg.parent().expect("ffmpeg has a parent directory");
-    assert_eq!(
-        ffprobe.parent(),
-        Some(tool_dir),
-        "ffmpeg and ffprobe are expected in the same PATH directory"
-    );
+    let ffmpeg_dir = ffmpeg.parent().expect("ffmpeg has a parent directory");
+    let ffprobe_dir = ffprobe.parent().expect("ffprobe has a parent directory");
 
     let temp = TestDir::new();
     let media = temp.0.join("sample.mkv");
@@ -98,7 +94,10 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let engine = MediaEngine::new(vec![tool_dir.to_path_buf()]);
+    let engine = MediaEngine::new(vec![
+        ffmpeg_dir.to_path_buf(),
+        ffprobe_dir.to_path_buf(),
+    ]);
 
     let info = engine.probe_media(media_arg).expect("probe media");
     assert!((info.duration - 2.0).abs() < 0.15, "duration: {}", info.duration);
