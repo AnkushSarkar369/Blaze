@@ -691,6 +691,22 @@ impl eframe::App for BlazeApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Persistent in-app title ribbon; the native window title is set separately.
+        let header_width = ui.available_width();
+        ui.allocate_ui_with_layout(
+            egui::vec2(header_width, 30.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.add_space(12.0);
+                ui.label(
+                    egui::RichText::new("Blaze — Ankush Sarkar")
+                        .strong()
+                        .size(14.0),
+                );
+            },
+        );
+        ui.separator();
+
         // Make panel splitters easier to grab without changing their saved sizes.
         ui.style_mut().interaction.resize_grab_radius_side = 10.0;
         let root_rect = ui.available_rect_before_wrap();
@@ -699,14 +715,7 @@ impl eframe::App for BlazeApp {
         // This runs once per import; later manual resizing remains untouched.
         if self.pending_preview_fit {
             if let Some(info) = self.media_info.as_ref() {
-                let aspect = info.width.zip(info.height)
-                    .filter(|(width, height)| *width > 0 && *height > 0)
-                    .map(|(width, height)| width as f32 / height as f32)
-                    .unwrap_or(16.0 / 9.0);
-                let preview_height = (root_rect.height() - 220.0 - 54.0).max(160.0);
-                let preview_width = (preview_height * aspect + 14.0)
-                    .clamp(240.0, (root_rect.width() - 240.0).max(240.0));
-                let tools_width = (root_rect.width() - preview_width).max(240.0);
+                let tools_width = default_tools_width(root_rect, info);
                 let panel_id = ui.scope_id().with("tools");
                 let panel_rect = egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -1488,12 +1497,22 @@ impl eframe::App for BlazeApp {
                                             format_time_millis(self.playback_position),
                                             format_time_millis(duration)
                                         );
-                                        let time_width = if duration >= 3600.0 { 232.0 } else { 178.0 };
+                                        let time_font = egui::FontId::proportional(13.5);
+                                        let time_width = ui
+                                            .painter()
+                                            .layout_no_wrap(
+                                                time_label.clone(),
+                                                time_font.clone(),
+                                                ui.visuals().text_color(),
+                                            )
+                                            .size()
+                                            .x
+                                            + 2.0;
                                         let skip_button_width = 112.0;
                                         let slider_width = (ui.available_width()
                                             - time_width
                                             - skip_button_width
-                                            - 48.0)
+                                            - 26.0)
                                             .max(36.0);
 
                                         // Custom transport seekbar: a continuous orange fill,
@@ -1571,7 +1590,7 @@ impl eframe::App for BlazeApp {
                                             [time_width, 26.0],
                                             egui::Label::new(
                                                 egui::RichText::new(time_label)
-                                                    .font(egui::FontId::proportional(13.5)),
+                                                    .font(time_font),
                                             ),
                                         );
 
@@ -1581,6 +1600,7 @@ impl eframe::App for BlazeApp {
                                         } else {
                                             "Skip Cuts: OFF"
                                         })
+                                        .font(egui::FontId::proportional(13.5))
                                         .fill(if self.skip_cuts_enabled {
                                             egui::Color32::from_rgb(38, 111, 73)
                                         } else {
@@ -1616,7 +1636,37 @@ impl eframe::App for BlazeApp {
                 handle,
                 ui.scope_id().with("tools-resize-affordance"),
                 egui::Sense::hover(),
-            ).on_hover_text("Drag to resize");
+            ).on_hover_text("Drag to resize · Double-click to reset");
+            let reset = response.hovered()
+                && ui.input(|input| input.pointer.button_double_clicked(egui::PointerButton::Primary));
+            if reset {
+                if let Some(info) = self.media_info.as_ref() {
+                    let width = default_tools_width(root_rect, info);
+                    let panel_rect = egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width, root_rect.height()),
+                    );
+                    let panel_id = ui.scope_id().with("tools");
+                    ui.ctx().data_mut(|data| {
+                        data.insert_persisted(
+                            panel_id,
+                            egui::containers::panel::PanelState { outer_rect: panel_rect },
+                        );
+                    });
+                } else {
+                    let panel_id = ui.scope_id().with("tools");
+                    let panel_rect = egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(310.0, root_rect.height()),
+                    );
+                    ui.ctx().data_mut(|data| {
+                        data.insert_persisted(
+                            panel_id,
+                            egui::containers::panel::PanelState { outer_rect: panel_rect },
+                        );
+                    });
+                }
+            }
             let fill = if response.hovered() {
                 egui::Color32::from_rgb(67, 71, 75)
             } else { handle_fill };
@@ -1638,7 +1688,22 @@ impl eframe::App for BlazeApp {
                 handle,
                 ui.scope_id().with("timeline-resize-affordance"),
                 egui::Sense::hover(),
-            ).on_hover_text("Drag to resize");
+            ).on_hover_text("Drag to resize · Double-click to reset");
+            let reset = response.hovered()
+                && ui.input(|input| input.pointer.button_double_clicked(egui::PointerButton::Primary));
+            if reset {
+                let panel_id = ui.scope_id().with("timeline");
+                let panel_rect = egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(root_rect.width(), 220.0),
+                );
+                ui.ctx().data_mut(|data| {
+                    data.insert_persisted(
+                        panel_id,
+                        egui::containers::panel::PanelState { outer_rect: panel_rect },
+                    );
+                });
+            }
             let fill = if response.hovered() {
                 egui::Color32::from_rgb(67, 71, 75)
             } else { handle_fill };
@@ -1668,6 +1733,12 @@ impl eframe::App for BlazeApp {
                         .show(ui, |ui| {
                             ui.monospace("Ctrl + Scroll");
                             ui.label("Zoom timeline in / out");
+                            ui.end_row();
+                            ui.monospace("Double-click vertical splitter");
+                            ui.label("Reset preview / tools proportions");
+                            ui.end_row();
+                            ui.monospace("Double-click timeline splitter");
+                            ui.label("Reset timeline height");
                             ui.end_row();
                             ui.monospace("Scroll");
                             ui.label("Move timeline left / right");
@@ -1812,6 +1883,19 @@ fn format_time(seconds: f64) -> String {
     } else {
         format!("{minutes:02}:{seconds:02}")
     }
+}
+
+fn default_tools_width(root_rect: egui::Rect, info: &MediaInfo) -> f32 {
+    let aspect = info
+        .width
+        .zip(info.height)
+        .filter(|(width, height)| *width > 0 && *height > 0)
+        .map(|(width, height)| width as f32 / height as f32)
+        .unwrap_or(16.0 / 9.0);
+    let preview_height = (root_rect.height() - 220.0 - 54.0).max(160.0);
+    let preview_width = (preview_height * aspect + 14.0)
+        .clamp(240.0, (root_rect.width() - 240.0).max(240.0));
+    (root_rect.width() - preview_width).max(240.0)
 }
 
 fn format_ruler_time(seconds: f64, step: f64) -> String {
