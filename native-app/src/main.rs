@@ -71,6 +71,7 @@ impl BlazeApp {
 
         if let Err(error) = self.playback.load(&path) {
             eprintln!("Blaze: {error}");
+            self.playback.stop();
             self.selected_path = None;
             self.loading = false;
             return;
