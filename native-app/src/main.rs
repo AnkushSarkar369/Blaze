@@ -6,6 +6,7 @@ use std::{
 };
 
 use blaze_engine::{MediaEngine, MediaInfo};
+// Silence detection UI integration follows.
 use eframe::egui;
 use playback::Playback;
 use rfd::FileDialog;
