@@ -1,4 +1,5 @@
 use std::{
+    fs,
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
     time::Duration,
@@ -13,6 +14,55 @@ mod playback;
 mod waveform;
 
 use waveform::Waveform;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ToolTab {
+    BlazeMode,
+    PreciseMode,
+    Export,
+}
+
+impl ToolTab {
+    const ALL: [Self; 3] = [Self::BlazeMode, Self::PreciseMode, Self::Export];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::BlazeMode => "Blaze Mode",
+            Self::PreciseMode => "Precise Mode",
+            Self::Export => "Export",
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            Self::BlazeMode => "Fast, keyframe-aligned cutting for near-instant edits.",
+            Self::PreciseMode => "Frame-accurate cutting for edits that need exact timing.",
+            Self::Export => "Configure and export the finished video.",
+        }
+    }
+}
+
+fn help_seen_path() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|home| {
+        PathBuf::from(home)
+            .join(".config")
+            .join("blaze")
+            .join("first_run_help_seen")
+    })
+}
+
+fn has_seen_first_run_help() -> bool {
+    help_seen_path().is_some_and(|path| path.exists())
+}
+
+fn mark_first_run_help_seen() {
+    if let Some(path) = help_seen_path() {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(path, b"");
+    }
+}
 
 type ProbeResult = (u64, Result<(PathBuf, MediaInfo), String>);
 enum WaveformMessage {
@@ -36,6 +86,9 @@ struct BlazeApp {
     waveform_progress: Option<f32>,
     timeline_zoom: f32,
     timeline_offset: f64,
+    active_tool_tab: ToolTab,
+    show_help: bool,
+    first_run_help_seen: bool,
 }
 
 impl BlazeApp {
@@ -73,6 +126,9 @@ impl BlazeApp {
             waveform_progress: None,
             timeline_zoom: 1.0,
             timeline_offset: 0.0,
+            active_tool_tab: ToolTab::BlazeMode,
+            show_help: !has_seen_first_run_help(),
+            first_run_help_seen: has_seen_first_run_help(),
         })
     }
 
@@ -212,6 +268,12 @@ impl eframe::App for BlazeApp {
         let space_pressed = ctx.input_mut(|input| {
             input.consume_key(egui::Modifiers::NONE, egui::Key::Space)
         });
+        let help_shortcut = ctx.input_mut(|input| {
+            input.consume_key(egui::Modifiers::CTRL, egui::Key::H)
+        });
+        if help_shortcut {
+            self.show_help = !self.show_help;
+        }
         if space_pressed && self.selected_path.is_some() {
             if let Err(error) = self.playback.toggle_pause() {
                 eprintln!("Blaze: {error}");
@@ -388,8 +450,19 @@ impl eframe::App for BlazeApp {
             .default_size(310.0)
             .min_size(240.0)
             .show(ui, |ui| {
-                ui.heading("Tools");
+                ui.horizontal(|ui| {
+                    for tab in ToolTab::ALL {
+                        if ui
+                            .selectable_label(self.active_tool_tab == tab, tab.label())
+                            .clicked()
+                        {
+                            self.active_tool_tab = tab;
+                        }
+                    }
+                });
                 ui.separator();
+                ui.add_space(8.0);
+                ui.label(self.active_tool_tab.description());
             });
 
         egui::CentralPanel::default()
@@ -538,6 +611,61 @@ impl eframe::App for BlazeApp {
                         });
                     });
             });
+
+        if self.show_help {
+            egui::Window::new("Quick Help")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(430.0)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .open(&mut self.show_help)
+                .show(ui.ctx(), |ui| {
+                    ui.label("Keyboard shortcuts");
+                    ui.add_space(6.0);
+                    egui::Grid::new("blaze_quick_help_shortcuts")
+                        .num_columns(2)
+                        .spacing([18.0, 8.0])
+                        .show(ui, |ui| {
+                            ui.monospace("Ctrl + Scroll");
+                            ui.label("Zoom timeline in / out");
+                            ui.end_row();
+                            ui.monospace("Alt + Scroll");
+                            ui.label("Move timeline left / right");
+                            ui.end_row();
+                            ui.monospace("Space");
+                            ui.label("Play / pause video");
+                            ui.end_row();
+                            ui.monospace("Ctrl + H");
+                            ui.label("Open this help window");
+                            ui.end_row();
+                        });
+
+                    ui.separator();
+                    ui.label("Editing modes");
+                    ui.add_space(6.0);
+                    egui::Grid::new("blaze_quick_help_modes")
+                        .num_columns(2)
+                        .spacing([18.0, 8.0])
+                        .show(ui, |ui| {
+                            ui.strong("Blaze Mode");
+                            ui.label("Instant, keyframe-aligned cuts");
+                            ui.end_row();
+                            ui.strong("Precise Mode");
+                            ui.label("Frame-accurate cuts");
+                            ui.end_row();
+                            ui.strong("Export");
+                            ui.label("Render the finished video");
+                            ui.end_row();
+                        });
+                    ui.add_space(10.0);
+                    ui.label("You can reopen this guide anytime with Ctrl + H.");
+                });
+        }
+
+        if !self.show_help && !self.first_run_help_seen {
+            mark_first_run_help_seen();
+            self.first_run_help_seen = true;
+        }
     }
 
     fn on_exit(&mut self, gl: Option<&glow::Context>) {
