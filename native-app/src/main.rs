@@ -11,7 +11,7 @@ use rfd::FileDialog;
 
 mod playback;
 
-type ProbeResult = Result<(PathBuf, MediaInfo), String>;
+type ProbeResult = (u64, Result<(PathBuf, MediaInfo), String>);
 
 struct BlazeApp {
     playback: Playback,
@@ -20,7 +20,7 @@ struct BlazeApp {
     loading: bool,
     seeking: bool,
     playback_position: f64,
-    status: String,
+    probe_generation: u64,
     probe_tx: Sender<ProbeResult>,
     probe_rx: Receiver<ProbeResult>,
 }
@@ -50,7 +50,7 @@ impl BlazeApp {
             loading: false,
             seeking: false,
             playback_position: 0.0,
-            status: "Ready".to_owned(),
+            probe_generation: 0,
             probe_tx,
             probe_rx,
         })
@@ -61,15 +61,16 @@ impl BlazeApp {
             return;
         };
 
+        self.probe_generation = self.probe_generation.wrapping_add(1);
+        let generation = self.probe_generation;
         self.loading = true;
         self.seeking = false;
         self.playback_position = 0.0;
-        self.status = "Opening media…".to_owned();
         self.media_info = None;
         self.selected_path = Some(path.clone());
 
         if let Err(error) = self.playback.load(&path) {
-            self.status = error;
+            eprintln!("Blaze: {error}");
         }
 
         let sender = self.probe_tx.clone();
@@ -80,37 +81,29 @@ impl BlazeApp {
             let result = engine
                 .probe_media(&path.to_string_lossy())
                 .map(|info| (path, info));
-            let _ = sender.send(result);
+            let _ = sender.send((generation, result));
             repaint.request_repaint();
         });
     }
 
     fn poll_probe(&mut self) {
-        match self.probe_rx.try_recv() {
-            Ok(Ok((path, info))) => {
-                self.selected_path = Some(path);
-                self.media_info = Some(info);
-                self.loading = false;
-                self.status = "Media loaded".to_owned();
+        while let Ok((generation, result)) = self.probe_rx.try_recv() {
+            if generation != self.probe_generation {
+                continue;
             }
-            Ok(Err(error)) => {
-                self.loading = false;
-                self.status = error;
-            }
-            Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.loading = false;
-                self.status = "Media analysis worker stopped unexpectedly".to_owned();
+
+            match result {
+                Ok((path, info)) => {
+                    self.selected_path = Some(path);
+                    self.media_info = Some(info);
+                    self.loading = false;
+                }
+                Err(error) => {
+                    self.loading = false;
+                    eprintln!("Blaze: media analysis failed: {error}");
+                }
             }
         }
-    }
-
-    fn filename(&self) -> &str {
-        self.selected_path
-            .as_deref()
-            .and_then(|path| path.file_name())
-            .and_then(|name| name.to_str())
-            .unwrap_or("No footage loaded")
     }
 }
 
@@ -119,7 +112,7 @@ impl eframe::App for BlazeApp {
         self.poll_probe();
 
         if let Some(error) = self.playback.poll_error() {
-            self.status = error;
+            eprintln!("Blaze: {error}");
             self.loading = false;
         }
 
@@ -133,37 +126,12 @@ impl eframe::App for BlazeApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::Panel::bottom("status")
-            .exact_size(24.0)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(&self.status).small().weak());
-                    ui.separator();
-                    ui.label(egui::RichText::new(self.filename()).small().weak());
-
-                    if let Some(info) = &self.media_info {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let audio = if info.has_audio {
-                                format!("Audio · {} ch", info.audio_channels.unwrap_or(0))
-                            } else {
-                                "No audio stream".to_owned()
-                            };
-                            ui.label(egui::RichText::new(audio).small().weak());
-                        });
-                    }
-                });
-            });
-
         egui::Panel::bottom("timeline")
             .resizable(true)
             .default_size(220.0)
             .min_size(140.0)
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading("Timeline");
-                    ui.separator();
-                    ui.label("Single visual waveform lane");
-                });
+                ui.heading("Timeline");
                 ui.add_space(12.0);
                 let available = ui.available_rect_before_wrap();
                 let lane = egui::Rect::from_min_size(
@@ -180,12 +148,7 @@ impl eframe::App for BlazeApp {
                     egui::Stroke::new(1.0, egui::Color32::from_rgb(55, 61, 62)),
                 );
                 ui.allocate_rect(lane, egui::Sense::hover());
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new("Waveform rendering and timeline interaction come next.")
-                        .small()
-                        .weak(),
-                );
+
             });
 
         egui::Panel::right("tools")
@@ -222,13 +185,25 @@ impl eframe::App for BlazeApp {
 
                 if self.selected_path.is_some() {
                     self.playback.paint(ui.painter(), preview_rect);
+
+                    let import_rect = egui::Rect::from_min_size(
+                        preview_rect.left_top() + egui::vec2(12.0, 12.0),
+                        egui::vec2(34.0, 30.0),
+                    );
+                    if ui
+                        .put(import_rect, egui::Button::new("＋"))
+                        .on_hover_text("Import video")
+                        .clicked()
+                    {
+                        self.open_video(ui.ctx());
+                    }
                 } else {
                     let button_rect = egui::Rect::from_center_size(
                         preview_rect.center(),
-                        egui::vec2(148.0, 40.0),
+                        egui::vec2(156.0, 42.0),
                     );
                     if ui
-                        .put(button_rect, egui::Button::new("Open video"))
+                        .put(button_rect, egui::Button::new("＋  Import video"))
                         .clicked()
                     {
                         self.open_video(ui.ctx());
@@ -238,14 +213,16 @@ impl eframe::App for BlazeApp {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if self.selected_path.is_some() {
-                        if ui.button("Open").clicked() {
-                            self.open_video(ui.ctx());
-                        }
-
                         let paused = self.playback.is_paused();
-                        if ui.button(if paused { "Play" } else { "Pause" }).clicked() {
+                        let play_label = if paused { "▶" } else { "Ⅱ" };
+                        let play_hint = if paused { "Play" } else { "Pause" };
+                        if ui
+                            .add_sized([34.0, 28.0], egui::Button::new(play_label))
+                            .on_hover_text(play_hint)
+                            .clicked()
+                        {
                             if let Err(error) = self.playback.toggle_pause() {
-                                self.status = error;
+                                eprintln!("Blaze: {error}");
                             }
                         }
 
@@ -256,7 +233,9 @@ impl eframe::App for BlazeApp {
                         let duration = duration.max(0.01);
                         self.playback_position = self.playback_position.clamp(0.0, duration);
 
-                        let response = ui.add(
+                        let slider_width = (ui.available_width() - 104.0).max(80.0);
+                        let response = ui.add_sized(
+                            [slider_width, 22.0],
                             egui::Slider::new(&mut self.playback_position, 0.0..=duration)
                                 .show_value(false),
                         );
@@ -269,7 +248,7 @@ impl eframe::App for BlazeApp {
                         {
                             self.seeking = false;
                             if let Err(error) = self.playback.seek(self.playback_position) {
-                                self.status = error;
+                                eprintln!("Blaze: {error}");
                             }
                         }
 
@@ -278,8 +257,6 @@ impl eframe::App for BlazeApp {
                             format_time(self.playback_position),
                             format_time(duration)
                         ));
-                    } else {
-                        ui.label("No footage loaded");
                     }
                 });
             });
