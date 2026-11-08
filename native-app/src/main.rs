@@ -6,6 +6,7 @@ use std::{
 };
 
 use blaze_engine::{MediaEngine, MediaInfo};
+use blaze_engine::export::{self, InterchangeFormat};
 use blaze_engine::silence::{
     DetectionLevel, PaddingPreset, SilenceDetectionConfig, SilenceInterval,
 };
@@ -84,6 +85,7 @@ struct EditRegion {
 type ProbeResult = (u64, Result<(PathBuf, MediaInfo), String>);
 type SilenceResult = (u64, Result<Vec<SilenceInterval>, String>);
 type KeyframeResult = (u64, Result<Vec<f64>, String>);
+type ExportResult = (u64, Result<String, String>);
 enum WaveformMessage {
     Progress { generation: u64, fraction: f32 },
     Complete { generation: u64, result: Result<Vec<u8>, String> },
@@ -113,6 +115,11 @@ struct BlazeApp {
     keyframes: Vec<f64>,
     keyframes_running: bool,
     keyframe_error: Option<String>,
+    export_tx: Sender<ExportResult>,
+    export_rx: Receiver<ExportResult>,
+    export_generation: u64,
+    export_running: bool,
+    export_status: Option<(bool, String)>,
     detection_level: usize,
     padding_level: usize,
     minimum_silence_ms: u32,
@@ -165,6 +172,7 @@ impl BlazeApp {
         let (waveform_tx, waveform_rx) = mpsc::channel();
         let (silence_tx, silence_rx) = mpsc::channel();
         let (keyframe_tx, keyframe_rx) = mpsc::channel();
+        let (export_tx, export_rx) = mpsc::channel();
 
         Ok(Self {
             playback,
@@ -190,6 +198,11 @@ impl BlazeApp {
             keyframes: Vec::new(),
             keyframes_running: false,
             keyframe_error: None,
+            export_tx,
+            export_rx,
+            export_generation: 0,
+            export_running: false,
+            export_status: None,
             detection_level: 2,
             padding_level: 1,
             minimum_silence_ms: 300,
@@ -461,6 +474,75 @@ impl BlazeApp {
             }
         }
     }
+
+    fn start_blaze_export(&mut self, output: PathBuf, ctx: &egui::Context) {
+        if self.export_running { return; }
+        let (Some(source), Some(info)) = (self.selected_path.clone(), self.media_info.clone()) else { return; };
+        let ranges: Vec<(f64, f64)> = self.edit_regions.iter().map(|r| (r.start, r.end)).collect();
+        let duration = info.duration;
+        self.export_generation = self.export_generation.wrapping_add(1);
+        let generation = self.export_generation;
+        self.export_running = true;
+        self.export_status = None;
+        let sender = self.export_tx.clone();
+        let repaint = ctx.clone();
+
+        std::thread::spawn(move || {
+            let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
+            let engine = MediaEngine::new([tools]);
+            let result = export::export_blaze_video(&engine, &source, &output, duration, &ranges)
+                .map(|report| {
+                    let mut message = format!(
+                        "Blaze Export completed.\n{}\nDuration: {:.2}s",
+                        report.output_path.display(),
+                        report.actual_duration
+                    );
+                    if let Some(warning) = report.warning {
+                        message.push_str("\n");
+                        message.push_str(&warning);
+                    }
+                    message
+                });
+            let _ = sender.send((generation, result));
+            repaint.request_repaint();
+        });
+    }
+
+    fn start_interchange_export(
+        &mut self,
+        format: InterchangeFormat,
+        output: PathBuf,
+        ctx: &egui::Context,
+    ) {
+        if self.export_running { return; }
+        let (Some(source), Some(info)) = (self.selected_path.clone(), self.media_info.clone()) else { return; };
+        let ranges: Vec<(f64, f64)> = self.edit_regions.iter().map(|r| (r.start, r.end)).collect();
+        self.export_generation = self.export_generation.wrapping_add(1);
+        let generation = self.export_generation;
+        self.export_running = true;
+        self.export_status = None;
+        let sender = self.export_tx.clone();
+        let repaint = ctx.clone();
+
+        std::thread::spawn(move || {
+            let result = export::export_interchange(format, &source, &info, &ranges, &output)
+                .map(|_| format!("Timeline exported:\n{}", output.display()));
+            let _ = sender.send((generation, result));
+            repaint.request_repaint();
+        });
+    }
+
+    fn poll_exports(&mut self) {
+        while let Ok((generation, result)) = self.export_rx.try_recv() {
+            if generation != self.export_generation { continue; }
+            self.export_running = false;
+            self.export_status = Some(match result {
+                Ok(message) => (true, message),
+                Err(error) => (false, error),
+            });
+        }
+    }
+
 }
 
 impl eframe::App for BlazeApp {
@@ -469,6 +551,7 @@ impl eframe::App for BlazeApp {
         self.poll_waveform();
         self.poll_silence();
         self.poll_keyframes(ctx);
+        self.poll_exports();
 
         // Global transport shortcut: handle Space at the app level rather
         // than inside a particular panel, so it works regardless of focus
@@ -1062,8 +1145,10 @@ impl eframe::App for BlazeApp {
 
                         let blaze_reason = if self.selected_path.is_none() {
                             Some("Import a video to begin.")
+                        } else if self.loading || self.media_info.is_none() {
+                            Some("Wait for video analysis to finish.")
                         } else if self.active_mode != Some(EditingMode::Blaze) {
-                            Some("Requires Blaze Mode. Switch modes to enable Blaze Export.")
+                            Some("Requires Blaze Mode. Switch to Blaze Mode to enable this export.")
                         } else if self.keyframes_running {
                             Some("Waiting for keyframe analysis to finish.")
                         } else if self.keyframe_error.is_some() || self.keyframes.is_empty() {
@@ -1071,25 +1156,34 @@ impl eframe::App for BlazeApp {
                         } else if self.edit_regions.is_empty() {
                             Some("Create at least one cut region before exporting.")
                         } else {
-                            Some("Blaze Export pipeline is awaiting integration.")
+                            None
                         };
 
-                        let blaze_eligible = self.selected_path.is_some()
-                            && self.active_mode == Some(EditingMode::Blaze)
-                            && !self.keyframes_running
-                            && self.keyframe_error.is_none()
-                            && !self.keyframes.is_empty()
-                            && !self.edit_regions.is_empty();
-
-                        ui.add_enabled(
-                            false,
-                            egui::Button::new(egui::RichText::new("Blaze Export").strong())
+                        let blaze_eligible = blaze_reason.is_none() && !self.export_running;
+                        let blaze_clicked = ui.add_enabled(
+                            blaze_eligible,
+                            egui::Button::new(egui::RichText::new(
+                                if self.export_running { "Blaze Export — Exporting…" } else { "Blaze Export" }
+                            ).strong())
                                 .min_size(egui::vec2(ui.available_width(), 38.0)),
-                        );
+                        ).clicked();
+
                         if let Some(reason) = blaze_reason {
                             ui.label(egui::RichText::new(reason).small().color(ui.visuals().weak_text_color()));
-                        } else if blaze_eligible {
-                            ui.label(egui::RichText::new("Ready for stream-copy export.").small());
+                        }
+                        if blaze_clicked {
+                            if let Some(source) = self.selected_path.clone() {
+                                let extension = source.extension().and_then(|s| s.to_str()).unwrap_or("mkv").to_string();
+                                let stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
+                                let filename = format!("{stem}_Blaze.{extension}");
+                                if let Some(output) = FileDialog::new()
+                                    .add_filter("Video", &[extension.as_str()])
+                                    .set_file_name(&filename)
+                                    .save_file()
+                                {
+                                    self.start_blaze_export(output, ui.ctx());
+                                }
+                            }
                         }
 
                         ui.add_space(8.0);
@@ -1109,25 +1203,58 @@ impl eframe::App for BlazeApp {
                         ui.add_space(8.0);
                         ui.strong("Timestamp Export");
                         ui.label(
-                            egui::RichText::new("Export edit decisions for use in a non-linear editor.")
+                            egui::RichText::new("Export the current edit as an editable NLE timeline.")
                                 .small()
                                 .color(ui.visuals().weak_text_color()),
                         );
                         ui.add_space(8.0);
 
-                        let timestamp_formats = ["DaVinci", "EDL", "FCPXML", "Premiere XML"];
-                        for format in timestamp_formats {
-                            ui.add_enabled(
-                                false,
-                                egui::Button::new(format)
+                        let timestamp_available = self.selected_path.is_some()
+                            && self.media_info.is_some()
+                            && !self.loading
+                            && !self.export_running;
+                        let timestamp_formats = [
+                            ("DaVinci Resolve XML", "xml", "DaVinci_Resolve", InterchangeFormat::DavinciResolve),
+                            ("EDL", "edl", "EDL", InterchangeFormat::Edl),
+                            ("FCPXML", "fcpxml", "FCPXML", InterchangeFormat::Fcpxml),
+                            ("Premiere XML", "xml", "Premiere", InterchangeFormat::PremiereXml),
+                        ];
+
+                        for (label, extension, suffix, format) in timestamp_formats {
+                            let clicked = ui.add_enabled(
+                                timestamp_available,
+                                egui::Button::new(label)
                                     .min_size(egui::vec2(ui.available_width(), 34.0)),
-                            );
+                            ).clicked();
+                            if clicked {
+                                if let Some(source) = self.selected_path.clone() {
+                                    let stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
+                                    let filename = format!("{stem}_{suffix}.{extension}");
+                                    let output = FileDialog::new()
+                                        .add_filter("Timeline interchange", &[extension])
+                                        .set_file_name(&filename)
+                                        .save_file();
+                                    if let Some(output) = output {
+                                        self.start_interchange_export(format, output, ui.ctx());
+                                    }
+                                }
+                            }
                         }
-                        ui.label(
-                            egui::RichText::new("Interchange export is not connected yet.")
-                                .small()
-                                .color(ui.visuals().weak_text_color()),
-                        );
+
+                        if !timestamp_available {
+                            ui.label(egui::RichText::new("Import a video to enable timestamp exports.")
+                                .small().color(ui.visuals().weak_text_color()));
+                        }
+
+                        if self.export_running {
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| { ui.spinner(); ui.small("Preparing export…"); });
+                        }
+                        if let Some((success, message)) = &self.export_status {
+                            ui.add_space(8.0);
+                            let color = if *success { egui::Color32::LIGHT_GREEN } else { egui::Color32::LIGHT_RED };
+                            ui.colored_label(color, message);
+                        }
                     }
                 }
 
