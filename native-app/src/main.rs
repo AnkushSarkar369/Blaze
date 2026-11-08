@@ -15,7 +15,10 @@ mod waveform;
 use waveform::Waveform;
 
 type ProbeResult = (u64, Result<(PathBuf, MediaInfo), String>);
-type WaveformResult = (u64, Result<Vec<u8>, String>);
+enum WaveformMessage {
+    Progress { generation: u64, fraction: f32 },
+    Complete { generation: u64, result: Result<Vec<u8>, String> },
+}
 
 struct BlazeApp {
     playback: Playback,
@@ -28,8 +31,9 @@ struct BlazeApp {
     probe_tx: Sender<ProbeResult>,
     probe_rx: Receiver<ProbeResult>,
     waveform: Option<Waveform>,
-    waveform_tx: Sender<WaveformResult>,
-    waveform_rx: Receiver<WaveformResult>,
+    waveform_tx: Sender<WaveformMessage>,
+    waveform_rx: Receiver<WaveformMessage>,
+    waveform_progress: Option<f32>,
 }
 
 impl BlazeApp {
@@ -64,6 +68,7 @@ impl BlazeApp {
             waveform: None,
             waveform_tx,
             waveform_rx,
+            waveform_progress: None,
         })
     }
 
@@ -79,6 +84,7 @@ impl BlazeApp {
         self.playback_position = 0.0;
         self.media_info = None;
         self.waveform = None;
+        self.waveform_progress = Some(0.0);
         self.selected_path = Some(path.clone());
 
         if let Err(error) = self.playback.load(&path) {
@@ -115,15 +121,29 @@ impl BlazeApp {
 
                     if info.has_audio {
                         let channels = info.audio_channels.unwrap_or(2).clamp(1, 32) as usize;
+                        let duration = info.duration;
                         let sender = self.waveform_tx.clone();
                         let repaint = ctx.clone();
                         std::thread::spawn(move || {
                             let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
                             let engine = MediaEngine::new([tools]);
-                            let result = engine.generate_waveform(&path.to_string_lossy(), channels);
-                            let _ = sender.send((generation, result));
+                            let result = engine.generate_waveform_with_progress(
+                                &path.to_string_lossy(),
+                                channels,
+                                duration,
+                                |fraction| {
+                                    let _ = sender.send(WaveformMessage::Progress {
+                                        generation,
+                                        fraction,
+                                    });
+                                    repaint.request_repaint();
+                                },
+                            );
+                            let _ = sender.send(WaveformMessage::Complete { generation, result });
                             repaint.request_repaint();
                         });
+                    } else {
+                        self.waveform_progress = None;
                     }
 
                     self.media_info = Some(info);
@@ -133,6 +153,7 @@ impl BlazeApp {
                     self.selected_path = None;
                     self.media_info = None;
                     self.waveform = None;
+                    self.waveform_progress = None;
                     self.playback_position = 0.0;
                     self.playback.stop();
                     eprintln!("Blaze: media analysis failed: {error}");
@@ -142,23 +163,32 @@ impl BlazeApp {
     }
 
     fn poll_waveform(&mut self) {
-        while let Ok((generation, result)) = self.waveform_rx.try_recv() {
-            if generation != self.probe_generation {
-                continue;
-            }
-
-            match result {
-                Ok(bytes) => match Waveform::from_bytes(&bytes) {
-                    Ok(waveform) => self.waveform = Some(waveform),
-                    Err(error) => {
-                        self.waveform = None;
-                        eprintln!("Blaze: waveform data was invalid: {error}");
-                    }
-                },
-                Err(error) => {
-                    self.waveform = None;
-                    eprintln!("Blaze: waveform generation failed: {error}");
+        while let Ok(message) = self.waveform_rx.try_recv() {
+            match message {
+                WaveformMessage::Progress { generation, fraction }
+                    if generation == self.probe_generation =>
+                {
+                    self.waveform_progress = Some(fraction.clamp(0.0, 1.0));
                 }
+                WaveformMessage::Complete { generation, result }
+                    if generation == self.probe_generation =>
+                {
+                    self.waveform_progress = None;
+                    match result {
+                        Ok(bytes) => match Waveform::from_bytes(&bytes) {
+                            Ok(waveform) => self.waveform = Some(waveform),
+                            Err(error) => {
+                                self.waveform = None;
+                                eprintln!("Blaze: waveform data was invalid: {error}");
+                            }
+                        },
+                        Err(error) => {
+                            self.waveform = None;
+                            eprintln!("Blaze: waveform generation failed: {error}");
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -175,6 +205,7 @@ impl eframe::App for BlazeApp {
             self.selected_path = None;
             self.media_info = None;
             self.waveform = None;
+            self.waveform_progress = None;
             self.playback_position = 0.0;
         }
 
