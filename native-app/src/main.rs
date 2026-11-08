@@ -108,7 +108,7 @@ fn mode_selection_card(
     );
     let group_width = 22.0 + 9.0 + title_galley.size().x;
     let group_left = rect.center().x - group_width * 0.5;
-    let icon_center = egui::pos2(group_left + 10.0, rect.top() + 27.0);
+    let icon_center = egui::pos2(group_left + 10.0, rect.top() + 42.0);
 
     match icon {
         ModeCardIcon::Blaze => {
@@ -168,7 +168,7 @@ fn mode_selection_card(
     painter.galley(
         egui::pos2(
             rect.center().x - description_galley.size().x * 0.5,
-            rect.top() + 52.0,
+            rect.top() + 64.0,
         ),
         description_galley,
         description_color,
@@ -1241,7 +1241,7 @@ impl eframe::App for BlazeApp {
                         let blaze_response = mode_selection_card(
                             ui,
                             "Blaze Mode",
-                            "Keyframe-aligned cuts for faster stream-copy editing.",
+                            "Make quick cuts while keeping the original video quality.",
                             ModeCardIcon::Blaze,
                             self.active_mode == Some(EditingMode::Blaze),
                             blaze_ready,
@@ -1280,7 +1280,7 @@ impl eframe::App for BlazeApp {
                         let precise_response = mode_selection_card(
                             ui,
                             "Precision Mode",
-                            "Unrestricted cut boundaries when exact edit placement matters.",
+                            "Choose exactly where every cut begins and ends.",
                             ModeCardIcon::Precision,
                             self.active_mode == Some(EditingMode::Precise),
                             true,
@@ -1291,6 +1291,9 @@ impl eframe::App for BlazeApp {
                         }
                     }
                     ToolTab::BlazeMode | ToolTab::PreciseMode => {
+                        // egui sliders use Spacing::slider_width internally; add_sized alone
+                        // only sizes the surrounding widget allocation. Match the panel width.
+                        ui.spacing_mut().slider_width = ui.available_width() - 12.0;
                         let expert_mode_changed =
                             ui.checkbox(&mut self.expert_mode, "Expert Mode").changed();
                         if expert_mode_changed && self.expert_mode {
@@ -1438,7 +1441,6 @@ impl eframe::App for BlazeApp {
                                     .trailing_fill(false),
                             );
                             preset_scale_labels(ui, &DETECTION_LABELS, self.detection_level);
-                            ui.small("Default is the midpoint. Adjust in either direction.");
 
                             ui.add_space(18.0);
                             const PADDING_LABELS: [&str; 3] = [
@@ -1471,7 +1473,7 @@ impl eframe::App for BlazeApp {
                                     .trailing_fill(false),
                             );
                             preset_scale_labels(ui, &PADDING_LABELS, self.padding_level);
-                            ui.small("Normal is the midpoint. Move either way to preserve more or less audio.");
+                            ui.small("Choose how much audio to preserve around each detected pause.");
 
                             ui.add_space(18.0);
                             ui.horizontal(|ui| {
