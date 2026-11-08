@@ -9,9 +9,13 @@ use eframe::egui;
 use playback::Playback;
 use rfd::FileDialog;
 
-mod playback;\nmod waveform;\n\nuse waveform::Waveform;
+mod playback;
+mod waveform;
 
-type ProbeResult = (u64, Result<(PathBuf, MediaInfo), String>);\ntype WaveformResult = (u64, Result<Vec<u8>, String>);
+use waveform::Waveform;
+
+type ProbeResult = (u64, Result<(PathBuf, MediaInfo), String>);
+type WaveformResult = (u64, Result<Vec<u8>, String>);
 
 struct BlazeApp {
     playback: Playback,
@@ -162,7 +166,8 @@ impl BlazeApp {
 
 impl eframe::App for BlazeApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.poll_probe(ctx);\n        self.poll_waveform();
+        self.poll_probe(ctx);
+        self.poll_waveform();
 
         if let Some(error) = self.playback.poll_error() {
             eprintln!("Blaze: {error}");
