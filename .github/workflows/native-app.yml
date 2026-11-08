@@ -25,6 +25,12 @@ jobs:
             libssl-dev \
             libgl1-mesa-dev \
             libdbus-1-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxi-dev \
+            libxcursor-dev \
+            libxinerama-dev \
             pkg-config
       - name: Check native application
         run: cargo check --manifest-path native-app/Cargo.toml
