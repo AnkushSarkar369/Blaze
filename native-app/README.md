@@ -8,15 +8,15 @@ Embedded playback is provided by libmpv through the mpv render API. Video is ren
 
 The player uses MPV's `auto-safe` hardware-decoding mode. Hardware decoding depends on the GPU, driver, and source codec; unsupported formats fall back to software decoding.
 
-## Fedora development dependency
+## Fedora playback dependency
 
-Install the libmpv development package:
+Install the libmpv runtime library:
 
 ```bash
-sudo dnf install mpv-devel
+sudo dnf install mpv-libs
 ```
 
-This supplies the libmpv shared library and the pkg-config metadata required to link the Rust bindings.
+Blaze uses the hand-written Rust bindings without requiring mpv headers or pkg-config metadata. Its build script locates the versioned runtime library (`libmpv.so.2`) and creates a temporary linker-name symlink inside Cargo's build directory. No system files are modified, and the application remains dynamically linked to libmpv at runtime.
 
 ## Run
 
