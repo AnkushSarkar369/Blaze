@@ -29,10 +29,10 @@ impl Playback {
                 .set_property("vo", "libmpv")?
                 .set_property("hwdec", "auto-safe")?
                 .set_property("keep-open", "yes")?
-                .set_property("osc", "no")?
-                .set_property("osd-level", "0")?
-                .set_property("input-default-bindings", "no")?
-                .set_property("input-vo-keyboard", "no")?
+                .set_property("osc", false)?
+                .set_property("osd-level", 0_i64)?
+                .set_property("input-default-bindings", false)?
+                .set_property("input-vo-keyboard", false)?
                 .build()?,
         );
 
