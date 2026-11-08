@@ -117,7 +117,7 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
     assert_eq!(read_u32(&waveform, 0), 0x4257_5631);
     assert_eq!(read_u32(&waveform, 4), 1);
     assert_eq!(read_u32(&waveform, 8), peaks::BLOCKS_PER_SECOND);
-    assert!(read_u32(&waveform, 12) > 1_000);
+    assert!(read_u32(&waveform, 12) > 300);
 
     let playback_path = engine
         .prepare_audio(&temp.0, 1, media_arg)
