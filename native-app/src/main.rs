@@ -76,6 +76,7 @@ struct EditRegion {
 
 type ProbeResult = (u64, Result<(PathBuf, MediaInfo), String>);
 type SilenceResult = (u64, Result<Vec<SilenceInterval>, String>);
+type KeyframeResult = (u64, Result<Vec<f64>, String>);
 enum WaveformMessage {
     Progress { generation: u64, fraction: f32 },
     Complete { generation: u64, result: Result<Vec<u8>, String> },
@@ -99,6 +100,12 @@ struct BlazeApp {
     silence_rx: Receiver<SilenceResult>,
     silence_generation: u64,
     silence_running: bool,
+    keyframe_tx: Sender<KeyframeResult>,
+    keyframe_rx: Receiver<KeyframeResult>,
+    keyframe_generation: u64,
+    keyframes: Vec<f64>,
+    keyframes_running: bool,
+    keyframe_error: Option<String>,
     detection_level: usize,
     padding_level: usize,
     minimum_silence_ms: u32,
@@ -137,6 +144,7 @@ impl BlazeApp {
         let (probe_tx, probe_rx) = mpsc::channel();
         let (waveform_tx, waveform_rx) = mpsc::channel();
         let (silence_tx, silence_rx) = mpsc::channel();
+        let (keyframe_tx, keyframe_rx) = mpsc::channel();
 
         Ok(Self {
             playback,
@@ -156,6 +164,12 @@ impl BlazeApp {
             silence_rx,
             silence_generation: 0,
             silence_running: false,
+            keyframe_tx,
+            keyframe_rx,
+            keyframe_generation: 0,
+            keyframes: Vec::new(),
+            keyframes_running: false,
+            keyframe_error: None,
             detection_level: 2,
             padding_level: 1,
             minimum_silence_ms: 300,
@@ -174,6 +188,52 @@ impl BlazeApp {
             show_help: !has_seen_first_run_help(),
             first_run_help_seen: has_seen_first_run_help(),
         })
+    }
+
+    fn snap_to_keyframe(&self, time: f64) -> Option<f64> {
+        self.keyframes.iter().copied().min_by(|a, b| {
+            (a - time).abs().total_cmp(&(b - time).abs())
+        })
+    }
+
+    fn snap_boundary(&self, time: f64, other: f64, is_start: bool) -> Option<f64> {
+        self.keyframes.iter().copied()
+            .filter(|candidate| if is_start { *candidate < other } else { *candidate > other })
+            .min_by(|a, b| (a - time).abs().total_cmp(&(b - time).abs()))
+    }
+
+    fn start_keyframe_analysis(&mut self, path: PathBuf) {
+        self.keyframe_generation = self.keyframe_generation.wrapping_add(1);
+        let generation = self.keyframe_generation;
+        self.keyframes.clear();
+        self.keyframes_running = true;
+        self.keyframe_error = None;
+        let sender = self.keyframe_tx.clone();
+        std::thread::spawn(move || {
+            let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
+            let engine = MediaEngine::new([tools]);
+            let result = engine.detect_keyframes(&path.to_string_lossy());
+            let _ = sender.send((generation, result));
+        });
+    }
+
+    fn poll_keyframes(&mut self, ctx: &egui::Context) {
+        while let Ok((generation, result)) = self.keyframe_rx.try_recv() {
+            if generation != self.keyframe_generation { continue; }
+            self.keyframes_running = false;
+            match result {
+                Ok(mut keyframes) => {
+                    keyframes.sort_by(f64::total_cmp);
+                    keyframes.dedup_by(|a, b| (*a - *b).abs() < 0.000_001);
+                    self.keyframes = keyframes;
+                    if self.keyframes.is_empty() {
+                        self.keyframe_error = Some("No usable video keyframes were found.".to_string());
+                    }
+                }
+                Err(error) => self.keyframe_error = Some(error),
+            }
+            ctx.request_repaint();
+        }
     }
 
     fn start_silence_detection(&mut self, ctx: &egui::Context) {
@@ -254,6 +314,10 @@ impl BlazeApp {
         };
 
         self.probe_generation = self.probe_generation.wrapping_add(1);
+        self.keyframe_generation = self.keyframe_generation.wrapping_add(1);
+        self.keyframes.clear();
+        self.keyframes_running = false;
+        self.keyframe_error = None;
         self.silence_generation = self.silence_generation.wrapping_add(1);
         self.silence_running = false;
         let generation = self.probe_generation;
@@ -268,6 +332,7 @@ impl BlazeApp {
         self.waveform = None;
         self.waveform_progress = Some(0.0);
         self.selected_path = Some(path.clone());
+        self.start_keyframe_analysis(path.clone());
 
         if let Err(error) = self.playback.load(&path) {
             eprintln!("Blaze: {error}");
@@ -382,6 +447,7 @@ impl eframe::App for BlazeApp {
         self.poll_probe(ctx);
         self.poll_waveform();
         self.poll_silence();
+        self.poll_keyframes(ctx);
 
         // Global transport shortcut: handle Space at the app level rather
         // than inside a particular panel, so it works regardless of focus
@@ -398,16 +464,22 @@ impl eframe::App for BlazeApp {
         let mark_end_pressed = ctx.input_mut(|input| {
             input.consume_key(egui::Modifiers::NONE, egui::Key::M)
         });
+        let blaze_mode = self.active_tool_tab == ToolTab::BlazeMode;
         if self.selected_path.is_some() && mark_start_pressed {
             if self.pending_region_start.is_some() {
                 self.pending_region_start = None;
             } else {
-                self.pending_region_start = Some(self.playback_position);
+                let start = if blaze_mode {
+                    self.snap_to_keyframe(self.playback_position).unwrap_or(self.playback_position)
+                } else { self.playback_position };
+                self.pending_region_start = Some(start);
             }
         }
         if self.selected_path.is_some() && mark_end_pressed {
             if let Some(start) = self.pending_region_start {
-                let end = self.playback_position;
+                let end = if blaze_mode {
+                    self.snap_boundary(self.playback_position, start, false).unwrap_or(self.playback_position)
+                } else { self.playback_position };
                 if end > start {
                     self.edit_regions.push(EditRegion { start, end });
                     self.pending_region_start = None;
@@ -622,7 +694,11 @@ impl eframe::App for BlazeApp {
                                     + ((pointer.x - lane.left()) / lane.width()).clamp(0.0, 1.0) as f64
                                         * visible_duration)
                                     .clamp(0.0, duration);
-                                if is_start {
+                                if self.active_tool_tab == ToolTab::BlazeMode {
+                                    if let Some(snapped) = self.snap_boundary(time, if is_start { region.end } else { region.start }, is_start) {
+                                        if is_start { region.start = snapped; } else { region.end = snapped; }
+                                    }
+                                } else if is_start {
                                     region.start = time.min(region.end - 0.001);
                                 } else {
                                     region.end = time.max(region.start + 0.001).min(duration);
@@ -663,12 +739,12 @@ impl eframe::App for BlazeApp {
                         handle_interaction |= response.hovered() || response.dragged();
                         if response.dragged() {
                             if let Some(pointer) = response.interact_pointer_pos() {
-                                self.pending_region_start = Some(
-                                    (self.timeline_offset
-                                        + ((pointer.x - lane.left()) / lane.width()).clamp(0.0, 1.0) as f64
-                                            * visible_duration)
-                                        .clamp(0.0, duration),
-                                );
+                                let time = (self.timeline_offset
+                                    + ((pointer.x - lane.left()) / lane.width()).clamp(0.0, 1.0) as f64
+                                        * visible_duration).clamp(0.0, duration);
+                                self.pending_region_start = Some(if self.active_tool_tab == ToolTab::BlazeMode {
+                                    self.snap_to_keyframe(time).unwrap_or(time)
+                                } else { time });
                             }
                         }
                         ui.painter().line_segment(
@@ -747,6 +823,20 @@ impl eframe::App for BlazeApp {
                 ui.separator();
                 ui.add_space(8.0);
                 ui.label(self.active_tool_tab.description());
+
+                if self.active_tool_tab == ToolTab::BlazeMode {
+                    ui.add_space(12.0);
+                    if self.keyframes_running {
+                        ui.horizontal(|ui| { ui.spinner(); ui.label("Analysing GOP / keyframe structure…"); });
+                    } else if let Some(error) = &self.keyframe_error {
+                        ui.colored_label(egui::Color32::LIGHT_RED, format!("Keyframe analysis failed: {error}"));
+                    } else if !self.keyframes.is_empty() {
+                        ui.label(format!("{} keyframes detected", self.keyframes.len()));
+                        ui.small("GOP snapping is active. N/M markers and dragged cut boundaries snap to the nearest keyframe.");
+                    } else {
+                        ui.small("Import a video to analyse its GOP structure.");
+                    }
+                }
 
                 if self.active_tool_tab == ToolTab::PreciseMode {
                     ui.add_space(16.0);
