@@ -815,6 +815,7 @@ impl eframe::App for BlazeApp {
             .default_size(310.0)
             .min_size(240.0)
             .show(ui, |ui| {
+                egui::Frame::group(ui.style()).show(ui, |ui| {
                 ui.heading("Mode Selector");
                 ui.add_space(8.0);
 
@@ -855,8 +856,10 @@ impl eframe::App for BlazeApp {
                     self.active_mode = Some(EditingMode::Precise);
                 }
                 ui.label("Unrestricted cut boundaries. Use when exact edit placement matters more than stream-copy constraints.");
+                });
 
-                ui.separator();
+                ui.add_space(8.0);
+                
                 ui.add_space(8.0);
                 if let Some(mode) = self.active_mode {
                     ui.heading(mode.label());
@@ -864,7 +867,10 @@ impl eframe::App for BlazeApp {
                 }
 
                 if self.active_mode.is_some() {
-                    ui.add_space(16.0);
+                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.heading(self.active_mode.unwrap().label());
+                    ui.add_space(12.0);
+                    
                     ui.checkbox(&mut self.expert_mode, "Expert Mode");
                     ui.add_space(12.0);
 
@@ -1000,10 +1006,16 @@ impl eframe::App for BlazeApp {
                         ui.spinner();
                         ui.small("Analysing audio. A rescan replaces existing regions.");
                     }
+                    });
                 } else {
                     ui.add_space(12.0);
                     ui.label("Select an editing mode to configure silence detection and timeline editing.");
                 }
+
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.heading("Export");
+                    ui.label("Export configuration will appear here.");
+                });
 
                 // Keep the resizable panel at the user-selected width instead of
                 // allowing its contents to shrink it to their intrinsic width.
