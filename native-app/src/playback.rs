@@ -160,6 +160,9 @@ impl Playback {
         self.mpv
             .command(&["loadfile", path.as_ref(), "replace"])
             .map_err(|error| format!("MPV could not open this file: {error}"))?;
+        self.mpv
+            .set_property("pause", false)
+            .map_err(|error| format!("MPV could not start playback: {error}"))?;
 
         if let Some(surface) = &self.surface {
             if let Ok(mut surface) = surface.lock() {
