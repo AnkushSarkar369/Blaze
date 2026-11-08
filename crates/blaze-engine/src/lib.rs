@@ -6,6 +6,7 @@
 
 pub mod peaks;
 pub mod silence;
+pub mod export;
 pub mod player;
 mod frames;
 
@@ -27,6 +28,7 @@ pub struct MediaInfo {
     pub video_codec: Option<String>,
     pub audio_codec: Option<String>,
     pub audio_channels: Option<u32>,
+    pub audio_sample_rate: Option<u32>,
     pub has_audio: bool,
 }
 
@@ -164,7 +166,7 @@ impl MediaEngine {
                 "-v",
                 "error",
                 "-show_entries",
-                "format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate,duration,channels",
+                "format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate,duration,channels,sample_rate",
                 "-of",
                 "json",
                 path,
@@ -209,6 +211,10 @@ impl MediaEngine {
             audio_channels: audio
                 .and_then(|stream| stream["channels"].as_u64())
                 .map(|value| value as u32),
+            audio_sample_rate: audio
+                .and_then(|stream| stream["sample_rate"].as_str()
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .or_else(|| stream["sample_rate"].as_u64().map(|value| value as u32))),
             has_audio: audio.is_some(),
         })
     }
