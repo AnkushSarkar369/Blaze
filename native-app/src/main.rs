@@ -34,6 +34,8 @@ struct BlazeApp {
     waveform_tx: Sender<WaveformMessage>,
     waveform_rx: Receiver<WaveformMessage>,
     waveform_progress: Option<f32>,
+    timeline_zoom: f32,
+    timeline_offset: f64,
 }
 
 impl BlazeApp {
@@ -69,6 +71,8 @@ impl BlazeApp {
             waveform_tx,
             waveform_rx,
             waveform_progress: None,
+            timeline_zoom: 1.0,
+            timeline_offset: 0.0,
         })
     }
 
@@ -82,6 +86,8 @@ impl BlazeApp {
         self.loading = true;
         self.seeking = false;
         self.playback_position = 0.0;
+        self.timeline_zoom = 1.0;
+        self.timeline_offset = 0.0;
         self.media_info = None;
         self.waveform = None;
         self.waveform_progress = Some(0.0);
@@ -228,6 +234,51 @@ impl eframe::App for BlazeApp {
                 let available = ui.available_rect_before_wrap();
                 let lane = available.shrink2(egui::vec2(10.0, 8.0));
 
+                let duration = self
+                    .media_info
+                    .as_ref()
+                    .map(|info| info.duration)
+                    .filter(|duration| duration.is_finite() && *duration > 0.0)
+                    .unwrap_or_else(|| self.playback.duration())
+                    .max(0.01);
+
+                let can_seek = self.selected_path.is_some() && self.waveform_progress.is_none();
+                let sense = if can_seek {
+                    egui::Sense::click_and_drag()
+                } else {
+                    egui::Sense::hover()
+                };
+                let response = ui.allocate_rect(lane, sense);
+
+                // Timeline navigation is deliberately modifier-based so ordinary
+                // wheel input does not interfere with the rest of the interface.
+                if can_seek && response.hovered() {
+                    let (modifiers, scroll) = ui.input(|input| {
+                        (input.modifiers, input.smooth_scroll_delta)
+                    });
+                    let visible_duration = (duration / self.timeline_zoom as f64).max(0.01);
+                    if modifiers.ctrl && scroll.y.abs() > 0.0 {
+                        let pointer_x = ui.input(|input| input.pointer.hover_pos())
+                            .map(|position| position.x)
+                            .unwrap_or_else(|| lane.center().x);
+                        let anchor = ((pointer_x - lane.left()) / lane.width()).clamp(0.0, 1.0) as f64;
+                        let anchor_time = self.timeline_offset + anchor * visible_duration;
+                        let zoom_factor = (scroll.y * 0.003).exp();
+                        self.timeline_zoom = (self.timeline_zoom * zoom_factor as f32).clamp(1.0, 128.0);
+                        let new_visible = duration / self.timeline_zoom as f64;
+                        self.timeline_offset = anchor_time - anchor * new_visible;
+                    } else if modifiers.alt && scroll.y.abs() > 0.0 {
+                        self.timeline_offset -= scroll.y as f64 * visible_duration * 0.0015;
+                    }
+
+                    let visible_duration = duration / self.timeline_zoom as f64;
+                    self.timeline_offset = self.timeline_offset.clamp(0.0, (duration - visible_duration).max(0.0));
+                }
+
+                let visible_duration = duration / self.timeline_zoom as f64;
+                let view_start = self.timeline_offset / duration;
+                let view_end = ((self.timeline_offset + visible_duration) / duration).min(1.0);
+
                 ui.painter().rect_filled(
                     lane,
                     egui::CornerRadius::same(3),
@@ -257,7 +308,7 @@ impl eframe::App for BlazeApp {
                         egui::Color32::from_rgb(220, 220, 220),
                     );
                 } else if let Some(waveform) = &self.waveform {
-                    waveform.paint(ui.painter(), lane);
+                    waveform.paint_range(ui.painter(), lane, view_start, view_end);
                 } else {
                     ui.painter().line_segment(
                         [lane.left_center(), lane.right_center()],
@@ -265,16 +316,11 @@ impl eframe::App for BlazeApp {
                     );
                 }
 
-                let duration = self
-                    .media_info
-                    .as_ref()
-                    .map(|info| info.duration)
-                    .filter(|duration| duration.is_finite() && *duration > 0.0)
-                    .unwrap_or_else(|| self.playback.duration())
-                    .max(0.01);
-
-                if self.selected_path.is_some() && self.waveform_progress.is_none() {
-                    let progress = (self.playback_position / duration).clamp(0.0, 1.0) as f32;
+                if self.selected_path.is_some() && self.waveform_progress.is_none()
+                    && self.playback_position >= self.timeline_offset
+                    && self.playback_position <= self.timeline_offset + visible_duration
+                {
+                    let progress = ((self.playback_position - self.timeline_offset) / visible_duration) as f32;
                     let playhead_x = lane.left() + lane.width() * progress;
                     ui.painter().line_segment(
                         [
@@ -285,18 +331,10 @@ impl eframe::App for BlazeApp {
                     );
                 }
 
-                let can_seek = self.selected_path.is_some() && self.waveform_progress.is_none();
-                let sense = if can_seek {
-                    egui::Sense::click_and_drag()
-                } else {
-                    egui::Sense::hover()
-                };
-                let response = ui.allocate_rect(lane, sense);
-
                 if can_seek {
                     let pointer_time = |position: egui::Pos2| {
                         let progress = ((position.x - lane.left()) / lane.width()).clamp(0.0, 1.0);
-                        progress as f64 * duration
+                        self.timeline_offset + progress as f64 * visible_duration
                     };
 
                     if response.dragged() {
