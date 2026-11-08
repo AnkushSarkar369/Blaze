@@ -704,7 +704,7 @@ impl eframe::App for BlazeApp {
                 } else { 16.0 / 9.0 };
                 let preview_height = (root_rect.height() - 220.0 - 54.0).max(160.0);
                 let preview_width = (preview_height * aspect + 14.0)
-                    .clamp(360.0, (root_rect.width() - 240.0).max(360.0));
+                    .clamp(240.0, (root_rect.width() - 240.0).max(240.0));
                 let tools_width = (root_rect.width() - preview_width).max(240.0);
                 let panel_id = ui.scope_id().with("tools");
                 let panel_rect = egui::Rect::from_min_size(
@@ -1586,7 +1586,15 @@ impl eframe::App for BlazeApp {
                 egui::pos2(rect.left(), rect.center().y),
                 egui::vec2(10.0, 62.0),
             );
-            ui.painter().rect_filled(handle, egui::CornerRadius::same(5), handle_fill);
+            let response = ui.interact(
+                handle,
+                egui::Id::new("tools-resize-affordance"),
+                egui::Sense::hover(),
+            ).on_hover_text("Drag to resize");
+            let fill = if response.hovered() {
+                egui::Color32::from_rgb(67, 71, 75)
+            } else { handle_fill };
+            ui.painter().rect_filled(handle, egui::CornerRadius::same(5), fill);
             for offset in [-8.0_f32, 0.0, 8.0] {
                 ui.painter().circle_filled(
                     egui::pos2(handle.center().x, handle.center().y + offset),
@@ -1600,7 +1608,15 @@ impl eframe::App for BlazeApp {
                 egui::pos2(rect.center().x, rect.top()),
                 egui::vec2(62.0, 10.0),
             );
-            ui.painter().rect_filled(handle, egui::CornerRadius::same(5), handle_fill);
+            let response = ui.interact(
+                handle,
+                egui::Id::new("timeline-resize-affordance"),
+                egui::Sense::hover(),
+            ).on_hover_text("Drag to resize");
+            let fill = if response.hovered() {
+                egui::Color32::from_rgb(67, 71, 75)
+            } else { handle_fill };
+            ui.painter().rect_filled(handle, egui::CornerRadius::same(5), fill);
             for offset in [-8.0_f32, 0.0, 8.0] {
                 ui.painter().circle_filled(
                     egui::pos2(handle.center().x + offset, handle.center().y),
