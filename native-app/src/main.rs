@@ -728,6 +728,21 @@ impl eframe::App for BlazeApp {
                                             || (response.changed() && !response.dragged() && !self.seeking)
                                         {
                                             self.seeking = false;
+
+                                            // A manual seek can target a point outside the
+                                            // zoomed timeline viewport. Move the viewport only
+                                            // when needed; preserve its position when the target
+                                            // is already visible.
+                                            let visible_duration = duration / self.timeline_zoom as f64;
+                                            let view_end = self.timeline_offset + visible_duration;
+                                            if self.playback_position < self.timeline_offset
+                                                || self.playback_position > view_end
+                                            {
+                                                self.timeline_offset = (self.playback_position
+                                                    - visible_duration * 0.8)
+                                                    .clamp(0.0, (duration - visible_duration).max(0.0));
+                                            }
+
                                             if let Err(error) = self.playback.seek(self.playback_position) {
                                                 eprintln!("Blaze: {error}");
                                             }
