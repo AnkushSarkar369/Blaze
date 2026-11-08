@@ -1571,7 +1571,7 @@ impl eframe::App for BlazeApp {
                                             [time_width, 26.0],
                                             egui::Label::new(
                                                 egui::RichText::new(time_label)
-                                                    .proportional(13.5),
+                                                    .font(egui::FontId::proportional(13.5)),
                                             ),
                                         );
 
