@@ -328,7 +328,9 @@ fn build_edl(source: &Path, info: &MediaInfo, rate: FrameRate, segments: &[Segme
         let source_out = segment.source_out;
         let record_in = timecode_base + segment.record_in;
         let record_out = record_in + segment.duration();
-        let channels: &[&str] = if info.has_audio { &["V", "A"] } else { &["V"] };
+        let video_and_audio = ["V", "A"];
+        let video_only = ["V"];
+        let channels: &[&str] = if info.has_audio { &video_and_audio } else { &video_only };
         for channel in channels {
             out.push_str(&format!("{n:03}  {reel:<8} {channel}     C        {} {} {} {}\n",
                 timecode(source_in, rate), timecode(source_out, rate),
