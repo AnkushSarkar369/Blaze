@@ -1,35 +1,39 @@
-# Blaze native application shell
+# Blaze native application
 
-This is the first native application stage. It is deliberately isolated from the existing Tauri application so it can be built and evaluated without replacing the current working branch or changing the existing frontend.
+Blaze is a native Rust desktop application built with eframe/egui and OpenGL. It does not use a browser engine, WebView, React, HTML, CSS, JavaScript, or Tauri.
 
-## What this stage provides
+## Playback
 
-- A native desktop window created by eframe/winit and rendered with OpenGL through the Glow backend.
-- A resizable preview / tools / timeline layout.
-- Native file selection through rfd.
-- Background FFprobe metadata inspection through the existing `blaze-engine` crate.
-- The existing single-lane waveform requirement is documented in the timeline shell, but waveform data is not yet connected.
+Embedded playback is provided by libmpv through the mpv render API. Video is rendered directly into the existing egui preview; audio is handled by mpv and remains the source's original audio stream. FFmpeg remains responsible for media probing and the editing/export operations built on the existing `blaze-engine`.
 
-## What is deliberately not implemented
+The player uses MPV's `auto-safe` hardware-decoding mode. Hardware decoding depends on the GPU, driver, and source codec; unsupported formats fall back to software decoding.
 
-- Video playback, audio output, seeking, waveform rendering, editing, cuts, export, and the Tools workflow.
-- No browser engine, WebView, React, HTML, CSS, JavaScript, or Tauri runtime is used by this application.
-- The preview placeholder is not a simulated video player.
+## Fedora development dependency
 
-## Run on Fedora
+Install the libmpv development package:
 
-Install the native development packages required by eframe/winit and the OpenGL backend, then run:
+```bash
+sudo dnf install mpv-devel
+```
+
+This supplies the libmpv shared library and the pkg-config metadata required to link the Rust bindings.
+
+## Run
 
 ```bash
 cargo run --manifest-path native-app/Cargo.toml
 ```
 
-The app expects the existing media tools to be available in the repository's `BIN/` directory or in `~/bin`, matching the media engine's existing lookup behaviour.
+The app expects the existing FFmpeg/FFprobe tools in the repository's `BIN/` directory or in `~/bin`, matching the media engine's existing lookup behaviour.
 
-The isolated workspace generates its own `Cargo.lock`. It will be folded into the root workspace after the native foundation is validated.
+## Current scope
 
-## Playback architecture gate
+- Native application window and resizable preview / tools / timeline layout.
+- Native file picker inside the preview.
+- Embedded video and audio playback through libmpv.
+- Play/pause and seeking controls.
+- Background FFprobe metadata inspection through `blaze-engine`.
+- The single-lane waveform and timeline remain placeholders.
+- Editing, cuts, export, and the Tools workflow are not implemented yet.
 
-The next stage is a small, separately testable libmpv render-API integration against eframe's Glow context. mpv's current documentation recommends the render API over embedding a foreign native child window. The render API requires careful OpenGL context ownership and thread coordination; the mpv update callback must only wake the render thread, and render calls must run with the GL context current. No playback dependency is added until that integration is proven on the target Linux graphics stack.
-
-Audio must remain the original stereo stream. The waveform is only a merged visual envelope and must never be used as playback audio.
+Audio playback is independent of the waveform. The waveform will be a visual envelope only; it must never be used as the playback signal.
