@@ -7,14 +7,14 @@ use std::{
 fn main() {
     println!("cargo:rerun-if-env-changed=BLAZE_LIBMPV_PATH");
 
-    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("linux") {
+    if env::var("CARGO_CFG_TARGET_OS").ok().as_deref() != Some("linux") {
         println!("cargo:warning=Blaze's current libmpv linker shim is configured for Linux.");
         return;
     }
 
     let library = locate_libmpv().unwrap_or_else(|| {
         panic!(
-            "libmpv runtime library was not found. Install it with your system package manager              (Fedora: sudo dnf install mpv-libs)."
+            "libmpv runtime library was not found. Install it with your system package manager (Fedora: sudo dnf install mpv-libs)."
         )
     });
 
