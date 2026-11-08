@@ -1,0 +1,452 @@
+//! Stream-copy video export and NLE timeline interchange formats.
+//! Cut regions are DELETE ranges; exporters build the complementary KEEP ranges.
+
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+};
+
+use crate::{MediaEngine, MediaInfo};
+
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InterchangeFormat { DavinciResolve, Edl, Fcpxml, PremiereXml }
+
+#[derive(Clone, Debug)]
+pub struct ExportReport {
+    pub output_path: PathBuf,
+    pub expected_duration: f64,
+    pub actual_duration: f64,
+    pub warning: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FrameRate { numerator: u32, denominator: u32, nominal: u32, ntsc: bool }
+
+#[derive(Clone, Copy, Debug)]
+struct Segment { source_in: i64, source_out: i64, record_in: i64 }
+
+impl Segment { fn duration(self) -> i64 { self.source_out - self.source_in } }
+
+struct Workspace(PathBuf);
+impl Drop for Workspace {
+    fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+}
+
+fn frame_rate(fps: f64) -> Result<FrameRate, String> {
+    if !fps.is_finite() || fps <= 0.0 {
+        return Err("The source frame rate could not be determined.".into());
+    }
+    let common = [
+        (24000, 1001, 24, true), (30000, 1001, 30, true),
+        (60000, 1001, 60, true), (24, 1, 24, false), (25, 1, 25, false),
+        (30, 1, 30, false), (48, 1, 48, false), (50, 1, 50, false), (60, 1, 60, false),
+    ];
+    if let Some((num, den, nominal, ntsc)) = common.iter().copied()
+        .min_by(|a, b| {
+            let af = a.0 as f64 / a.1 as f64;
+            let bf = b.0 as f64 / b.1 as f64;
+            (af - fps).abs().total_cmp(&(bf - fps).abs())
+        })
+        .filter(|(num, den, _, _)| (fps - (*num as f64 / *den as f64)).abs() < 0.02)
+    {
+        return Ok(FrameRate { numerator: num, denominator: den, nominal, ntsc });
+    }
+    let nominal = fps.round().clamp(1.0, 240.0) as u32;
+    Ok(FrameRate { numerator: nominal, denominator: 1, nominal, ntsc: false })
+}
+
+fn seconds_to_frames(seconds: f64, rate: FrameRate) -> i64 {
+    (seconds.max(0.0) * rate.numerator as f64 / rate.denominator as f64).round() as i64
+}
+
+fn gcd(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 { let r = a % b; a = b; b = r; }
+    a.max(1)
+}
+
+fn frame_time(frames: i64, rate: FrameRate) -> String {
+    let numerator = (frames.max(0) as u64).saturating_mul(rate.denominator as u64);
+    let denominator = rate.numerator as u64;
+    let divisor = gcd(numerator, denominator);
+    format!("{}/{}s", numerator / divisor, denominator / divisor)
+}
+
+fn timecode(frames: i64, rate: FrameRate) -> String {
+    let frames = frames.max(0) as u64;
+    let fps = rate.nominal as u64;
+    let total_seconds = frames / fps;
+    format!("{:02}:{:02}:{:02}:{:02}",
+        total_seconds / 3600, (total_seconds / 60) % 60, total_seconds % 60, frames % fps)
+}
+
+fn xml_escape(value: &str) -> String {
+    value.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+        .replace('"', "&quot;").replace('\'', "&apos;")
+}
+
+fn file_url(path: &Path) -> String {
+    let absolute = if path.is_absolute() { path.to_path_buf() }
+        else { std::env::current_dir().unwrap_or_default().join(path) };
+    let raw = absolute.to_string_lossy();
+    let mut encoded = String::with_capacity(raw.len());
+    for byte in raw.as_bytes() {
+        if byte.is_ascii_alphanumeric() || b"/-_.~:".contains(byte) {
+            encoded.push(*byte as char);
+        } else { encoded.push_str(&format!("%{byte:02X}")); }
+    }
+    if encoded.starts_with('/') { format!("file://{encoded}") } else { format!("file:///{encoded}") }
+}
+
+fn reel_name(path: &Path) -> String {
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("BLAZE");
+    let clean: String = stem.chars().filter(|c| c.is_ascii_alphanumeric())
+        .take(8).map(|c| c.to_ascii_uppercase()).collect();
+    if clean.is_empty() { "BLAZE".into() } else { clean }
+}
+
+fn merged_deletions(ranges: &[(f64, f64)], duration: f64) -> Vec<(f64, f64)> {
+    let mut cuts: Vec<(f64, f64)> = ranges.iter().filter_map(|(start, end)| {
+        if !start.is_finite() || !end.is_finite() { return None; }
+        let start = start.clamp(0.0, duration);
+        let end = end.clamp(0.0, duration);
+        (end > start).then_some((start, end))
+    }).collect();
+    cuts.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut merged: Vec<(f64, f64)> = Vec::new();
+    for (start, end) in cuts {
+        if let Some(last) = merged.last_mut() {
+            if start <= last.1 { last.1 = last.1.max(end); continue; }
+        }
+        merged.push((start, end));
+    }
+    merged
+}
+
+fn keep_segments(ranges: &[(f64, f64)], duration: f64, rate: FrameRate) -> Vec<Segment> {
+    let total_frames = seconds_to_frames(duration, rate);
+    let cuts = merged_deletions(ranges, duration);
+    let mut cursor = 0.0_f64;
+    let mut record_cursor = 0_i64;
+    let mut segments = Vec::new();
+    let mut push_segment = |start: f64, end: f64| {
+        let source_in = seconds_to_frames(start, rate).clamp(0, total_frames);
+        let source_out = seconds_to_frames(end, rate).clamp(0, total_frames);
+        if source_out > source_in {
+            segments.push(Segment { source_in, source_out, record_in: record_cursor });
+            record_cursor += source_out - source_in;
+        }
+    };
+    for (start, end) in cuts {
+        if start > cursor { push_segment(cursor, start); }
+        cursor = cursor.max(end);
+    }
+    if cursor < duration { push_segment(cursor, duration); }
+    segments
+}
+
+fn make_workspace(parent: &Path, stem: &str) -> Result<Workspace, String> {
+    for _ in 0..100 {
+        let id = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let candidate = parent.join(format!(".{stem}_blaze_export_{}_{}", std::process::id(), id));
+        match fs::create_dir(&candidate) {
+            Ok(()) => return Ok(Workspace(candidate)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("Could not create export workspace: {error}")),
+        }
+    }
+    Err("Could not allocate a unique export workspace.".into())
+}
+
+fn run(engine: &MediaEngine, args: &[&str], description: &str) -> Result<(), String> {
+    let output = engine.command("ffmpeg")?.args(args).output()
+        .map_err(|error| format!("Could not start FFmpeg while {description}: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("FFmpeg failed while {description}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()));
+    }
+    Ok(())
+}
+
+fn probe_duration(engine: &MediaEngine, path: &Path) -> Result<f64, String> {
+    let path_arg = path.to_string_lossy();
+    let output = engine.command("ffprobe")?.args([
+        "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", path_arg.as_ref(),
+    ]).output().map_err(|error| format!("Could not start FFprobe: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("FFprobe could not verify the exported video: {}",
+            String::from_utf8_lossy(&output.stderr).trim()));
+    }
+    String::from_utf8_lossy(&output.stdout).trim().parse::<f64>()
+        .map_err(|_| "FFprobe returned an invalid output duration.".into())
+}
+
+/// Stream-copies KEEP ranges from the original source, then concatenates them.
+pub fn export_blaze_video(
+    engine: &MediaEngine, source: &Path, output: &Path,
+    duration: f64, delete_ranges: &[(f64, f64)],
+) -> Result<ExportReport, String> {
+    if !source.is_file() { return Err("The source video no longer exists.".into()); }
+    if !duration.is_finite() || duration <= 0.0 { return Err("The source video has an invalid duration.".into()); }
+    if delete_ranges.is_empty() { return Err("There are no cut regions to export.".into()); }
+    if source == output { return Err("The output file cannot replace the source video.".into()); }
+
+    let rate = frame_rate_for_stream_copy(engine, source)?;
+    let segments = keep_segments(delete_ranges, duration, rate);
+    if segments.is_empty() {
+        return Err("The cut regions remove the entire video; there is nothing to export.".into());
+    }
+
+    let source_parent = source.parent().unwrap_or_else(|| Path::new("."));
+    let stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
+    let workspace = make_workspace(source_parent, stem)?;
+    let extension = source.extension().and_then(|s| s.to_str()).unwrap_or("mkv");
+    let mut clips = Vec::with_capacity(segments.len());
+
+    for (index, segment) in segments.iter().enumerate() {
+        let clip = workspace.0.join(format!("clip_{:04}.{extension}", index + 1));
+        let start = segment.source_in as f64 * rate.denominator as f64 / rate.numerator as f64;
+        let length = segment.duration() as f64 * rate.denominator as f64 / rate.numerator as f64;
+        let source_arg = source.to_string_lossy();
+        let clip_arg = clip.to_string_lossy();
+        let start_arg = format!("{start:.9}");
+        let length_arg = format!("{length:.9}");
+        run(engine, &[
+            "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
+            "-ss", &start_arg, "-i", source_arg.as_ref(), "-t", &length_arg,
+            "-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero",
+            clip_arg.as_ref(),
+        ], &format!("extracting kept segment {}", index + 1))?;
+        if !clip.is_file() || fs::metadata(&clip).map(|m| m.len()).unwrap_or(0) == 0 {
+            return Err(format!("FFmpeg produced an empty temporary clip for segment {}.", index + 1));
+        }
+        clips.push(clip);
+    }
+
+    let manifest = workspace.0.join("concat.txt");
+    let mut manifest_text = String::new();
+    for clip in &clips {
+        let path = clip.to_string_lossy().replace('\\', "/").replace('\'', "'\\''");
+        manifest_text.push_str(&format!("file '{path}'\n"));
+    }
+    fs::write(&manifest, manifest_text)
+        .map_err(|error| format!("Could not write the temporary concat manifest: {error}"))?;
+
+    let joined = workspace.0.join(format!("joined.{extension}"));
+    let manifest_arg = manifest.to_string_lossy();
+    let joined_arg = joined.to_string_lossy();
+    run(engine, &[
+        "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
+        "-f", "concat", "-safe", "0", "-i", manifest_arg.as_ref(),
+        "-map", "0", "-c", "copy", joined_arg.as_ref(),
+    ], "concatenating the kept segments")?;
+
+    let expected_duration = segments.iter().map(|segment|
+        segment.duration() as f64 * rate.denominator as f64 / rate.numerator as f64
+    ).sum::<f64>();
+    let actual_duration = probe_duration(engine, &joined)?;
+
+    let output_parent = output.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(output_parent)
+        .map_err(|error| format!("Could not access the output folder: {error}"))?;
+    let output_stem = output.file_stem().and_then(|s| s.to_str()).unwrap_or("blaze");
+    let output_ext = output.extension().and_then(|s| s.to_str()).unwrap_or(extension);
+    let id = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let staging = output_parent.join(format!(".{output_stem}.partial_{}_{}.{}",
+        std::process::id(), id, output_ext));
+    fs::copy(&joined, &staging)
+        .map_err(|error| format!("Could not stage the finished video in the output folder: {error}"))?;
+    if let Err(error) = fs::rename(&staging, output) {
+        let _ = fs::remove_file(&staging);
+        return Err(format!("Could not move the completed video into place: {error}"));
+    }
+
+    let warning = if (actual_duration - expected_duration).abs() > 2.0 {
+        Some(format!("The exported duration ({actual_duration:.2}s) differs from expected ({expected_duration:.2}s). Review the result."))
+    } else { None };
+    Ok(ExportReport { output_path: output.to_path_buf(), expected_duration, actual_duration, warning })
+}
+
+fn frame_rate_for_stream_copy(engine: &MediaEngine, source: &Path) -> Result<FrameRate, String> {
+    let source_arg = source.to_string_lossy();
+    let output = engine.command("ffprobe")?.args([
+        "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=avg_frame_rate,r_frame_rate",
+        "-of", "default=noprint_wrappers=1:nokey=1", source_arg.as_ref(),
+    ]).output().map_err(|error| format!("Could not read the source frame rate: {error}"))?;
+    if !output.status.success() { return Err("FFprobe could not read the source frame rate.".into()); }
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut parts = line.trim().split('/');
+        let numerator = parts.next().and_then(|v| v.parse::<f64>().ok());
+        let denominator = parts.next().and_then(|v| v.parse::<f64>().ok());
+        if let (Some(n), Some(d)) = (numerator, denominator) {
+            if d > 0.0 && n > 0.0 { return frame_rate(n / d); }
+        }
+    }
+    Err("The source frame rate could not be determined for stream-copy export.".into())
+}
+
+/// Exports the single-source, single-track edit as a timeline interchange file.
+pub fn export_interchange(
+    format: InterchangeFormat, source: &Path, info: &MediaInfo,
+    delete_ranges: &[(f64, f64)], output: &Path,
+) -> Result<(), String> {
+    if !source.is_file() { return Err("The source video no longer exists.".into()); }
+    let rate = frame_rate(info.fps.ok_or_else(|| "The source frame rate could not be determined.".to_string())?)?;
+    let segments = keep_segments(delete_ranges, info.duration, rate);
+    if segments.is_empty() { return Err("The edit removes the entire source; no timeline can be exported.".into()); }
+    let contents = match format {
+        InterchangeFormat::Edl => build_edl(source, info, rate, &segments),
+        InterchangeFormat::Fcpxml => build_fcpxml(source, info, rate, &segments)?,
+        InterchangeFormat::DavinciResolve | InterchangeFormat::PremiereXml =>
+            build_fcp7_xml(source, info, rate, &segments)?,
+    };
+    fs::write(output, contents).map_err(|error| format!("Could not write the timeline file: {error}"))
+}
+
+fn build_edl(source: &Path, info: &MediaInfo, rate: FrameRate, segments: &[Segment]) -> String {
+    let mut out = String::new();
+    let reel = reel_name(source);
+    out.push_str(&format!("TITLE: {}\nFCM: NON-DROP FRAME\n\n",
+        source.file_stem().and_then(|s| s.to_str()).unwrap_or("Blaze Edit")));
+    for (index, segment) in segments.iter().enumerate() {
+        let n = index + 1;
+        let source_in = 90_000_i64 + segment.source_in;
+        let source_out = 90_000_i64 + segment.source_out;
+        let record_in = 90_000_i64 + segment.record_in;
+        let record_out = record_in + segment.duration();
+        out.push_str(&format!("{n:03}  {reel:<8} V     C        {} {} {} {}\n",
+            timecode(source_in, rate), timecode(source_out, rate),
+            timecode(record_in, rate), timecode(record_out, rate)));
+        out.push_str(&format!("* FROM CLIP NAME: {}\n* SOURCE FILE: {}\n\n",
+            source.file_name().and_then(|s| s.to_str()).unwrap_or("Source"), source.display()));
+    }
+    if info.has_audio { out.push_str("* Audio is linked to the source in the XML interchange exports.\n"); }
+    out
+}
+
+fn build_fcp7_xml(
+    source: &Path, info: &MediaInfo, rate: FrameRate, segments: &[Segment],
+) -> Result<String, String> {
+    let width = info.width.ok_or_else(|| "Source video dimensions are unavailable for XML export.".to_string())?;
+    let height = info.height.ok_or_else(|| "Source video dimensions are unavailable for XML export.".to_string())?;
+    let name = source.file_name().and_then(|s| s.to_str()).unwrap_or("Source");
+    let name_xml = xml_escape(name);
+    let path_url = xml_escape(&file_url(source));
+    let clip_duration: i64 = segments.iter().map(|s| s.duration()).sum();
+    let ntsc = if rate.ntsc { "TRUE" } else { "FALSE" };
+    let source_duration = seconds_to_frames(info.duration, rate);
+    let mut out = String::new();
+    out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE xmeml>\n<xmeml version=\"5\"><project><name>Blaze Edit</name><children><sequence id=\"sequence-1\">\n");
+    out.push_str(&format!("<name>Blaze Edit</name><duration>{clip_duration}</duration><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate>\n",
+        rate.nominal));
+    out.push_str(&format!("<timecode><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate><string>01:00:00:00</string><frame>0</frame><displayformat>NDF</displayformat></timecode>\n",
+        rate.nominal));
+    out.push_str(&format!("<media><video><format><samplecharacteristics><width>{width}</width><height>{height}</height><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate><fielddominance>none</fielddominance><pixelaspectratio>square</pixelaspectratio></samplecharacteristics></format><track>\n",
+        rate.nominal));
+    for (i, segment) in segments.iter().enumerate() {
+        out.push_str(&format!("<clipitem id=\"video-{}\"><name>{name_xml}</name><duration>{}</duration><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate><start>{}</start><end>{}</end><in>{}</in><out>{}</out><file id=\"file-1\"><name>{name_xml}</name><pathurl>{path_url}</pathurl><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate><duration>{source_duration}</duration><media><video><samplecharacteristics><width>{width}</width><height>{height}</height></samplecharacteristics></video></media></file>\n",
+            i + 1, segment.duration(), rate.nominal, segment.record_in,
+            segment.record_in + segment.duration(), segment.source_in, segment.source_out, rate.nominal));
+        if info.has_audio {
+            out.push_str(&format!("<link><linkclipref>audio-{}</linkclipref><mediatype>audio</mediatype><trackindex>1</trackindex><clipindex>{}</clipindex></link>\n",
+                i + 1, i + 1));
+        }
+        out.push_str("</clipitem>\n");
+    }
+    out.push_str("</track></video>\n");
+    if info.has_audio {
+        let channels = info.audio_channels.unwrap_or(2);
+        let sample_rate = info.audio_sample_rate.unwrap_or(48000);
+        out.push_str(&format!("<audio><numOutputChannels>{channels}</numOutputChannels><format><samplecharacteristics><depth>16</depth><samplerate>{sample_rate}</samplerate></samplecharacteristics></format><tracks><track>\n"));
+        for (i, segment) in segments.iter().enumerate() {
+            out.push_str(&format!("<clipitem id=\"audio-{}\"><name>{name_xml}</name><duration>{}</duration><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate><start>{}</start><end>{}</end><in>{}</in><out>{}</out><file id=\"file-1\"><name>{name_xml}</name><pathurl>{path_url}</pathurl></file><sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack><link><linkclipref>video-{}</linkclipref><mediatype>video</mediatype><trackindex>1</trackindex><clipindex>{}</clipindex></link></clipitem>\n",
+                i + 1, segment.duration(), rate.nominal, segment.record_in,
+                segment.record_in + segment.duration(), segment.source_in, segment.source_out, i + 1, i + 1));
+        }
+        out.push_str("</track></tracks></audio>\n");
+    }
+    out.push_str("</media></sequence></children></project></xmeml>\n");
+    Ok(out)
+}
+
+fn build_fcpxml(
+    source: &Path, info: &MediaInfo, rate: FrameRate, segments: &[Segment],
+) -> Result<String, String> {
+    let width = info.width.ok_or_else(|| "Source video dimensions are unavailable for FCPXML export.".to_string())?;
+    let height = info.height.ok_or_else(|| "Source video dimensions are unavailable for FCPXML export.".to_string())?;
+    let name = source.file_name().and_then(|s| s.to_str()).unwrap_or("Source");
+    let stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("Blaze Edit");
+    let path_url = xml_escape(&file_url(source));
+    let name_xml = xml_escape(name);
+    let stem_xml = xml_escape(stem);
+    let total_frames: i64 = segments.iter().map(|s| s.duration()).sum();
+    let channels = info.audio_channels.unwrap_or(2);
+    let sample_rate = info.audio_sample_rate.unwrap_or(48000);
+    let format_name = if rate.ntsc {
+        format!("FFVideoFormat{}p{:.2}", height,
+            rate.nominal as f64 * rate.denominator as f64 / rate.numerator as f64)
+    } else { format!("FFVideoFormat{}p{}", height, rate.nominal) };
+
+    let mut out = String::new();
+    out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE fcpxml>\n<fcpxml version=\"1.10\"><resources>\n");
+    out.push_str(&format!("<format id=\"r1\" name=\"{format_name}\" frameDuration=\"{}/{}s\" width=\"{width}\" height=\"{height}\"/>\n",
+        rate.denominator, rate.numerator));
+    out.push_str(&format!("<asset id=\"r2\" name=\"{name_xml}\" src=\"{path_url}\" start=\"0s\" duration=\"{}\" hasVideo=\"1\" hasAudio=\"{}\" format=\"r1\"",
+        frame_time(seconds_to_frames(info.duration, rate), rate), if info.has_audio { "1" } else { "0" }));
+    if info.has_audio {
+        out.push_str(&format!(" audioSources=\"1\" audioChannels=\"{channels}\" audioRate=\"{sample_rate}\"/>\n"));
+    } else { out.push_str("/>\n"); }
+
+    out.push_str(&format!("</resources><library><event name=\"Blaze Edit\"><project name=\"{stem_xml}\"><sequence format=\"r1\" duration=\"{}\" tcStart=\"0s\" tcFormat=\"NDF\"",
+        frame_time(total_frames, rate)));
+    if info.has_audio {
+        let layout = if channels == 1 { "mono" } else if channels == 2 { "stereo" } else { "surround" };
+        out.push_str(&format!(" audioLayout=\"{layout}\" audioRate=\"{}k\"", sample_rate / 1000));
+    }
+    out.push_str("><spine>\n");
+    for (i, segment) in segments.iter().enumerate() {
+        out.push_str(&format!("<asset-clip name=\"{name_xml} ({})\" ref=\"r2\" offset=\"{}\" start=\"{}\" duration=\"{}\"",
+            i + 1, frame_time(segment.record_in, rate),
+            frame_time(segment.source_in, rate), frame_time(segment.duration(), rate)));
+        if info.has_audio { out.push_str(" audioRole=\"dialogue\""); }
+        out.push_str("/>\n");
+    }
+    out.push_str("</spine></sequence></project></event></library></fcpxml>\n");
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deletion_ranges_are_merged_and_inverted() {
+        let rate = frame_rate(25.0).unwrap();
+        let segments = keep_segments(&[(2.0, 4.0), (3.5, 5.0), (8.0, 9.0)], 10.0, rate);
+        assert_eq!(segments.len(), 3);
+        assert_eq!((segments[0].source_in, segments[0].source_out), (0, 50));
+        assert_eq!((segments[1].source_in, segments[1].source_out), (125, 200));
+        assert_eq!((segments[2].source_in, segments[2].source_out), (225, 250));
+    }
+
+    #[test]
+    fn fractional_frame_rate_is_preserved() {
+        let rate = frame_rate(29.97002997).unwrap();
+        assert_eq!((rate.numerator, rate.denominator, rate.nominal, rate.ntsc), (30000, 1001, 30, true));
+        assert_eq!(frame_time(30, rate), "1001/1000s");
+    }
+
+    #[test]
+    fn xml_escaping_handles_special_characters() {
+        assert_eq!(xml_escape("A&B <clip> 'x'"), "A&amp;B &lt;clip&gt; &apos;x&apos;");
+    }
+
+    #[test]
+    fn file_urls_escape_spaces_and_hashes() {
+        assert_eq!(file_url(Path::new("/tmp/my video#1.mov")), "file:///tmp/my%20video%231.mov");
+    }
+}
