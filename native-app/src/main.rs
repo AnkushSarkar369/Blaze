@@ -157,14 +157,17 @@ impl BlazeApp {
         cc: &eframe::CreationContext<'_>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = egui::Color32::from_rgb(22, 23, 25);
-        visuals.window_fill = egui::Color32::from_rgb(25, 26, 28);
-        visuals.extreme_bg_color = egui::Color32::from_rgb(14, 15, 17);
-        visuals.faint_bg_color = egui::Color32::from_rgb(31, 33, 36);
-        visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(29, 31, 34);
-        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(38, 40, 43);
-        visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(51, 54, 58);
-        visuals.widgets.active.bg_fill = egui::Color32::from_rgb(218, 105, 49);
+        visuals.panel_fill = egui::Color32::from_rgb(21, 22, 24);
+        visuals.window_fill = egui::Color32::from_rgb(24, 25, 27);
+        visuals.extreme_bg_color = egui::Color32::from_rgb(16, 17, 18);
+        visuals.faint_bg_color = egui::Color32::from_rgb(28, 30, 32);
+        visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(25, 27, 29);
+        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(34, 36, 39);
+        visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(46, 49, 52);
+        visuals.widgets.active.bg_fill = egui::Color32::from_rgb(255, 104, 79);
+        visuals.hyperlink_color = egui::Color32::from_rgb(255, 120, 96);
+        visuals.selection.bg_fill = egui::Color32::from_rgb(92, 45, 39);
+        visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 104, 79));
         cc.egui_ctx.set_visuals(visuals);
 
         let playback = Playback::new(cc)?;
@@ -729,7 +732,7 @@ impl eframe::App for BlazeApp {
                 ui.painter().rect_filled(
                     lane,
                     egui::CornerRadius::same(3),
-                    egui::Color32::from_rgb(17, 19, 21),
+                    egui::Color32::from_rgb(19, 20, 22),
                 );
 
                 if let Some(progress) = self.waveform_progress {
@@ -742,7 +745,7 @@ impl eframe::App for BlazeApp {
                         ui.painter().rect_filled(
                             fill,
                             egui::CornerRadius::same(3),
-                            egui::Color32::from_rgb(105, 55, 37),
+                            egui::Color32::from_rgb(92, 45, 39),
                         );
                     }
 
@@ -759,7 +762,7 @@ impl eframe::App for BlazeApp {
                 } else {
                     ui.painter().line_segment(
                         [lane.left_center(), lane.right_center()],
-                        egui::Stroke::new(1.0, egui::Color32::from_rgb(55, 61, 62)),
+                        egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 46, 49)),
                     );
                 }
 
@@ -782,7 +785,7 @@ impl eframe::App for BlazeApp {
                         ui.painter().rect_filled(
                             region_rect.intersect(lane),
                             egui::CornerRadius::same(2),
-                            egui::Color32::from_rgba_unmultiplied(190, 66, 62, 105),
+                            egui::Color32::from_rgba_unmultiplied(255, 104, 79, 42),
                         );
                     }
 
@@ -815,9 +818,9 @@ impl eframe::App for BlazeApp {
                             }
                         }
                         let color = if handle_response.hovered() || handle_response.dragged() {
-                            egui::Color32::from_rgb(255, 190, 145)
+                            egui::Color32::from_rgb(255, 151, 132)
                         } else {
-                            egui::Color32::from_rgb(238, 115, 83)
+                            egui::Color32::from_rgb(255, 104, 79)
                         };
                         ui.painter().line_segment(
                             [egui::pos2(x, lane.top()), egui::pos2(x, lane.bottom())],
@@ -858,7 +861,7 @@ impl eframe::App for BlazeApp {
                         }
                         ui.painter().line_segment(
                             [egui::pos2(x, lane.top()), egui::pos2(x, lane.bottom())],
-                            egui::Stroke::new(3.0, egui::Color32::from_rgb(235, 165, 75)),
+                            egui::Stroke::new(3.0, egui::Color32::from_rgb(255, 104, 79)),
                         );
                     }
                 }
@@ -874,7 +877,7 @@ impl eframe::App for BlazeApp {
                             egui::pos2(playhead_x, lane.top()),
                             egui::pos2(playhead_x, lane.bottom()),
                         ],
-                        egui::Stroke::new(1.5, egui::Color32::from_rgb(235, 133, 83)),
+                        egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 104, 79)),
                     );
                 }
 
@@ -1265,14 +1268,14 @@ impl eframe::App for BlazeApp {
             });
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(egui::Color32::from_rgb(14, 15, 17)))
+            .frame(egui::Frame::new().fill(egui::Color32::from_rgb(16, 17, 18)))
             .show(ui, |ui| {
                 // One framed Preview Panel contains both the video viewport
                 // and its transport bar. Tools remains a separate right panel.
                 egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(17, 18, 20))
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(48, 50, 53)))
-                    .corner_radius(egui::CornerRadius::same(6))
+                    .fill(egui::Color32::from_rgb(21, 22, 24))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(42, 44, 47)))
+                    .corner_radius(egui::CornerRadius::same(2))
                     .inner_margin(egui::Margin::same(6))
                     .show(ui, |ui| {
                         let available = ui.available_rect_before_wrap();
@@ -1291,7 +1294,7 @@ impl eframe::App for BlazeApp {
                             ui.painter().rect_filled(
                                 preview_rect,
                                 egui::CornerRadius::same(3),
-                                egui::Color32::from_rgb(8, 9, 10),
+                                egui::Color32::from_rgb(10, 11, 12),
                             );
 
                             if self.selected_path.is_some() {
@@ -1416,9 +1419,9 @@ impl eframe::App for BlazeApp {
                                             "Skip Cuts: OFF"
                                         })
                                         .fill(if self.skip_cuts_enabled {
-                                            egui::Color32::from_rgb(35, 112, 72)
+                                            egui::Color32::from_rgb(92, 45, 39)
                                         } else {
-                                            egui::Color32::from_rgb(130, 55, 48)
+                                            egui::Color32::from_rgb(34, 36, 39)
                                         });
                                         if ui
                                             .add_sized([skip_button_width, 26.0], skip_button)
