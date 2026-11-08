@@ -28,7 +28,9 @@ The app expects the existing FFmpeg/FFprobe tools in the repository's `BIN/` dir
 
 ## Current scope
 
-- Native application window and resizable preview / tools / timeline layout.
+- Native application window and resizable preview / mode-tabs / timeline layout.
+- The right panel has three top-level tabs: Blaze Mode, Precise Mode, and Export. Each tab currently has a structural placeholder; its workflow will be implemented independently.
+- A first-run Quick Help dialog explains the keyboard shortcuts and the three modes. Dismissing it records completion in `~/.config/blaze/first_run_help_seen`; it can be reopened at any time with Ctrl+H.
 - Native file picker inside the preview.
 - Embedded video and audio playback through libmpv.
 - A dedicated transport strip with vector play/pause and import icons, a wide seek bar and right-aligned time display.
