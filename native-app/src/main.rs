@@ -226,32 +226,41 @@ impl eframe::App for BlazeApp {
                     );
                 }
 
-                let response = ui.allocate_rect(lane, egui::Sense::click_and_drag());
-                let pointer_time = |position: egui::Pos2| {
-                    let progress = ((position.x - lane.left()) / lane.width()).clamp(0.0, 1.0);
-                    progress as f64 * duration
+                let can_seek = self.selected_path.is_some();
+                let sense = if can_seek {
+                    egui::Sense::click_and_drag()
+                } else {
+                    egui::Sense::hover()
                 };
+                let response = ui.allocate_rect(lane, sense);
 
-                if response.dragged() {
-                    self.seeking = true;
-                    if let Some(position) = response.interact_pointer_pos() {
-                        self.playback_position = pointer_time(position);
-                    }
-                }
+                if can_seek {
+                    let pointer_time = |position: egui::Pos2| {
+                        let progress = ((position.x - lane.left()) / lane.width()).clamp(0.0, 1.0);
+                        progress as f64 * duration
+                    };
 
-                if response.drag_stopped() {
-                    if let Some(position) = response.interact_pointer_pos() {
-                        self.playback_position = pointer_time(position);
+                    if response.dragged() {
+                        self.seeking = true;
+                        if let Some(position) = response.interact_pointer_pos() {
+                            self.playback_position = pointer_time(position);
+                        }
                     }
-                    self.seeking = false;
-                    if let Err(error) = self.playback.seek(self.playback_position) {
-                        eprintln!("Blaze: {error}");
-                    }
-                } else if response.clicked() {
-                    if let Some(position) = response.interact_pointer_pos() {
-                        self.playback_position = pointer_time(position);
+
+                    if response.drag_stopped() {
+                        if let Some(position) = response.interact_pointer_pos() {
+                            self.playback_position = pointer_time(position);
+                        }
+                        self.seeking = false;
                         if let Err(error) = self.playback.seek(self.playback_position) {
                             eprintln!("Blaze: {error}");
+                        }
+                    } else if response.clicked() {
+                        if let Some(position) = response.interact_pointer_pos() {
+                            self.playback_position = pointer_time(position);
+                            if let Err(error) = self.playback.seek(self.playback_position) {
+                                eprintln!("Blaze: {error}");
+                            }
                         }
                     }
                 }
