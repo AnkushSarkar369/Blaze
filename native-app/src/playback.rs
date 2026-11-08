@@ -182,6 +182,15 @@ impl Playback {
         Ok(())
     }
 
+    pub fn stop(&self) {
+        let _ = self.mpv.command(&["stop"]);
+        if let Some(surface) = &self.surface {
+            if let Ok(mut surface) = surface.lock() {
+                surface.has_frame = false;
+            }
+        }
+    }
+
     pub fn toggle_pause(&self) -> Result<(), String> {
         let paused = self.mpv.get_property::<bool>("pause").unwrap_or(false);
         self.mpv
