@@ -125,14 +125,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "blaze-engine"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "blaze"
 version = "0.1.0"
 dependencies = [
@@ -142,6 +134,14 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+]
+
+[[package]]
+name = "blaze-engine"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

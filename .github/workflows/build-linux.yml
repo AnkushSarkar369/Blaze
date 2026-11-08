@@ -43,6 +43,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Blaze-Linux-AppImage
-          path: src-tauri/target/release/bundle/appimage/*.AppImage
+          path: target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
           retention-days: 14
