@@ -20,28 +20,16 @@ mod waveform;
 use waveform::Waveform;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ToolTab {
-    BlazeMode,
-    PreciseMode,
-    Export,
+enum EditingMode {
+    Blaze,
+    Precise,
 }
 
-impl ToolTab {
-    const ALL: [Self; 3] = [Self::BlazeMode, Self::PreciseMode, Self::Export];
-
+impl EditingMode {
     fn label(self) -> &'static str {
         match self {
-            Self::BlazeMode => "Blaze Mode",
-            Self::PreciseMode => "Precise Mode",
-            Self::Export => "Export",
-        }
-    }
-
-    fn description(self) -> &'static str {
-        match self {
-            Self::BlazeMode => "Fast, keyframe-aligned cutting for near-instant edits.",
-            Self::PreciseMode => "Create and adjust precise cut regions directly on the timeline.",
-            Self::Export => "Configure and export the finished video.",
+            Self::Blaze => "Blaze Mode",
+            Self::Precise => "Precise Mode",
         }
     }
 }
@@ -120,7 +108,7 @@ struct BlazeApp {
     edit_regions: Vec<EditRegion>,
     pending_region_start: Option<f64>,
     skip_cuts_enabled: bool,
-    active_tool_tab: ToolTab,
+    active_mode: Option<EditingMode>,
     show_help: bool,
     first_run_help_seen: bool,
 }
@@ -196,7 +184,7 @@ impl BlazeApp {
             edit_regions: Vec::new(),
             pending_region_start: None,
             skip_cuts_enabled: false,
-            active_tool_tab: ToolTab::BlazeMode,
+            active_mode: None,
             show_help: !has_seen_first_run_help(),
             first_run_help_seen: has_seen_first_run_help(),
         })
@@ -289,11 +277,21 @@ impl BlazeApp {
             self.silence_running = false;
             match result {
                 Ok(intervals) => {
-                    // Rescan replaces the current region set with fresh detections.
-                    self.edit_regions = intervals.into_iter()
-                        .filter(|interval| interval.end > interval.start)
-                        .map(|interval| EditRegion { start: interval.start, end: interval.end })
-                        .collect();
+                    // Silence detection is identical in both modes. Blaze applies
+                    // keyframe constraints only when converting detections to cuts.
+                    self.edit_regions = if self.active_mode == Some(EditingMode::Blaze) {
+                        let keyframes = &self.keyframes;
+                        intervals.into_iter().filter_map(|interval| {
+                            let start = nearest_keyframe(keyframes, interval.start)?;
+                            let end = nearest_boundary_keyframe(keyframes, interval.end, start, false)?;
+                            (end > start).then_some(EditRegion { start, end })
+                        }).collect()
+                    } else {
+                        intervals.into_iter()
+                            .filter(|interval| interval.end > interval.start)
+                            .map(|interval| EditRegion { start: interval.start, end: interval.end })
+                            .collect()
+                    };
                     self.pending_region_start = None;
                 }
                 Err(error) => eprintln!("Blaze: silence detection failed: {error}"),
@@ -466,8 +464,8 @@ impl eframe::App for BlazeApp {
         let mark_end_pressed = ctx.input_mut(|input| {
             input.consume_key(egui::Modifiers::NONE, egui::Key::M)
         });
-        let blaze_mode = self.active_tool_tab == ToolTab::BlazeMode;
-        if self.selected_path.is_some() && mark_start_pressed {
+        let blaze_mode = self.active_mode == Some(EditingMode::Blaze);
+        if self.selected_path.is_some() && self.active_mode.is_some() && mark_start_pressed {
             if self.pending_region_start.is_some() {
                 self.pending_region_start = None;
             } else {
@@ -480,7 +478,7 @@ impl eframe::App for BlazeApp {
                 }
             }
         }
-        if self.selected_path.is_some() && mark_end_pressed {
+        if self.selected_path.is_some() && self.active_mode.is_some() && mark_end_pressed {
             if let Some(start) = self.pending_region_start {
                 let end = if blaze_mode {
                     nearest_boundary_keyframe(&self.keyframes, self.playback_position, start, false)
@@ -665,7 +663,7 @@ impl eframe::App for BlazeApp {
                 // silence analysis later). Their two boundary handles remain
                 // freely movable in Precise Mode.
                 let mut handle_interaction = false;
-                let blaze_snapping = self.active_tool_tab == ToolTab::BlazeMode;
+                let blaze_snapping = self.active_mode == Some(EditingMode::Blaze);
                 let keyframes = self.keyframes.clone();
                 for (index, region) in self.edit_regions.iter_mut().enumerate() {
                     let start_x = lane.left()
@@ -817,35 +815,55 @@ impl eframe::App for BlazeApp {
             .default_size(310.0)
             .min_size(240.0)
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    for tab in ToolTab::ALL {
-                        if ui
-                            .selectable_label(self.active_tool_tab == tab, tab.label())
-                            .clicked()
-                        {
-                            self.active_tool_tab = tab;
-                        }
-                    }
-                });
-                ui.separator();
+                ui.heading("Mode Selector");
                 ui.add_space(8.0);
-                ui.label(self.active_tool_tab.description());
 
-                if self.active_tool_tab == ToolTab::BlazeMode {
-                    ui.add_space(12.0);
-                    if self.keyframes_running {
-                        ui.horizontal(|ui| { ui.spinner(); ui.label("Analysing GOP / keyframe structure…"); });
-                    } else if let Some(error) = &self.keyframe_error {
-                        ui.colored_label(egui::Color32::LIGHT_RED, format!("Keyframe analysis failed: {error}"));
-                    } else if !self.keyframes.is_empty() {
-                        ui.label(format!("{} keyframes detected", self.keyframes.len()));
-                        ui.small("GOP snapping is active. N/M markers and dragged cut boundaries snap to the nearest keyframe.");
-                    } else {
-                        ui.small("Import a video to analyse its GOP structure.");
-                    }
+                let blaze_ready = self.selected_path.is_none()
+                    || (!self.keyframes_running && self.keyframe_error.is_none() && !self.keyframes.is_empty());
+                let blaze_button = egui::Button::new(
+                    egui::RichText::new("⚡  Blaze Mode").strong().size(15.0)
+                )
+                .selected(self.active_mode == Some(EditingMode::Blaze))
+                .min_size(egui::vec2(ui.available_width(), 52.0));
+                if ui.add_enabled(blaze_ready, blaze_button).clicked() {
+                    let keyframes = self.keyframes.clone();
+                    self.edit_regions = self.edit_regions.iter().filter_map(|region| {
+                        let start = nearest_keyframe(&keyframes, region.start)?;
+                        let end = nearest_boundary_keyframe(&keyframes, region.end, start, false)?;
+                        (end > start).then_some(EditRegion { start, end })
+                    }).collect();
+                    self.pending_region_start = self.pending_region_start
+                        .and_then(|start| nearest_keyframe(&keyframes, start));
+                    self.active_mode = Some(EditingMode::Blaze);
+                }
+                ui.label("Keyframe-aligned cuts. Faster stream-copy editing at the cost of boundary precision.");
+                if self.keyframes_running && self.selected_path.is_some() {
+                    ui.horizontal(|ui| { ui.spinner(); ui.small("Analysing GOP / keyframe structure…"); });
+                } else if let Some(error) = &self.keyframe_error {
+                    ui.colored_label(egui::Color32::LIGHT_RED, format!("Keyframe analysis failed: {error}"));
+                } else if !self.keyframes.is_empty() {
+                    ui.small(format!("{} video keyframes available.", self.keyframes.len()));
                 }
 
-                if self.active_tool_tab == ToolTab::PreciseMode {
+                ui.add_space(12.0);
+                let precise_button = egui::Button::new(
+                    egui::RichText::new("◎  Precise Mode").strong().size(15.0)
+                )
+                .selected(self.active_mode == Some(EditingMode::Precise))
+                .min_size(egui::vec2(ui.available_width(), 52.0));
+                if ui.add(precise_button).clicked() {
+                    self.active_mode = Some(EditingMode::Precise);
+                }
+                ui.label("Unrestricted cut boundaries. Use when exact edit placement matters more than stream-copy constraints.");
+
+                ui.separator();
+                ui.add_space(8.0);
+                if let Some(mode) = self.active_mode {
+                    ui.heading(mode.label());
+                    ui.add_space(8.0);
+                }
+
+                if self.active_mode.is_some() {
                     ui.add_space(16.0);
                     ui.checkbox(&mut self.expert_mode, "Expert Mode");
                     ui.add_space(12.0);
@@ -964,9 +982,12 @@ impl eframe::App for BlazeApp {
                     }
 
                     ui.add_space(20.0);
+                    let blaze_ready = self.active_mode != Some(EditingMode::Blaze)
+                        || (!self.keyframes_running && self.keyframe_error.is_none() && !self.keyframes.is_empty());
                     let can_detect = self.selected_path.is_some()
                         && self.media_info.as_ref().is_some_and(|info| info.has_audio)
-                        && !self.silence_running;
+                        && !self.silence_running
+                        && blaze_ready;
                     if ui.add_enabled(
                         can_detect,
                         egui::Button::new(if self.silence_running { "Analysing Audio…" } else { "Detect Silence" })
@@ -979,6 +1000,9 @@ impl eframe::App for BlazeApp {
                         ui.spinner();
                         ui.small("Analysing audio. A rescan replaces existing regions.");
                     }
+                } else {
+                    ui.add_space(12.0);
+                    ui.label("Select an editing mode to configure silence detection and timeline editing.");
                 }
 
                 // Keep the resizable panel at the user-selected width instead of
@@ -1201,10 +1225,10 @@ impl eframe::App for BlazeApp {
                         .spacing([18.0, 8.0])
                         .show(ui, |ui| {
                             ui.strong("Blaze Mode");
-                            ui.label("Instant, keyframe-aligned cuts");
+                            ui.label("Keyframe-aligned cuts with stream-copy constraints");
                             ui.end_row();
                             ui.strong("Precise Mode");
-                            ui.label("Frame-accurate cuts");
+                            ui.label("Unrestricted boundary placement");
                             ui.end_row();
                             ui.strong("Export");
                             ui.label("Render the finished video");
