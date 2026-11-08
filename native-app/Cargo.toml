@@ -12,3 +12,6 @@ description = "Native desktop application shell for Blaze."
 blaze-engine = { path = "../crates/blaze-engine" }
 eframe = { version = "0.37.0", default-features = false, features = ["clipboard", "default_fonts", "glow", "wayland", "x11"] }
 rfd = "0.17.2"
+egui_glow = "=0.37.0"
+glow = "=0.17.0"
+rsmpv = { version = "=0.2.1", features = ["render"] }
