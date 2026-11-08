@@ -1,0 +1,32 @@
+name: Native application shell
+
+on:
+  push:
+    branches:
+      - migration/native-app-shell
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check-native-app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux GUI build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxkbcommon-dev \
+            libssl-dev \
+            libgl1-mesa-dev \
+            libdbus-1-dev \
+            pkg-config
+      - name: Check native application
+        run: cargo check --manifest-path native-app/Cargo.toml
+      - name: Test native application and media engine
+        run: cargo test --manifest-path native-app/Cargo.toml
