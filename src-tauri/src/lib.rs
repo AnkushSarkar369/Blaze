@@ -1,14 +1,25 @@
+mod frames;
 mod peaks;
+mod player;
 
 use serde::Serialize;
 use serde_json::Value;
 use std::{
+    collections::HashMap,
     env,
     io::Read,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc, Mutex,
+    },
 };
-use tauri::{path::BaseDirectory, Manager};
+use tauri::{
+    ipc::{Channel, InvokeResponseBody},
+    path::BaseDirectory,
+    Manager, State,
+};
 
 #[derive(Serialize)]
 struct MediaInfo {
@@ -322,6 +333,211 @@ async fn generate_waveform(
         .map(tauri::ipc::Response::new)
 }
 
+/// Scratch space for decoded playback audio. Wiped on every launch.
+struct MediaTemp {
+    dir: PathBuf,
+    counter: AtomicU32,
+}
+
+fn prepare_audio_sync(
+    app: &tauri::AppHandle,
+    dir: &Path,
+    number: u32,
+    path: &str,
+) -> Result<String, String> {
+    // Drop playback audio from earlier imports.
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("playback-") && name.ends_with(".wav") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+
+    let output = dir.join(format!("playback-{number}.wav"));
+    let output_arg = output
+        .to_str()
+        .ok_or_else(|| "The temporary folder path is not valid UTF-8.".to_string())?;
+
+    let result = run_tool(
+        app,
+        "ffmpeg",
+        &[
+            "-hide_banner",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            path,
+            "-map",
+            "0:a:0",
+            "-vn",
+            "-ac",
+            "2",
+            "-ar",
+            "48000",
+            "-c:a",
+            "pcm_s16le",
+            output_arg,
+        ],
+    );
+
+    match result {
+        Ok(_) => Ok(output_arg.to_string()),
+        Err(error) => {
+            let _ = std::fs::remove_file(&output);
+            Err(error)
+        }
+    }
+}
+
+/// Decodes the first audio stream to a 48 kHz stereo WAV that the webview's
+/// audio element can play and seek in. Returns the WAV's path.
+#[tauri::command]
+async fn prepare_audio(
+    app: tauri::AppHandle,
+    temp: State<'_, MediaTemp>,
+    path: String,
+) -> Result<String, String> {
+    let dir = temp.dir.clone();
+    let number = temp.counter.fetch_add(1, Ordering::SeqCst) + 1;
+    tauri::async_runtime::spawn_blocking(move || prepare_audio_sync(&app, &dir, number, &path))
+        .await
+        .map_err(|error| format!("Audio preparation task failed: {error}"))?
+}
+
+struct StreamSession {
+    credits: player::Credits,
+    child: Mutex<Option<Child>>,
+}
+
+#[derive(Default)]
+struct Streams {
+    next: AtomicU32,
+    active: Arc<Mutex<HashMap<u32, Arc<StreamSession>>>>,
+}
+
+/// Starts streaming numbered JPEG preview frames from `start` seconds (see
+/// `player.rs` for the message format). Returns a session id for `player_ack`
+/// and `player_stop`. `max_frames == 0` streams to the end of the file.
+#[tauri::command]
+async fn player_start(
+    app: tauri::AppHandle,
+    streams: State<'_, Streams>,
+    path: String,
+    start: f64,
+    fps: f64,
+    max_frames: u32,
+    on_frame: Channel,
+) -> Result<u32, String> {
+    let mut command = tool_command(&app, "ffmpeg")?;
+    command
+        .args(player::video_args(&path, start, fps, max_frames))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("Could not start FFmpeg: {error}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Could not read FFmpeg video output.".to_string())?;
+    let stderr = child.stderr.take();
+
+    let id = streams.next.fetch_add(1, Ordering::SeqCst) + 1;
+    let session = Arc::new(StreamSession {
+        credits: player::Credits::new(player::INITIAL_CREDITS),
+        child: Mutex::new(Some(child)),
+    });
+    streams.active.lock().unwrap().insert(id, session.clone());
+    let active = streams.active.clone();
+
+    std::thread::spawn(move || {
+        // Keep the start of FFmpeg's error output, but always drain the pipe so
+        // FFmpeg can never block on a full stderr buffer.
+        let error_log = stderr.map(|mut pipe| {
+            std::thread::spawn(move || {
+                let mut kept = Vec::new();
+                let mut chunk = [0_u8; 1024];
+                while let Ok(count) = pipe.read(&mut chunk) {
+                    if count == 0 {
+                        break;
+                    }
+                    if kept.len() < 4096 {
+                        kept.extend_from_slice(&chunk[..count]);
+                    }
+                }
+                String::from_utf8_lossy(&kept).trim().to_string()
+            })
+        });
+
+        let (frames, outcome) = player::pump(stdout, &session.credits, |index, jpeg| {
+            on_frame
+                .send(InvokeResponseBody::Raw(player::encode_frame(index, &jpeg)))
+                .is_ok()
+        });
+
+        if outcome == player::Outcome::Stopped || session.credits.is_cancelled() {
+            if let Some(child) = session.child.lock().unwrap().as_mut() {
+                let _ = child.kill();
+            }
+        }
+
+        let child = session.child.lock().unwrap().take();
+        let succeeded = child
+            .map(|mut child| child.wait().map(|status| status.success()).unwrap_or(false))
+            .unwrap_or(false);
+        let log = error_log
+            .and_then(|handle| handle.join().ok())
+            .unwrap_or_default();
+
+        if !session.credits.is_cancelled() {
+            let message = if frames == 0 && !succeeded {
+                let text = if log.is_empty() {
+                    "FFmpeg could not decode this video.".to_string()
+                } else {
+                    log
+                };
+                player::encode_marker(player::ERROR_MARKER, &text)
+            } else {
+                player::encode_marker(player::END_MARKER, "")
+            };
+            let _ = on_frame.send(InvokeResponseBody::Raw(message));
+        }
+
+        active.lock().unwrap().remove(&id);
+    });
+
+    Ok(id)
+}
+
+/// The webview has consumed `count` frames; let FFmpeg run `count` frames further.
+#[tauri::command]
+async fn player_ack(streams: State<'_, Streams>, session: u32, count: u32) -> Result<(), String> {
+    let found = streams.active.lock().unwrap().get(&session).cloned();
+    if let Some(session) = found {
+        session.credits.release(count as i64);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn player_stop(streams: State<'_, Streams>, session: u32) -> Result<(), String> {
+    let found = streams.active.lock().unwrap().get(&session).cloned();
+    if let Some(session) = found {
+        session.credits.cancel();
+        if let Some(child) = session.child.lock().unwrap().as_mut() {
+            let _ = child.kill();
+        }
+    }
+    Ok(())
+}
+
 fn initialize_data_directory(data: &Path) -> Result<(), String> {
     let temp = data.join("Temp");
     let cache = data.join("Cache");
@@ -345,11 +561,13 @@ fn initialize_data_directory(data: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn ensure_runtime_dirs(app: &tauri::AppHandle) -> Result<(), String> {
+/// Creates the data folders and returns the data directory that was used.
+fn ensure_runtime_dirs(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     if let Ok(executable) = env::current_exe() {
         if let Some(directory) = executable.parent() {
-            if initialize_data_directory(&directory.join("DATA")).is_ok() {
-                return Ok(());
+            let data = directory.join("DATA");
+            if initialize_data_directory(&data).is_ok() {
+                return Ok(data);
             }
         }
     }
@@ -359,7 +577,8 @@ fn ensure_runtime_dirs(app: &tauri::AppHandle) -> Result<(), String> {
         .app_cache_dir()
         .map_err(|error| format!("Could not locate the application cache directory: {error}"))?;
 
-    initialize_data_directory(&cache)
+    initialize_data_directory(&cache)?;
+    Ok(cache)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -367,13 +586,22 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            ensure_runtime_dirs(app.handle()).map_err(std::io::Error::other)?;
+            let data = ensure_runtime_dirs(app.handle()).map_err(std::io::Error::other)?;
+            app.manage(MediaTemp {
+                dir: data.join("Temp"),
+                counter: AtomicU32::new(0),
+            });
+            app.manage(Streams::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             probe_media,
             detect_keyframes,
-            generate_waveform
+            generate_waveform,
+            prepare_audio,
+            player_start,
+            player_ack,
+            player_stop
         ])
         .run(tauri::generate_context!())
         .expect("error while running Blaze");

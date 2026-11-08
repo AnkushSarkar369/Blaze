@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type React from "react";
 import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { Player } from "./player";
 import { drawWaveform, parseWaveform, type WaveformData } from "./waveform";
 
 type ToolTab = "blaze" | "precise" | "export";
@@ -30,14 +31,13 @@ function formatTime(seconds: number) {
 }
 
 function App() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const browserObjectUrl = useRef<string | null>(null);
+  const previewCanvas = useRef<HTMLCanvasElement>(null);
+  const audioElement = useRef<HTMLAudioElement>(null);
+  const player = useRef<Player | null>(null);
   const timelineViewport = useRef<HTMLDivElement>(null);
   const waveformCanvas = useRef<HTMLCanvasElement>(null);
   const loadToken = useRef(0);
 
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [mediaPath, setMediaPath] = useState<string | null>(null);
   const [mediaInfo, setMediaInfo] = useState<MediaInfo | null>(null);
   const [duration, setDuration] = useState(0);
@@ -56,6 +56,7 @@ function App() {
   const [draggingDivider, setDraggingDivider] = useState<"vertical" | "horizontal" | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(1);
+  const [canPlay, setCanPlay] = useState(false);
 
   const mode = editingMode;
   const pixelsPerSecond = 72 * zoom;
@@ -75,12 +76,25 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (videoRef.current) videoRef.current.volume = volume;
-  }, [volume, videoUrl]);
-
-  useEffect(() => () => {
-    if (browserObjectUrl.current) URL.revokeObjectURL(browserObjectUrl.current);
+    const canvas = previewCanvas.current;
+    const audio = audioElement.current;
+    if (!canvas || !audio) return;
+    const instance = new Player(canvas, audio, {
+      onTime: setCurrentTime,
+      onPlayingChange: setIsPlaying,
+      onError: (message) => setAnalysisError(message),
+      onReadyChange: setCanPlay,
+    });
+    player.current = instance;
+    return () => {
+      instance.dispose();
+      player.current = null;
+    };
   }, []);
+
+  useEffect(() => {
+    player.current?.setVolume(volume);
+  }, [volume]);
 
   useEffect(() => {
     if (!isPlaying || !timelineViewport.current) return;
@@ -131,13 +145,13 @@ function App() {
     function handleKeyboard(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       if (event.code !== "Space" || target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
-      if (!videoUrl) return;
+      if (!mediaPath) return;
       event.preventDefault();
       togglePlayback();
     }
     window.addEventListener("keydown", handleKeyboard);
     return () => window.removeEventListener("keydown", handleKeyboard);
-  }, [videoUrl]);
+  }, [mediaPath]);
 
   function startDividerDrag(kind: "vertical" | "horizontal", event: React.PointerEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -166,26 +180,9 @@ function App() {
     setDraggingDivider(null);
   }
 
-  function importBrowserVideo(file?: File) {
-    if (!file) return;
-    if (browserObjectUrl.current) URL.revokeObjectURL(browserObjectUrl.current);
-    const objectUrl = URL.createObjectURL(file);
-    browserObjectUrl.current = objectUrl;
-    setVideoUrl(objectUrl);
-    setMediaPath(file.name);
-    setMediaInfo(null);
-    setDuration(0);
-    setCurrentTime(0);
-    setWaveform(null);
-    setKeyframes([]);
-    setCuts([]);
-    setZoom(1);
-    setAnalysisError("Browser preview only. FFmpeg analysis is available in the desktop app.");
-  }
-
   async function importVideo() {
     if (!isTauri()) {
-      fileInput.current?.click();
+      setAnalysisError("Importing needs the Blaze desktop app. A plain browser cannot run FFmpeg.");
       return;
     }
     let token = loadToken.current;
@@ -201,10 +198,10 @@ function App() {
       if (typeof selected !== "string") return;
 
       token = ++loadToken.current;
-      videoRef.current?.pause();
+      player.current?.pause();
       setIsPlaying(false);
+      setCanPlay(false);
       setMediaPath(selected);
-      setVideoUrl(convertFileSrc(selected));
       setMediaInfo(null);
       setDuration(0);
       setCurrentTime(0);
@@ -220,8 +217,14 @@ function App() {
       if (token !== loadToken.current) return;
       setMediaInfo(info);
       setDuration(info.duration);
+      player.current?.load({
+        path: selected,
+        duration: info.duration,
+        fps: info.fps,
+        hasAudio: info.has_audio,
+      });
 
-      const [waveResult, keyframeResult] = await Promise.allSettled([
+      const [waveResult, keyframeResult, audioResult] = await Promise.allSettled([
         info.has_audio
           ? invoke<ArrayBuffer>("generate_waveform", {
               path: selected,
@@ -229,9 +232,18 @@ function App() {
             }).then(parseWaveform)
           : Promise.resolve(null),
         invoke<number[]>("detect_keyframes", { path: selected }),
+        info.has_audio
+          ? invoke<string>("prepare_audio", { path: selected })
+          : Promise.resolve(null),
       ]);
 
       if (token !== loadToken.current) return;
+
+      if (audioResult.status === "fulfilled") {
+        if (audioResult.value) player.current?.setAudioSource(convertFileSrc(audioResult.value));
+      } else {
+        player.current?.disableAudio(`Audio could not be prepared (${String(audioResult.reason)}). Playing without sound.`);
+      }
 
       if (waveResult.status === "fulfilled") {
         setWaveform(waveResult.value);
@@ -254,18 +266,12 @@ function App() {
   }
 
   function togglePlayback() {
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) {
-      void video.play().catch((error) => setAnalysisError(`Playback failed: ${String(error)}`));
-    } else {
-      video.pause();
-    }
+    player.current?.toggle();
   }
 
   function seekVideo(nextTime: number) {
     const safeTime = Math.min(duration, Math.max(0, nextTime));
-    if (videoRef.current) videoRef.current.currentTime = safeTime;
+    player.current?.seek(safeTime);
     setCurrentTime(safeTime);
   }
 
@@ -318,38 +324,17 @@ function App() {
 
   return (
     <main className="app-shell">
-      <input
-        ref={fileInput}
-        className="hidden-input"
-        type="file"
-        accept="video/*"
-        onChange={(event) => {
-          importBrowserVideo(event.target.files?.[0]);
-          event.target.value = "";
-        }}
-      />
+      <audio ref={audioElement} hidden />
       <section className={`workspace-grid${draggingDivider ? " is-resizing" : ""}`} style={workspaceStyle}>
         <section className="quadrant preview-quadrant">
           <div className="preview-stage">
-            {videoUrl ? (
-              <video
-                ref={videoRef}
-                className="video-preview"
-                src={videoUrl}
-                playsInline
-                preload="metadata"
-                onLoadedMetadata={(event) => {
-                  if (!duration && Number.isFinite(event.currentTarget.duration)) {
-                    setDuration(event.currentTarget.duration);
-                  }
-                }}
-                onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
-                onPlay={() => setIsPlaying(true)}
-                onPause={() => setIsPlaying(false)}
-                onEnded={() => setIsPlaying(false)}
-                onClick={togglePlayback}
-              />
-            ) : (
+            <canvas
+              ref={previewCanvas}
+              className="video-preview"
+              hidden={!mediaPath}
+              onClick={togglePlayback}
+            />
+            {!mediaPath && (
               <div className="import-empty">
                 <div className="import-symbol">
                   <svg viewBox="0 0 48 48" role="presentation">
@@ -364,9 +349,15 @@ function App() {
             )}
           </div>
 
-          {videoUrl && (
+          {mediaPath && (
             <div className="player-controls">
-              <button className="player-button" onClick={togglePlayback} aria-label={isPlaying ? "Pause" : "Play"}>
+              <button
+                className="player-button"
+                onClick={togglePlayback}
+                disabled={!isPlaying && !canPlay}
+                title={!isPlaying && !canPlay ? "Preparing audio…" : undefined}
+                aria-label={isPlaying ? "Pause" : "Play"}
+              >
                 {isPlaying ? "Ⅱ" : "▶"}
               </button>
               <span className="player-time">{formatTime(currentTime)}</span>
@@ -400,7 +391,7 @@ function App() {
               />
               <button
                 className="player-button secondary-player-button"
-                onClick={() => void videoRef.current?.parentElement?.requestFullscreen?.()}
+                onClick={() => void previewCanvas.current?.parentElement?.requestFullscreen?.()}
                 aria-label="Fullscreen"
               >
                 ⛶
@@ -443,20 +434,20 @@ function App() {
               <div className="tool-kicker">FAST · KEYFRAME-ALIGNED</div>
               <h2>Blaze Mode</h2>
               <p>Cuts snap to real keyframes detected in the source video.</p>
-              <button className="tool-primary" onClick={addCut} disabled={!videoUrl}>ADD CUT AT PLAYHEAD</button>
-              {videoUrl && keyframes.length === 0 && <span className="tool-note">Keyframe analysis is unavailable.</span>}
+              <button className="tool-primary" onClick={addCut} disabled={!mediaPath}>ADD CUT AT PLAYHEAD</button>
+              {mediaPath && keyframes.length === 0 && <span className="tool-note">Keyframe analysis is unavailable.</span>}
             </>}
             {activeTab === "precise" && <>
               <div className="tool-kicker">FRAME-ACCURATE · RE-ENCODE</div>
               <h2>Precise Mode</h2>
               <p>Place cuts at the exact playhead position. Export will re-encode where required.</p>
-              <button className="tool-primary" onClick={addCut} disabled={!videoUrl}>ADD PRECISE CUT</button>
+              <button className="tool-primary" onClick={addCut} disabled={!mediaPath}>ADD PRECISE CUT</button>
             </>}
             {activeTab === "export" && <>
               <div className="tool-kicker">OUTPUT</div>
               <h2>Export</h2>
               <p>{cuts.length} cut point{cuts.length === 1 ? "" : "s"} · {mode === "blaze" ? "Blaze" : "Precise"} mode</p>
-              <button className="tool-primary" disabled={!videoUrl}>EXPORT VIDEO</button>
+              <button className="tool-primary" disabled={!mediaPath}>EXPORT VIDEO</button>
               <span className="tool-note">Export engine not connected yet.</span>
             </>}
             {analysisLoading && <span className="tool-note">Analysing media with FFmpeg…</span>}
@@ -496,7 +487,7 @@ function App() {
                   />
                 ) : (
                   <span className="track-empty">
-                    {!videoUrl
+                    {!mediaPath
                       ? "Import footage to view its waveform"
                       : mediaInfo && !mediaInfo.has_audio
                         ? "No audio stream"
