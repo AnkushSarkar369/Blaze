@@ -1484,7 +1484,7 @@ impl eframe::App for BlazeApp {
                                         let slider_width = (ui.available_width()
                                             - time_width
                                             - skip_button_width
-                                            - 26.0)
+                                            - 34.0)
                                             .max(36.0);
 
                                         // Custom transport seekbar: a continuous orange fill,
@@ -1590,7 +1590,8 @@ impl eframe::App for BlazeApp {
                                         {
                                             self.skip_cuts_enabled = !self.skip_cuts_enabled;
                                         }
-                                        ui.add_space(8.0);
+                                        // Keep a deliberate gap between the button and the preview panel edge.
+                                        ui.add_space(16.0);
                                     },
                                 );
                             }
