@@ -1595,12 +1595,15 @@ impl eframe::App for BlazeApp {
                                         );
 
                                         ui.add_space(8.0);
-                                        let skip_button = egui::Button::new(if self.skip_cuts_enabled {
+                                        let skip_label = if self.skip_cuts_enabled {
                                             "Skip Cuts: ON"
                                         } else {
                                             "Skip Cuts: OFF"
-                                        })
-                                        .font(egui::FontId::proportional(13.5))
+                                        };
+                                        let skip_button = egui::Button::new(
+                                            egui::RichText::new(skip_label)
+                                                .font(egui::FontId::proportional(13.5)),
+                                        )
                                         .fill(if self.skip_cuts_enabled {
                                             egui::Color32::from_rgb(38, 111, 73)
                                         } else {
