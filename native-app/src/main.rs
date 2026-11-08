@@ -1293,7 +1293,8 @@ impl eframe::App for BlazeApp {
                     ToolTab::BlazeMode | ToolTab::PreciseMode => {
                         // egui sliders use Spacing::slider_width internally; add_sized alone
                         // only sizes the surrounding widget allocation. Match the panel width.
-                        ui.spacing_mut().slider_width = ui.available_width() - 12.0;
+                        let slider_rail_width = (ui.available_width() - 12.0).max(1.0);
+                        ui.spacing_mut().slider_width = slider_rail_width;
                         let expert_mode_changed =
                             ui.checkbox(&mut self.expert_mode, "Expert Mode").changed();
                         if expert_mode_changed && self.expert_mode {
