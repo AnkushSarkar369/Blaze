@@ -102,10 +102,7 @@ struct BlazeApp {
     detection_level: usize,
     padding_level: usize,
     minimum_silence_ms: u32,
-    custom_detection_open: bool,
-    custom_padding_open: bool,
-    detection_custom_enabled: bool,
-    padding_custom_enabled: bool,
+    expert_mode: bool,
     custom_padding_before_ms: u32,
     custom_padding_after_ms: u32,
     custom_threshold_db: f64,
@@ -162,10 +159,7 @@ impl BlazeApp {
             detection_level: 2,
             padding_level: 1,
             minimum_silence_ms: 300,
-            custom_detection_open: false,
-            custom_padding_open: false,
-            detection_custom_enabled: false,
-            padding_custom_enabled: false,
+            expert_mode: false,
             custom_padding_before_ms: 60,
             custom_padding_after_ms: 60,
             custom_threshold_db: 22.0,
@@ -202,7 +196,7 @@ impl BlazeApp {
             2 => PaddingPreset::Tight.milliseconds(),
             _ => PaddingPreset::Normal.milliseconds(),
         };
-        let (padding_before_ms, padding_after_ms) = if self.padding_custom_enabled {
+        let (padding_before_ms, padding_after_ms) = if self.expert_mode {
             (self.custom_padding_before_ms, self.custom_padding_after_ms)
         } else {
             (preset_padding, preset_padding)
@@ -212,8 +206,8 @@ impl BlazeApp {
             padding_before_ms,
             padding_after_ms,
             minimum_duration_ms: self.minimum_silence_ms,
-            threshold_below_baseline_db: self.detection_custom_enabled.then_some(self.custom_threshold_db),
-            peak_ceiling_dbfs: (self.detection_custom_enabled && self.custom_peak_gate_enabled)
+            threshold_below_baseline_db: self.expert_mode.then_some(self.custom_threshold_db),
+            peak_ceiling_dbfs: (self.expert_mode && self.custom_peak_gate_enabled)
                 .then_some(self.custom_peak_ceiling_dbfs),
         };
         let tx = self.silence_tx.clone();
@@ -755,57 +749,122 @@ impl eframe::App for BlazeApp {
                 ui.label(self.active_tool_tab.description());
 
                 if self.active_tool_tab == ToolTab::PreciseMode {
-                    ui.add_space(18.0);
-                    ui.strong("Detection Level");
-                    ui.horizontal(|ui| {
-                        ui.add(egui::Slider::new(&mut self.detection_level, 0..=4).step_by(1.0).show_value(false));
-                        if ui.small_button("Custom").clicked() {
-                            self.detection_custom_enabled = true;
-                            self.custom_detection_open = true;
-                        }
-                    });
-                    egui::Grid::new("detection_level_labels")
-                        .num_columns(5)
-                        .show(ui, |ui| {
-                            for (index, label) in ["Comfortable", "Optimal", "Default", "Tight", "Aggressive"].iter().enumerate() {
-                                ui.label(egui::RichText::new(*label).size(10.0).color(
-                                    if self.detection_level == index { ui.visuals().strong_text_color() } else { ui.visuals().weak_text_color() }
-                                ));
-                            }
-                            ui.end_row();
-                        });
+                    ui.add_space(16.0);
+                    ui.checkbox(&mut self.expert_mode, "Expert Mode");
+                    ui.add_space(12.0);
 
-                    ui.add_space(18.0);
-                    ui.strong("Padding");
-                    ui.horizontal(|ui| {
-                        ui.add(egui::Slider::new(&mut self.padding_level, 0..=2).step_by(1.0).show_value(false));
-                        if ui.small_button("Custom").clicked() {
-                            self.padding_custom_enabled = true;
-                            self.custom_padding_open = true;
-                        }
-                    });
-                    egui::Grid::new("padding_level_labels")
-                        .num_columns(3)
-                        .show(ui, |ui| {
-                            for (index, label) in ["Comfortable", "Normal", "Tight"].iter().enumerate() {
-                                ui.label(egui::RichText::new(*label).size(10.0).color(
-                                    if self.padding_level == index { ui.visuals().strong_text_color() } else { ui.visuals().weak_text_color() }
-                                ));
-                            }
-                            ui.end_row();
-                        });
+                    if self.expert_mode {
+                        ui.strong("Detection Threshold");
+                        ui.label("Level below the adaptive programme baseline");
+                        ui.add(
+                            egui::Slider::new(&mut self.custom_threshold_db, 3.0..=60.0)
+                                .suffix(" dB")
+                                .fixed_decimals(1),
+                        );
 
-                    ui.add_space(18.0);
-                    ui.horizontal(|ui| {
+                        ui.add_space(14.0);
+                        ui.strong("Peak Ceiling");
+                        ui.checkbox(&mut self.custom_peak_gate_enabled, "Enable peak ceiling");
+                        if self.custom_peak_gate_enabled {
+                            ui.add(
+                                egui::Slider::new(&mut self.custom_peak_ceiling_dbfs, -90.0..=0.0)
+                                    .suffix(" dBFS")
+                                    .fixed_decimals(1),
+                            );
+                        }
+
+                        ui.add_space(14.0);
+                        ui.strong("Padding");
+                        ui.label("Preserve audio around detected silence");
+                        egui::Grid::new("expert_padding_controls")
+                            .num_columns(2)
+                            .spacing([12.0, 8.0])
+                            .show(ui, |ui| {
+                                ui.label("Before");
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::DragValue::new(&mut self.custom_padding_before_ms)
+                                        .range(0..=2000)
+                                        .speed(10));
+                                    ui.label("ms");
+                                });
+                                ui.end_row();
+
+                                ui.label("After");
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::DragValue::new(&mut self.custom_padding_after_ms)
+                                        .range(0..=2000)
+                                        .speed(10));
+                                    ui.label("ms");
+                                });
+                                ui.end_row();
+                            });
+
+                        ui.add_space(14.0);
                         ui.strong("Minimum Silence Duration");
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.horizontal(|ui| {
                             ui.add(egui::DragValue::new(&mut self.minimum_silence_ms)
                                 .range(10..=10_000)
-                                .suffix(" ms")
                                 .speed(10));
+                            ui.label("ms");
                         });
-                    });
-                    ui.small("Default is 300 ms.");
+                    } else {
+                        ui.strong("Detection Level");
+                        ui.add(
+                            egui::Slider::new(&mut self.detection_level, 0..=4)
+                                .step_by(1.0)
+                                .show_value(false),
+                        );
+                        egui::Grid::new("detection_level_labels")
+                            .num_columns(5)
+                            .spacing([4.0, 4.0])
+                            .show(ui, |ui| {
+                                for (index, label) in ["Comfortable", "Optimal", "Default", "Tight", "Aggressive"].iter().enumerate() {
+                                    ui.label(egui::RichText::new(*label).size(10.0).color(
+                                        if self.detection_level == index {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().weak_text_color()
+                                        }
+                                    ));
+                                }
+                                ui.end_row();
+                            });
+
+                        ui.add_space(18.0);
+                        ui.strong("Padding");
+                        ui.add(
+                            egui::Slider::new(&mut self.padding_level, 0..=2)
+                                .step_by(1.0)
+                                .show_value(false),
+                        );
+                        egui::Grid::new("padding_level_labels")
+                            .num_columns(3)
+                            .spacing([8.0, 4.0])
+                            .show(ui, |ui| {
+                                for (index, label) in ["Comfortable", "Normal", "Tight"].iter().enumerate() {
+                                    ui.label(egui::RichText::new(*label).size(10.0).color(
+                                        if self.padding_level == index {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().weak_text_color()
+                                        }
+                                    ));
+                                }
+                                ui.end_row();
+                            });
+
+                        ui.add_space(18.0);
+                        ui.horizontal(|ui| {
+                            ui.strong("Minimum Silence Duration");
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label("ms");
+                                ui.add(egui::DragValue::new(&mut self.minimum_silence_ms)
+                                    .range(10..=10_000)
+                                    .speed(10));
+                            });
+                        });
+                        ui.small("Default is 300 ms.");
+                    }
 
                     ui.add_space(20.0);
                     let can_detect = self.selected_path.is_some()
@@ -822,34 +881,6 @@ impl eframe::App for BlazeApp {
                         ui.add_space(6.0);
                         ui.spinner();
                         ui.small("Analysing audio. A rescan replaces existing regions.");
-                    }
-
-                    if self.custom_detection_open {
-                        egui::Window::new("Detection Level · Custom")
-                            .collapsible(false)
-                            .resizable(false)
-                            .open(&mut self.custom_detection_open)
-                            .show(ui.ctx(), |ui| {
-                                ui.label("Threshold below adaptive programme baseline");
-                                ui.add(egui::Slider::new(&mut self.custom_threshold_db, 3.0..=60.0).suffix(" dB"));
-                                ui.small("Custom threshold overrides the selected detection preset.");
-                                ui.checkbox(&mut self.custom_peak_gate_enabled, "Also apply peak ceiling");
-                                if self.custom_peak_gate_enabled {
-                                    ui.add(egui::Slider::new(&mut self.custom_peak_ceiling_dbfs, -90.0..=0.0).suffix(" dBFS"));
-                                }
-                            });
-                    }
-                    if self.custom_padding_open {
-                        egui::Window::new("Padding · Custom")
-                            .collapsible(false)
-                            .resizable(false)
-                            .open(&mut self.custom_padding_open)
-                            .show(ui.ctx(), |ui| {
-                                ui.label("Padding before detected silence");
-                                ui.add(egui::DragValue::new(&mut self.custom_padding_before_ms).range(0..=2000).suffix(" ms"));
-                                ui.label("Padding after detected silence");
-                                ui.add(egui::DragValue::new(&mut self.custom_padding_after_ms).range(0..=2000).suffix(" ms"));
-                            });
                     }
                 }
 
