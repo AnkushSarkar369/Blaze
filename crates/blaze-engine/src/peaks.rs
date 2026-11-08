@@ -15,9 +15,9 @@
 //! without copying.
 
 pub const SAMPLE_RATE: u32 = 24_000;
-/// 24 samples at 24 kHz = 1 ms per block, i.e. 1000 blocks per second. That is
-/// finer than one screen pixel even at the maximum timeline zoom.
-pub const BLOCK_SAMPLES: usize = 24;
+/// 120 samples at 24 kHz = 5 ms per block, i.e. 200 blocks per second.
+/// This retains fine waveform detail while keeping long-media peak data compact.
+pub const BLOCK_SAMPLES: usize = 120;
 pub const BLOCKS_PER_SECOND: u32 = SAMPLE_RATE / BLOCK_SAMPLES as u32;
 
 const MAGIC: u32 = 0x4257_5631;
