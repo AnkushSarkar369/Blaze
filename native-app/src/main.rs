@@ -457,12 +457,12 @@ impl eframe::App for BlazeApp {
                             egui::pos2(x, lane.center().y),
                             egui::vec2(14.0, lane.height().max(18.0)),
                         );
-                        let id = ui.id().with(("edit-region-handle", index, is_start));
+                        let id = ui.scope_id().with(("edit-region-handle", index, is_start));
                         let handle_response = ui.interact(handle_rect, id, egui::Sense::drag());
                         handle_interaction |= handle_response.hovered() || handle_response.dragged();
                         if handle_response.dragged() {
                             if let Some(pointer) = handle_response.interact_pointer_pos() {
-                                let time = (timeline_offset
+                                let time = (self.timeline_offset
                                     + ((pointer.x - lane.left()) / lane.width()).clamp(0.0, 1.0) as f64
                                         * visible_duration)
                                     .clamp(0.0, duration);
@@ -501,14 +501,14 @@ impl eframe::App for BlazeApp {
                         );
                         let response = ui.interact(
                             handle_rect,
-                            ui.id().with("pending-region-start"),
+                            ui.scope_id().with("pending-region-start"),
                             egui::Sense::drag(),
                         );
                         handle_interaction |= response.hovered() || response.dragged();
                         if response.dragged() {
                             if let Some(pointer) = response.interact_pointer_pos() {
                                 self.pending_region_start = Some(
-                                    (timeline_offset
+                                    (self.timeline_offset
                                         + ((pointer.x - lane.left()) / lane.width()).clamp(0.0, 1.0) as f64
                                             * visible_duration)
                                         .clamp(0.0, duration),
