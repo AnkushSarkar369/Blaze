@@ -1451,7 +1451,7 @@ impl eframe::App for BlazeApp {
                                             }
                                         }
 
-                                        ui.add_space(10.0);
+                                        ui.add_space(4.0);
 
                                         let duration = self.media_duration();
                                         self.playback_position = self.playback_position.clamp(0.0, duration);
