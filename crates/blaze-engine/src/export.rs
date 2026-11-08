@@ -41,8 +41,10 @@ fn frame_rate(fps: f64) -> Result<FrameRate, String> {
     }
     let common = [
         (24000, 1001, 24, true), (30000, 1001, 30, true),
-        (60000, 1001, 60, true), (24, 1, 24, false), (25, 1, 25, false),
-        (30, 1, 30, false), (48, 1, 48, false), (50, 1, 50, false), (60, 1, 60, false),
+        (60000, 1001, 60, true), (120000, 1001, 120, true),
+        (24, 1, 24, false), (25, 1, 25, false), (30, 1, 30, false),
+        (48, 1, 48, false), (50, 1, 50, false), (60, 1, 60, false),
+        (100, 1, 100, false), (120, 1, 120, false),
     ];
     if let Some((num, den, nominal, ntsc)) = common.iter().copied()
         .min_by(|a, b| {
@@ -54,8 +56,7 @@ fn frame_rate(fps: f64) -> Result<FrameRate, String> {
     {
         return Ok(FrameRate { numerator: num, denominator: den, nominal, ntsc });
     }
-    let nominal = fps.round().clamp(1.0, 240.0) as u32;
-    Ok(FrameRate { numerator: nominal, denominator: 1, nominal, ntsc: false })
+    Err(format!("The source frame rate ({fps:.6} fps) is not a supported constant frame rate for frame-accurate export."))
 }
 
 fn seconds_to_frames(seconds: f64, rate: FrameRate) -> i64 {
@@ -193,6 +194,11 @@ pub fn export_blaze_video(
     if !duration.is_finite() || duration <= 0.0 { return Err("The source video has an invalid duration.".into()); }
     if delete_ranges.is_empty() { return Err("There are no cut regions to export.".into()); }
     if source == output { return Err("The output file cannot replace the source video.".into()); }
+    let source_ext = source.extension().and_then(|s| s.to_str()).unwrap_or("mkv");
+    let output_ext_check = output.extension().and_then(|s| s.to_str()).unwrap_or(source_ext);
+    if !source_ext.eq_ignore_ascii_case(output_ext_check) {
+        return Err(format!("Blaze Export preserves the source container. Save the output with the .{source_ext} extension."));
+    }
 
     let rate = frame_rate_for_stream_copy(engine, source)?;
     let segments = keep_segments(delete_ranges, duration, rate);
@@ -379,7 +385,7 @@ fn build_fcp7_xml(
         let sample_rate = info.audio_sample_rate.unwrap_or(48000);
         out.push_str(&format!("<audio><numOutputChannels>{channels}</numOutputChannels><format><samplecharacteristics><samplerate>{sample_rate}</samplerate></samplecharacteristics></format><track>\n"));
         for (i, segment) in segments.iter().enumerate() {
-            out.push_str(&format!("<clipitem id=\"audio-{}\"><name>{name_xml}</name><duration>{}</duration><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate><start>{}</start><end>{}</end><in>{}</in><out>{}</out><file id=\"file-1\"><name>{name_xml}</name><pathurl>{path_url}</pathurl></file><sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack><link><linkclipref>video-{}</linkclipref><mediatype>video</mediatype><trackindex>1</trackindex><clipindex>{}</clipindex></link></clipitem>\n",
+            out.push_str(&format!("<clipitem id=\"audio-{}\"><name>{name_xml}</name><duration>{}</duration><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate><start>{}</start><end>{}</end><in>{}</in><out>{}</out><file id=\"file-1\"/><sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack><link><linkclipref>video-{}</linkclipref><mediatype>video</mediatype><trackindex>1</trackindex><clipindex>{}</clipindex></link></clipitem>\n",
                 i + 1, segment.duration(), rate.nominal, segment.record_in,
                 segment.record_in + segment.duration(), segment.source_in, segment.source_out, i + 1, i + 1));
         }
