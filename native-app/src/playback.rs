@@ -254,6 +254,13 @@ impl Playback {
 
             if surface.has_frame {
                 unsafe {
+                    gl.enable(glow::SCISSOR_TEST);
+                    gl.scissor(
+                        viewport.left_px,
+                        viewport.from_bottom_px,
+                        width,
+                        height,
+                    );
                     gl.bind_framebuffer(glow::READ_FRAMEBUFFER, surface.framebuffer);
                     gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, painter.intermediate_fbo());
                     gl.blit_framebuffer(
