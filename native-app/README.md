@@ -34,7 +34,9 @@ The app expects the existing FFmpeg/FFprobe tools in the repository's `BIN/` dir
 - A dedicated transport strip with vector play/pause and import icons, a wide seek bar and right-aligned time display.
 - Play resumes from the beginning after the current clip reaches its end.
 - Background FFprobe metadata inspection through `blaze-engine`.
-- The single-lane waveform and timeline remain placeholders.
+- A single continuous, mirrored waveform generated asynchronously from the video's original audio.
+- A playback-synchronised playhead that follows libmpv's video position; clicking or dragging the waveform seeks the video.
+- Waveform peaks are generated at 200 blocks per second (5 ms resolution), with all source channels merged into one envelope. Peak data is compact and rendered at screen-pixel resolution.
 - Editing, cuts, export, and the Tools workflow are not implemented yet.
 
-Audio playback is independent of the waveform. The waveform will be a visual envelope only; it must never be used as the playback signal.
+Audio playback is independent of the waveform. The waveform is a visual envelope only; it is never used as the playback signal. Videos without an audio stream do not generate a waveform.
