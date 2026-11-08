@@ -59,16 +59,27 @@ impl Waveform {
 
     /// Paint one continuous, mirrored amplitude silhouette. Samples are
     /// reduced to the strongest peak within each horizontal screen pixel.
-    pub fn paint(&self, painter: &egui::Painter, rect: egui::Rect) {
+    pub fn paint_range(
+        &self,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        start_fraction: f64,
+        end_fraction: f64,
+    ) {
         if self.min.is_empty() || rect.width() < 1.0 || rect.height() < 2.0 {
             return;
         }
 
+        let start_fraction = start_fraction.clamp(0.0, 1.0);
+        let end_fraction = end_fraction.clamp(start_fraction, 1.0);
         let painter = painter.with_clip_rect(rect);
         let baseline = rect.center().y;
         let half_height = rect.height() * 0.47;
         let width = rect.width().ceil() as usize;
         let count = self.min.len();
+        let first_sample = (start_fraction * count as f64).floor() as usize;
+        let last_sample = ((end_fraction * count as f64).ceil() as usize).min(count);
+        let visible_count = last_sample.saturating_sub(first_sample).max(1);
 
         painter.line_segment(
             [
@@ -82,9 +93,11 @@ impl Waveform {
         let stroke = egui::Stroke::new(1.0, waveform_color);
 
         for column in 0..width {
-            let start = column * count / width;
-            let end = (((column + 1) * count + width - 1) / width).max(start + 1).min(count);
-            if start >= count {
+            let start = first_sample + column * visible_count / width;
+            let end = (first_sample + ((column + 1) * visible_count + width - 1) / width)
+                .max(start + 1)
+                .min(last_sample);
+            if start >= last_sample {
                 break;
             }
 
