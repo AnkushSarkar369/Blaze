@@ -289,8 +289,8 @@ impl eframe::App for BlazeApp {
             });
     }
 
-    fn on_exit(&mut self, _gl: Option<&glow::Context>) {
-        self.playback.shutdown();
+    fn on_exit(&mut self, gl: Option<&glow::Context>) {
+        self.playback.shutdown(gl);
     }
 }
 
