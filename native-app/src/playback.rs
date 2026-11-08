@@ -126,6 +126,12 @@ impl Playback {
             Mpv::builder()?
                 .set_property("vo", "libmpv")?
                 .set_property("hwdec", "vaapi-copy")?
+                // Haswell VA-API exposes MPEG-2, H.264 and VC-1 decode profiles.
+                // HEVC and other unsupported codecs deliberately fall back to software.
+                .set_property("hwdec-codecs", "h264,mpeg2video,vc1")?
+                // Add a small buffer cushion for low-power systems without changing
+                // the source audio or resampling it.
+                .set_property("audio-buffer", 0.30_f64)?
                 .set_property("video-timing-offset", 0.0_f64)?
                 .set_property("keep-open", "yes")?
                 .set_property("osc", false)?
