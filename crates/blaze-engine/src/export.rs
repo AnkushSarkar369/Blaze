@@ -314,9 +314,10 @@ fn build_edl(source: &Path, info: &MediaInfo, rate: FrameRate, segments: &[Segme
         source.file_stem().and_then(|s| s.to_str()).unwrap_or("Blaze Edit")));
     for (index, segment) in segments.iter().enumerate() {
         let n = index + 1;
-        let source_in = 90_000_i64 + segment.source_in;
-        let source_out = 90_000_i64 + segment.source_out;
-        let record_in = 90_000_i64 + segment.record_in;
+        let timecode_base = rate.nominal as i64 * 3600;
+        let source_in = timecode_base + segment.source_in;
+        let source_out = timecode_base + segment.source_out;
+        let record_in = timecode_base + segment.record_in;
         let record_out = record_in + segment.duration();
         out.push_str(&format!("{n:03}  {reel:<8} V     C        {} {} {} {}\n",
             timecode(source_in, rate), timecode(source_out, rate),
@@ -343,8 +344,8 @@ fn build_fcp7_xml(
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE xmeml>\n<xmeml version=\"5\"><project><name>Blaze Edit</name><children><sequence id=\"sequence-1\">\n");
     out.push_str(&format!("<name>Blaze Edit</name><duration>{clip_duration}</duration><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate>\n",
         rate.nominal));
-    out.push_str(&format!("<timecode><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate><string>01:00:00:00</string><frame>0</frame><displayformat>NDF</displayformat></timecode>\n",
-        rate.nominal));
+    out.push_str(&format!("<timecode><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate><string>01:00:00:00</string><frame>{}</frame><displayformat>NDF</displayformat></timecode>\n",
+        rate.nominal, rate.nominal as i64 * 3600));
     out.push_str(&format!("<media><video><format><samplecharacteristics><width>{width}</width><height>{height}</height><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate><fielddominance>none</fielddominance><pixelaspectratio>square</pixelaspectratio></samplecharacteristics></format><track>\n",
         rate.nominal));
     for (i, segment) in segments.iter().enumerate() {
@@ -388,7 +389,7 @@ fn build_fcpxml(
     let sample_rate = info.audio_sample_rate.unwrap_or(48000);
     let format_name = if rate.ntsc {
         format!("FFVideoFormat{}p{:.2}", height,
-            rate.nominal as f64 * rate.denominator as f64 / rate.numerator as f64)
+            rate.numerator as f64 / rate.denominator as f64)
     } else { format!("FFVideoFormat{}p{}", height, rate.nominal) };
 
     let mut out = String::new();
@@ -405,7 +406,7 @@ fn build_fcpxml(
         frame_time(total_frames, rate)));
     if info.has_audio {
         let layout = if channels == 1 { "mono" } else if channels == 2 { "stereo" } else { "surround" };
-        out.push_str(&format!(" audioLayout=\"{layout}\" audioRate=\"{}k\"", sample_rate / 1000));
+        out.push_str(&format!(" audioLayout=\"{layout}\" audioRate=\"{}k\"", if sample_rate % 1000 == 0 { format!(\"{}\", sample_rate / 1000) } else { format!(\"{:.1}\", sample_rate as f64 / 1000.0) }));
     }
     out.push_str("><spine>\n");
     for (i, segment) in segments.iter().enumerate() {
