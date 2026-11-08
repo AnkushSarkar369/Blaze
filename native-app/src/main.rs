@@ -897,7 +897,26 @@ impl eframe::App for BlazeApp {
                         ui.label("Unrestricted cut boundaries. Use when exact edit placement matters more than stream-copy constraints.");
                     }
                     ToolTab::BlazeMode | ToolTab::PreciseMode => {
-                ui.checkbox(&mut self.expert_mode, "Expert Mode");
+                let expert_mode_changed = ui.checkbox(&mut self.expert_mode, "Expert Mode").changed();
+                if expert_mode_changed && self.expert_mode {
+                    // Initialize Expert Mode from the currently selected presets,
+                    // rather than exposing unrelated hard-coded defaults.
+                    let level = match self.detection_level {
+                        0 => DetectionLevel::Comfortable,
+                        1 => DetectionLevel::Optimal,
+                        2 => DetectionLevel::Default,
+                        3 => DetectionLevel::Tight,
+                        _ => DetectionLevel::Aggressive,
+                    };
+                    self.custom_threshold_db = level.threshold_below_baseline_db();
+                    let padding = match self.padding_level {
+                        0 => PaddingPreset::Comfortable.milliseconds(),
+                        2 => PaddingPreset::Tight.milliseconds(),
+                        _ => PaddingPreset::Normal.milliseconds(),
+                    };
+                    self.custom_padding_before_ms = padding;
+                    self.custom_padding_after_ms = padding;
+                }
                 ui.add_space(12.0);
 
                 if self.expert_mode {
