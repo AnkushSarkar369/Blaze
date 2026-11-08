@@ -221,7 +221,7 @@ impl eframe::App for BlazeApp {
                 });
             });
 
-        egui::TopBottomPanel::bottom("status")
+        egui::TopBottomPanel::top("status")
             .exact_height(24.0)
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
