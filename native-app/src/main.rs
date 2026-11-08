@@ -157,11 +157,14 @@ impl BlazeApp {
         cc: &eframe::CreationContext<'_>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = egui::Color32::from_rgb(21, 22, 24);
-        visuals.window_fill = egui::Color32::from_rgb(24, 25, 27);
-        visuals.extreme_bg_color = egui::Color32::from_rgb(16, 17, 18);
-        visuals.faint_bg_color = egui::Color32::from_rgb(28, 30, 32);
-        visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(25, 27, 29);
+        let app_background = egui::Color32::from_rgb(16, 17, 18);
+        let panel_border = egui::Color32::from_rgb(42, 44, 47);
+        visuals.panel_fill = app_background;
+        visuals.window_fill = app_background;
+        visuals.extreme_bg_color = app_background;
+        visuals.faint_bg_color = app_background;
+        visuals.widgets.noninteractive.bg_fill = app_background;
+        visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, panel_border);
         visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(34, 36, 39);
         visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(46, 49, 52);
         visuals.widgets.active.bg_fill = egui::Color32::from_rgb(255, 104, 79);
@@ -671,6 +674,9 @@ impl eframe::App for BlazeApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Make panel splitters easier to grab without changing their saved sizes.
+        ui.style_mut().interaction.resize_grab_radius_side = 7.0;
+
         egui::Panel::bottom("timeline")
             .resizable(true)
             .default_size(220.0)
@@ -1273,7 +1279,7 @@ impl eframe::App for BlazeApp {
                 // One framed Preview Panel contains both the video viewport
                 // and its transport bar. Tools remains a separate right panel.
                 egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(21, 22, 24))
+                    .fill(egui::Color32::from_rgb(16, 17, 18))
                     .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(42, 44, 47)))
                     .corner_radius(egui::CornerRadius::same(2))
                     .inner_margin(egui::Margin::same(6))
@@ -1317,7 +1323,7 @@ impl eframe::App for BlazeApp {
                             ui.painter().rect_filled(
                                 ui.max_rect(),
                                 0.0,
-                                egui::Color32::from_rgb(17, 18, 20),
+                                egui::Color32::from_rgb(16, 17, 18),
                             );
 
                             if self.selected_path.is_some() {
@@ -1351,64 +1357,91 @@ impl eframe::App for BlazeApp {
 
                                         let time_label = format!(
                                             "{} / {}",
-                                            format_time(self.playback_position),
-                                            format_time(duration)
+                                            format_time_millis(self.playback_position),
+                                            format_time_millis(duration)
                                         );
-                                        let time_width = if duration >= 3600.0 { 148.0 } else { 104.0 };
+                                        let time_width = if duration >= 3600.0 { 232.0 } else { 178.0 };
                                         let skip_button_width = 112.0;
                                         let slider_width = (ui.available_width()
                                             - time_width
                                             - skip_button_width
                                             - 48.0)
-                                            .max(32.0);
+                                            .max(36.0);
 
-                                        // egui Slider has its own preferred width. Override it
-                                        // locally so the seek track truly fills the preview.
-                                        let mut slider_response = None;
-                                        ui.scope(|ui| {
-                                            ui.spacing_mut().slider_width = slider_width;
-                                            slider_response = Some(
-                                                ui.add_sized(
-                                                    [slider_width, 22.0],
-                                                    egui::Slider::new(
-                                                        &mut self.playback_position,
-                                                        0.0..=duration,
-                                                    )
-                                                    .show_value(false),
-                                                )
-                                                .on_hover_text("Seek"),
-                                            );
-                                        });
-                                        let response = slider_response.expect("slider scope always runs");
+                                        // Custom transport seekbar: a continuous orange fill,
+                                        // dark remainder and a white circular handle.
+                                        let (seek_id, seek_rect) =
+                                            ui.allocate_space(egui::vec2(slider_width, 32.0));
+                                        let seek_response = ui
+                                            .interact(seek_rect, seek_id, egui::Sense::click_and_drag())
+                                            .on_hover_text("Seek");
+                                        let track_width = (seek_rect.width() - 18.0).max(1.0);
+                                        let track = egui::Rect::from_center_size(
+                                            seek_rect.center(),
+                                            egui::vec2(track_width, 4.0),
+                                        );
 
-                                        if response.dragged() {
-                                            self.seeking = true;
-                                        }
+                                        let finish_seek = seek_response.drag_stopped() || seek_response.clicked();
+                                        if seek_response.dragged() || finish_seek {
+                                            if let Some(pointer) = seek_response.interact_pointer_pos() {
+                                                let progress = ((pointer.x - track.left()) / track.width())
+                                                    .clamp(0.0, 1.0) as f64;
+                                                self.playback_position = progress * duration;
 
-                                        // Preview seeking always moves the timeline viewport
-                                        // with it, even when the target is still inside the old
-                                        // viewport. Keep the seek position centred where possible.
-                                        if response.changed() {
-                                            let visible_duration = duration / self.timeline_zoom as f64;
-                                            self.timeline_offset = (self.playback_position
-                                                - visible_duration * 0.5)
-                                                .clamp(0.0, (duration - visible_duration).max(0.0));
-                                        }
+                                                // Keep the timeline viewport in sync with preview seeking.
+                                                let visible_duration =
+                                                    duration / self.timeline_zoom as f64;
+                                                self.timeline_offset = (self.playback_position
+                                                    - visible_duration * 0.5)
+                                                    .clamp(0.0, (duration - visible_duration).max(0.0));
+                                            }
 
-                                        if response.drag_stopped()
-                                            || (response.changed() && !response.dragged() && !self.seeking)
-                                        {
-                                            self.seeking = false;
-                                            if let Err(error) = self.playback.seek(self.playback_position) {
-                                                eprintln!("Blaze: {error}");
+                                            if seek_response.dragged() {
+                                                self.seeking = true;
+                                            } else {
+                                                self.seeking = false;
+                                                if let Err(error) = self.playback.seek(self.playback_position) {
+                                                    eprintln!("Blaze: {error}");
+                                                }
                                             }
                                         }
 
+                                        let progress =
+                                            (self.playback_position / duration).clamp(0.0, 1.0) as f32;
+                                        let thumb_x = egui::lerp(track.x_range(), progress);
+                                        let track_center = track.center().y;
+                                        let painter = ui.painter();
+                                        painter.rect_filled(
+                                            track,
+                                            egui::CornerRadius::same(2),
+                                            egui::Color32::from_rgb(67, 69, 72),
+                                        );
+                                        let filled_track = egui::Rect::from_min_max(
+                                            track.min,
+                                            egui::pos2(thumb_x, track.bottom()),
+                                        );
+                                        painter.rect_filled(
+                                            filled_track,
+                                            egui::CornerRadius::same(2),
+                                            egui::Color32::from_rgb(255, 104, 79),
+                                        );
+                                        painter.circle_filled(
+                                            egui::pos2(thumb_x, track_center),
+                                            if seek_response.hovered() || seek_response.dragged() {
+                                                8.0
+                                            } else {
+                                                7.0
+                                            },
+                                            egui::Color32::WHITE,
+                                        );
+
                                         ui.add_space(10.0);
                                         ui.add_sized(
-                                            [time_width, 22.0],
+                                            [time_width, 26.0],
                                             egui::Label::new(
-                                                egui::RichText::new(time_label).monospace().small(),
+                                                egui::RichText::new(time_label)
+                                                    .monospace()
+                                                    .size(13.5),
                                             ),
                                         );
 
@@ -1419,14 +1452,14 @@ impl eframe::App for BlazeApp {
                                             "Skip Cuts: OFF"
                                         })
                                         .fill(if self.skip_cuts_enabled {
-                                            egui::Color32::from_rgb(92, 45, 39)
+                                            egui::Color32::from_rgb(38, 111, 73)
                                         } else {
-                                            egui::Color32::from_rgb(34, 36, 39)
+                                            egui::Color32::from_rgb(126, 48, 44)
                                         });
                                         if ui
                                             .add_sized([skip_button_width, 26.0], skip_button)
                                             .on_hover_text(
-                                                "Automatically skip all completed N–M cut regions during playback",
+                                                "Automatically skip selected regions during playback",
                                             )
                                             .clicked()
                                         {
@@ -1599,6 +1632,20 @@ fn format_time(seconds: f64) -> String {
         format!("{hours:02}:{minutes:02}:{seconds:02}")
     } else {
         format!("{minutes:02}:{seconds:02}")
+    }
+}
+
+fn format_time_millis(seconds: f64) -> String {
+    let total_millis = (seconds.max(0.0) * 1000.0).round() as u64;
+    let hours = total_millis / 3_600_000;
+    let minutes = (total_millis / 60_000) % 60;
+    let seconds = (total_millis / 1000) % 60;
+    let millis = total_millis % 1000;
+
+    if hours > 0 {
+        format!("{hours:02}:{minutes:02}:{seconds:02}.{millis:03}")
+    } else {
+        format!("{minutes:02}:{seconds:02}.{millis:03}")
     }
 }
 
