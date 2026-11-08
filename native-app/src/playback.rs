@@ -220,7 +220,12 @@ impl Playback {
                 return;
             };
 
-            let resized = match surface.ensure(gl, width, height) {
+            let target_framebuffer = painter.intermediate_fbo();
+            let ensure_result = surface.ensure(gl, width, height);
+            unsafe {
+                gl.bind_framebuffer(glow::FRAMEBUFFER, target_framebuffer);
+            }
+            let resized = match ensure_result {
                 Ok(resized) => resized,
                 Err(error) => {
                     eprintln!("Blaze: could not allocate video surface: {error}");
@@ -262,7 +267,7 @@ impl Playback {
                         height,
                     );
                     gl.bind_framebuffer(glow::READ_FRAMEBUFFER, surface.framebuffer);
-                    gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, painter.intermediate_fbo());
+                    gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, target_framebuffer);
                     gl.blit_framebuffer(
                         0,
                         0,
@@ -275,8 +280,8 @@ impl Playback {
                         glow::COLOR_BUFFER_BIT,
                         glow::LINEAR,
                     );
-                    gl.bind_framebuffer(glow::FRAMEBUFFER, painter.intermediate_fbo());
                 }
+                gl.bind_framebuffer(glow::FRAMEBUFFER, target_framebuffer);
             }
         });
 
