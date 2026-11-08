@@ -35,6 +35,7 @@ The app expects the existing FFmpeg/FFprobe tools in the repository's `BIN/` dir
 - Play resumes from the beginning after the current clip reaches its end.
 - Background FFprobe metadata inspection through `blaze-engine`.
 - A single continuous, mirrored waveform generated asynchronously from the video's original audio.
+- During generation, the timeline becomes a left-to-right progress bar labelled “Generating Waveform Data”, with percentage updates from FFmpeg's decoded PCM output. The waveform replaces the progress bar when ready.
 - A playback-synchronised playhead that follows libmpv's video position; clicking or dragging the waveform seeks the video.
 - Waveform peaks are generated at 200 blocks per second (5 ms resolution), with all source channels merged into one envelope. Peak data is compact and rendered at screen-pixel resolution.
 - Editing, cuts, export, and the Tools workflow are not implemented yet.
