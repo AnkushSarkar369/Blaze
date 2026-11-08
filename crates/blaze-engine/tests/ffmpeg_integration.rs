@@ -111,9 +111,15 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
     assert!(keyframes.len() >= 4, "keyframes: {keyframes:?}");
     assert!(keyframes[0].abs() < 0.1);
 
+    let mut waveform_progress = Vec::new();
     let waveform = engine
-        .generate_waveform(media_arg, 2)
+        .generate_waveform_with_progress(media_arg, 2, info.duration, |progress| {
+            waveform_progress.push(progress);
+        })
         .expect("generate waveform");
+    assert!(!waveform_progress.is_empty());
+    assert_eq!(waveform_progress.last().copied(), Some(1.0));
+    assert!(waveform_progress.windows(2).all(|pair| pair[0] <= pair[1]));
     assert_eq!(read_u32(&waveform, 0), 0x4257_5631);
     assert_eq!(read_u32(&waveform, 4), 1);
     assert_eq!(read_u32(&waveform, 8), peaks::BLOCKS_PER_SECOND);
