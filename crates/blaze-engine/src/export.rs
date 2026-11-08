@@ -317,27 +317,37 @@ fn build_edl(source: &Path, info: &MediaInfo, rate: FrameRate, segments: &[Segme
     let mut out = String::new();
     let reel = reel_name(source);
     let name = source.file_name().and_then(|s| s.to_str()).unwrap_or("Source");
+    let audio_channels = info.audio_channels.unwrap_or(2);
+    let channel_code = if !info.has_audio {
+        "V"
+    } else {
+        match audio_channels {
+            0 => "V",
+            1 => "B",
+            2 => "AA/V",
+            3 => "VA1A2A3",
+            _ => "VA1A2A3A4",
+        }
+    };
+
     out.push_str(&format!("TITLE: {}\nFCM: NON-DROP FRAME\n\n",
         source.file_stem().and_then(|s| s.to_str()).unwrap_or("Blaze Edit")));
     for (index, segment) in segments.iter().enumerate() {
         let n = index + 1;
         let timecode_base = rate.nominal as i64 * 3600;
-        // Without an embedded source timecode field, source media is addressed
-        // from frame zero; the record timeline convention starts at 01:00:00:00.
+        // Source media is addressed from frame zero; the record timeline starts at 01:00:00:00.
         let source_in = segment.source_in;
         let source_out = segment.source_out;
         let record_in = timecode_base + segment.record_in;
         let record_out = record_in + segment.duration();
-        let video_and_audio = ["V", "A"];
-        let video_only = ["V"];
-        let channels: &[&str] = if info.has_audio { &video_and_audio } else { &video_only };
-        for channel in channels {
-            out.push_str(&format!("{n:03}  {reel:<8} {channel}     C        {} {} {} {}\n",
-                timecode(source_in, rate), timecode(source_out, rate),
-                timecode(record_in, rate), timecode(record_out, rate)));
-            out.push_str(&format!("* FROM CLIP NAME: {name}\n"));
-            out.push_str(&format!("* SOURCE FILE: {}\n\n", source.display()));
-        }
+        out.push_str(&format!("{n:03}  {reel:<8} {channel_code:<8} C        {} {} {} {}\n",
+            timecode(source_in, rate), timecode(source_out, rate),
+            timecode(record_in, rate), timecode(record_out, rate)));
+        out.push_str(&format!("* FROM CLIP NAME: {name}\n"));
+        out.push_str(&format!("* SOURCE FILE: {}\n\n", source.display()));
+    }
+    if audio_channels > 4 {
+        out.push_str("* WARNING: CMX 3600 represents at most four audio channels; additional channels are not listed.\n");
     }
     out
 }
