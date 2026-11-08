@@ -125,6 +125,18 @@ struct BlazeApp {
     first_run_help_seen: bool,
 }
 
+fn nearest_keyframe(keyframes: &[f64], time: f64) -> Option<f64> {
+    keyframes.iter().copied().min_by(|a, b| {
+        (a - time).abs().total_cmp(&(b - time).abs())
+    })
+}
+
+fn nearest_boundary_keyframe(keyframes: &[f64], time: f64, other: f64, is_start: bool) -> Option<f64> {
+    keyframes.iter().copied()
+        .filter(|candidate| if is_start { *candidate < other } else { *candidate > other })
+        .min_by(|a, b| (a - time).abs().total_cmp(&(b - time).abs()))
+}
+
 impl BlazeApp {
     fn new(
         cc: &eframe::CreationContext<'_>,
@@ -190,30 +202,20 @@ impl BlazeApp {
         })
     }
 
-    fn snap_to_keyframe(&self, time: f64) -> Option<f64> {
-        self.keyframes.iter().copied().min_by(|a, b| {
-            (a - time).abs().total_cmp(&(b - time).abs())
-        })
-    }
-
-    fn snap_boundary(&self, time: f64, other: f64, is_start: bool) -> Option<f64> {
-        self.keyframes.iter().copied()
-            .filter(|candidate| if is_start { *candidate < other } else { *candidate > other })
-            .min_by(|a, b| (a - time).abs().total_cmp(&(b - time).abs()))
-    }
-
-    fn start_keyframe_analysis(&mut self, path: PathBuf) {
+    fn start_keyframe_analysis(&mut self, path: PathBuf, ctx: &egui::Context) {
         self.keyframe_generation = self.keyframe_generation.wrapping_add(1);
         let generation = self.keyframe_generation;
         self.keyframes.clear();
         self.keyframes_running = true;
         self.keyframe_error = None;
         let sender = self.keyframe_tx.clone();
+        let repaint = ctx.clone();
         std::thread::spawn(move || {
             let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
             let engine = MediaEngine::new([tools]);
             let result = engine.detect_keyframes(&path.to_string_lossy());
             let _ = sender.send((generation, result));
+            repaint.request_repaint();
         });
     }
 
@@ -332,7 +334,7 @@ impl BlazeApp {
         self.waveform = None;
         self.waveform_progress = Some(0.0);
         self.selected_path = Some(path.clone());
-        self.start_keyframe_analysis(path.clone());
+        self.start_keyframe_analysis(path.clone(), ctx);
 
         if let Err(error) = self.playback.load(&path) {
             eprintln!("Blaze: {error}");
@@ -469,19 +471,22 @@ impl eframe::App for BlazeApp {
             if self.pending_region_start.is_some() {
                 self.pending_region_start = None;
             } else {
-                let start = if blaze_mode {
-                    self.snap_to_keyframe(self.playback_position).unwrap_or(self.playback_position)
-                } else { self.playback_position };
-                self.pending_region_start = Some(start);
+                if blaze_mode {
+                    if let Some(start) = nearest_keyframe(&self.keyframes, self.playback_position) {
+                        self.pending_region_start = Some(start);
+                    }
+                } else {
+                    self.pending_region_start = Some(self.playback_position);
+                }
             }
         }
         if self.selected_path.is_some() && mark_end_pressed {
             if let Some(start) = self.pending_region_start {
                 let end = if blaze_mode {
-                    self.snap_boundary(self.playback_position, start, false).unwrap_or(self.playback_position)
-                } else { self.playback_position };
-                if end > start {
-                    self.edit_regions.push(EditRegion { start, end });
+                    nearest_boundary_keyframe(&self.keyframes, self.playback_position, start, false)
+                } else { Some(self.playback_position) };
+                if end.is_some_and(|end| end > start) {
+                    self.edit_regions.push(EditRegion { start, end: end.unwrap() });
                     self.pending_region_start = None;
                 }
             }
@@ -660,6 +665,8 @@ impl eframe::App for BlazeApp {
                 // silence analysis later). Their two boundary handles remain
                 // freely movable in Precise Mode.
                 let mut handle_interaction = false;
+                let blaze_snapping = self.active_tool_tab == ToolTab::BlazeMode;
+                let keyframes = self.keyframes.clone();
                 for (index, region) in self.edit_regions.iter_mut().enumerate() {
                     let start_x = lane.left()
                         + (((region.start - self.timeline_offset) / visible_duration) as f32) * lane.width();
@@ -694,8 +701,8 @@ impl eframe::App for BlazeApp {
                                     + ((pointer.x - lane.left()) / lane.width()).clamp(0.0, 1.0) as f64
                                         * visible_duration)
                                     .clamp(0.0, duration);
-                                if self.active_tool_tab == ToolTab::BlazeMode {
-                                    if let Some(snapped) = self.snap_boundary(time, if is_start { region.end } else { region.start }, is_start) {
+                                if blaze_snapping {
+                                    if let Some(snapped) = nearest_boundary_keyframe(&keyframes, time, if is_start { region.end } else { region.start }, is_start) {
                                         if is_start { region.start = snapped; } else { region.end = snapped; }
                                     }
                                 } else if is_start {
@@ -742,8 +749,8 @@ impl eframe::App for BlazeApp {
                                 let time = (self.timeline_offset
                                     + ((pointer.x - lane.left()) / lane.width()).clamp(0.0, 1.0) as f64
                                         * visible_duration).clamp(0.0, duration);
-                                self.pending_region_start = Some(if self.active_tool_tab == ToolTab::BlazeMode {
-                                    self.snap_to_keyframe(time).unwrap_or(time)
+                                self.pending_region_start = Some(if blaze_snapping {
+                                    nearest_keyframe(&keyframes, time).unwrap_or(start)
                                 } else { time });
                             }
                         }
