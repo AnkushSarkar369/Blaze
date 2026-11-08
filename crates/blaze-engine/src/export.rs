@@ -477,6 +477,25 @@ mod tests {
     }
 
     #[test]
+    fn supplied_delete_list_produces_expected_keep_segments() {
+        let rate = frame_rate(25.0).unwrap();
+        let cuts = [
+            (0.0, 12.0),
+            (67.0, 71.0),
+            (108.0, 148.0),
+            (168.0, 172.0),
+            (843.0, 900.0),
+        ];
+        let segments = keep_segments(&cuts, 900.0, rate);
+        assert_eq!(segments.len(), 4);
+        assert_eq!((segments[0].source_in, segments[0].source_out), (300, 1_675));
+        assert_eq!((segments[1].source_in, segments[1].source_out), (1_775, 2_700));
+        assert_eq!((segments[2].source_in, segments[2].source_out), (3_700, 4_200));
+        assert_eq!((segments[3].source_in, segments[3].source_out), (4_300, 21_075));
+        assert_eq!(segments.iter().map(|s| s.duration()).sum::<i64>(), 19_575);
+    }
+
+    #[test]
     fn fractional_frame_rate_is_preserved() {
         let rate = frame_rate(29.97002997).unwrap();
         assert_eq!((rate.numerator, rate.denominator, rate.nominal, rate.ntsc), (30000, 1001, 30, true));
