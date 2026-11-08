@@ -7,14 +7,112 @@ use std::{
 };
 
 use eframe::egui;
+use glow::HasContext;
 use rsmpv::{
     render::{OpenGlFbo, OwnedRenderContext},
     Mpv,
 };
 
+#[derive(Default)]
+struct VideoSurface {
+    framebuffer: Option<glow::Framebuffer>,
+    texture: Option<glow::Texture>,
+    size: [i32; 2],
+    has_frame: bool,
+}
+
+impl VideoSurface {
+    fn ensure(
+        &mut self,
+        gl: &glow::Context,
+        width: i32,
+        height: i32,
+    ) -> Result<bool, String> {
+        if self.size == [width, height] && self.framebuffer.is_some() {
+            return Ok(false);
+        }
+
+        self.destroy(gl);
+
+        unsafe {
+            let texture = gl.create_texture().map_err(|error| error.to_string())?;
+            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MIN_FILTER,
+                glow::LINEAR as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MAG_FILTER,
+                glow::LINEAR as i32,
+            );
+            gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                glow::RGBA8 as i32,
+                width,
+                height,
+                0,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelUnpackData::Slice(None),
+            );
+
+            let framebuffer = match gl.create_framebuffer() {
+                Ok(framebuffer) => framebuffer,
+                Err(error) => {
+                    gl.delete_texture(texture);
+                    gl.bind_texture(glow::TEXTURE_2D, None);
+                    return Err(error);
+                }
+            };
+
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+            gl.framebuffer_texture_2d(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::TEXTURE_2D,
+                Some(texture),
+                0,
+            );
+            let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
+            gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+            gl.bind_texture(glow::TEXTURE_2D, None);
+
+            if status != glow::FRAMEBUFFER_COMPLETE {
+                gl.delete_framebuffer(framebuffer);
+                gl.delete_texture(texture);
+                return Err(format!("Video framebuffer is incomplete (0x{status:04x})"));
+            }
+
+            self.texture = Some(texture);
+            self.framebuffer = Some(framebuffer);
+            self.size = [width, height];
+            self.has_frame = false;
+        }
+
+        Ok(true)
+    }
+
+    fn destroy(&mut self, gl: &glow::Context) {
+        unsafe {
+            if let Some(framebuffer) = self.framebuffer.take() {
+                gl.delete_framebuffer(framebuffer);
+            }
+            if let Some(texture) = self.texture.take() {
+                gl.delete_texture(texture);
+            }
+        }
+        self.size = [0, 0];
+        self.has_frame = false;
+    }
+}
+
 pub struct Playback {
     // Drop the GL renderer before the player core.
     renderer: Option<Arc<Mutex<OwnedRenderContext>>>,
+    surface: Option<Arc<Mutex<VideoSurface>>>,
     mpv: Arc<Mpv>,
 }
 
@@ -42,7 +140,7 @@ impl Playback {
         });
 
         // eframe creates the Glow context before invoking the app creator.
-        // All renderer calls and its destruction happen from the same GL-backed UI thread.
+        // Renderer calls and destruction stay on the GL-backed UI thread.
         let mut renderer = unsafe {
             OwnedRenderContext::new_opengl(mpv.clone(), false, get_proc_address)?
         };
@@ -52,6 +150,7 @@ impl Playback {
 
         Ok(Self {
             renderer: Some(Arc::new(Mutex::new(renderer))),
+            surface: Some(Arc::new(Mutex::new(VideoSurface::default()))),
             mpv,
         })
     }
@@ -60,7 +159,14 @@ impl Playback {
         let path = path.to_string_lossy();
         self.mpv
             .command(&["loadfile", path.as_ref(), "replace"])
-            .map_err(|error| format!("MPV could not open this file: {error}"))
+            .map_err(|error| format!("MPV could not open this file: {error}"))?;
+
+        if let Some(surface) = &self.surface {
+            if let Ok(mut surface) = surface.lock() {
+                surface.has_frame = false;
+            }
+        }
+        Ok(())
     }
 
     pub fn toggle_pause(&self) -> Result<(), String> {
@@ -93,29 +199,76 @@ impl Playback {
         let Some(renderer) = self.renderer.as_ref().map(Arc::downgrade) else {
             return;
         };
+        let Some(surface) = self.surface.as_ref().map(Arc::downgrade) else {
+            return;
+        };
 
-        let callback = egui_glow::painter::CallbackFn::new(move |info, _painter| {
-            let Some(renderer) = renderer.upgrade() else {
+        let callback = egui_glow::painter::CallbackFn::new(move |info, painter| {
+            let (Some(renderer), Some(surface)) = (renderer.upgrade(), surface.upgrade()) else {
                 return;
             };
+
             let viewport = info.viewport_in_pixels();
-            if viewport.width_px <= 0 || viewport.height_px <= 0 {
+            let width = viewport.width_px;
+            let height = viewport.height_px;
+            if width <= 0 || height <= 0 {
                 return;
             }
+
+            let gl = painter.gl();
+            let Ok(mut surface) = surface.lock() else {
+                return;
+            };
+
+            let resized = match surface.ensure(gl, width, height) {
+                Ok(resized) => resized,
+                Err(error) => {
+                    eprintln!("Blaze: could not allocate video surface: {error}");
+                    return;
+                }
+            };
 
             let Ok(mut renderer) = renderer.lock() else {
                 return;
             };
 
-            if renderer.update() {
-                let target = OpenGlFbo {
-                    fbo: 0,
-                    width: viewport.width_px,
-                    height: viewport.height_px,
-                    internal_format: 0,
+            if resized || renderer.update() {
+                let Some(framebuffer) = surface.framebuffer else {
+                    return;
                 };
-                if let Err(error) = renderer.render_opengl(target, true, false) {
-                    eprintln!("Blaze: libmpv video rendering failed: {error}");
+                let target = OpenGlFbo {
+                    fbo: framebuffer.0.get() as i32,
+                    width,
+                    height,
+                    internal_format: glow::RGBA8 as i32,
+                };
+
+                match renderer.render_opengl(target, false, false) {
+                    Ok(()) => surface.has_frame = true,
+                    Err(error) => {
+                        surface.has_frame = false;
+                        eprintln!("Blaze: libmpv video rendering failed: {error}");
+                    }
+                }
+            }
+
+            if surface.has_frame {
+                unsafe {
+                    gl.bind_framebuffer(glow::READ_FRAMEBUFFER, surface.framebuffer);
+                    gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, painter.intermediate_fbo());
+                    gl.blit_framebuffer(
+                        0,
+                        0,
+                        width,
+                        height,
+                        viewport.left_px,
+                        viewport.from_bottom_px,
+                        viewport.left_px + width,
+                        viewport.from_bottom_px + height,
+                        glow::COLOR_BUFFER_BIT,
+                        glow::LINEAR,
+                    );
+                    gl.bind_framebuffer(glow::FRAMEBUFFER, painter.intermediate_fbo());
                 }
             }
         });
@@ -126,12 +279,21 @@ impl Playback {
         }));
     }
 
-    pub fn shutdown(&mut self) {
+    pub fn shutdown(&mut self, gl: Option<&glow::Context>) {
         if let Some(renderer) = self.renderer.take() {
             if let Ok(mut renderer) = renderer.lock() {
                 renderer.clear_update_callback();
             }
             drop(renderer);
+        }
+
+        if let Some(surface) = self.surface.take() {
+            if let Some(gl) = gl {
+                if let Ok(mut surface) = surface.lock() {
+                    surface.destroy(gl);
+                }
+            }
+            drop(surface);
         }
     }
 }
