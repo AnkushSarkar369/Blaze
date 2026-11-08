@@ -118,6 +118,11 @@ impl eframe::App for BlazeApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_probe();
 
+        if let Some(error) = self.playback.poll_error() {
+            self.status = error;
+            self.loading = false;
+        }
+
         if self.selected_path.is_some() && !self.seeking {
             self.playback_position = self.playback.position();
         }
