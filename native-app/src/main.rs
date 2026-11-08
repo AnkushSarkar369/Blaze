@@ -130,6 +130,8 @@ struct BlazeApp {
     show_help: bool,
     first_run_help_seen: bool,
     pending_preview_fit: bool,
+    last_tools_split_click: Option<(f64, egui::Pos2)>,
+    last_timeline_split_click: Option<(f64, egui::Pos2)>,
 }
 
 fn nearest_keyframe(keyframes: &[f64], time: f64) -> Option<f64> {
@@ -233,6 +235,8 @@ impl BlazeApp {
             show_help: !has_seen_first_run_help(),
             first_run_help_seen: has_seen_first_run_help(),
             pending_preview_fit: false,
+            last_tools_split_click: None,
+            last_timeline_split_click: None,
         })
     }
 
@@ -1480,7 +1484,7 @@ impl eframe::App for BlazeApp {
                                             .size()
                                             .x
                                             + 2.0;
-                                        let skip_button_width = 112.0;
+                                        let skip_button_width = 108.0;
                                         let slider_width = (ui.available_width()
                                             - time_width
                                             - skip_button_width
@@ -1582,7 +1586,7 @@ impl eframe::App for BlazeApp {
                                             egui::Color32::from_rgb(126, 48, 44)
                                         });
                                         if ui
-                                            .add_sized([skip_button_width, 32.0], skip_button)
+                                            .add_sized([skip_button_width, 30.0], skip_button)
                                             .on_hover_text(
                                                 "Automatically skip selected regions during playback",
                                             )
@@ -1590,7 +1594,7 @@ impl eframe::App for BlazeApp {
                                         {
                                             self.skip_cuts_enabled = !self.skip_cuts_enabled;
                                         }
-                                        ui.add_space(8.0);
+                                        ui.add_space(16.0);
                                     },
                                 );
                             }
@@ -1603,17 +1607,27 @@ impl eframe::App for BlazeApp {
         let handle_fill = egui::Color32::from_rgb(42, 45, 48);
         let handle_mark = egui::Color32::from_rgb(126, 130, 134);
         { let rect = tools_split_rect;
-            let handle = egui::Rect::from_center_size(
-                egui::pos2(rect.left(), rect.center().y),
-                egui::vec2(10.0, 62.0),
+            let handle = egui::Rect::from_min_max(
+                egui::pos2(rect.left() - 9.0, rect.top()),
+                egui::pos2(rect.left() + 9.0, rect.bottom()),
             );
             let response = ui.interact(
                 handle,
                 ui.scope_id().with("tools-resize-affordance"),
                 egui::Sense::hover(),
             ).on_hover_text("Drag to resize · Double-click to reset");
-            let reset = response.hovered()
-                && ui.input(|input| input.pointer.button_double_clicked(egui::PointerButton::Primary));
+            let (clicked, click_time, click_pos) = ui.input(|input| (
+                input.pointer.button_clicked(egui::PointerButton::Primary),
+                input.time,
+                input.pointer.interact_pos(),
+            ));
+            let reset = splitter_double_clicked(
+                &mut self.last_tools_split_click,
+                response.hovered(),
+                clicked,
+                click_time,
+                click_pos,
+            );
             if reset {
                 if let Some(info) = self.media_info.as_ref() {
                     let width = default_tools_width(root_rect, info);
@@ -1655,17 +1669,27 @@ impl eframe::App for BlazeApp {
             }
         }
         { let rect = timeline_split_rect;
-            let handle = egui::Rect::from_center_size(
-                egui::pos2(rect.center().x, rect.top()),
-                egui::vec2(62.0, 10.0),
+            let handle = egui::Rect::from_min_max(
+                egui::pos2(rect.left(), rect.top() - 9.0),
+                egui::pos2(rect.right(), rect.top() + 9.0),
             );
             let response = ui.interact(
                 handle,
                 ui.scope_id().with("timeline-resize-affordance"),
                 egui::Sense::hover(),
             ).on_hover_text("Drag to resize · Double-click to reset");
-            let reset = response.hovered()
-                && ui.input(|input| input.pointer.button_double_clicked(egui::PointerButton::Primary));
+            let (clicked, click_time, click_pos) = ui.input(|input| (
+                input.pointer.button_clicked(egui::PointerButton::Primary),
+                input.time,
+                input.pointer.interact_pos(),
+            ));
+            let reset = splitter_double_clicked(
+                &mut self.last_timeline_split_click,
+                response.hovered(),
+                clicked,
+                click_time,
+                click_pos,
+            );
             if reset {
                 let panel_id = ui.scope_id().with("timeline");
                 let panel_rect = egui::Rect::from_min_size(
@@ -1845,6 +1869,31 @@ fn paint_player_icon(
             );
         }
     }
+}
+
+fn splitter_double_clicked(
+    last_click: &mut Option<(f64, egui::Pos2)>,
+    hovered: bool,
+    clicked: bool,
+    time: f64,
+    position: Option<egui::Pos2>,
+) -> bool {
+    if !hovered || !clicked {
+        return false;
+    }
+    let Some(position) = position else {
+        *last_click = None;
+        return false;
+    };
+
+    let is_double = last_click.is_some_and(|(previous_time, previous_position)| {
+        time - previous_time <= 0.45
+            && time >= previous_time
+            && previous_position.distance(position) <= 14.0
+    });
+
+    *last_click = if is_double { None } else { Some((time, position)) };
+    is_double
 }
 
 fn default_tools_width(root_rect: egui::Rect, info: &MediaInfo) -> f32 {
