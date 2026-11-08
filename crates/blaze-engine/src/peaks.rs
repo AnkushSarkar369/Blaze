@@ -186,7 +186,8 @@ mod tests {
     #[test]
     fn header_and_size_are_consistent() {
         let mut builder = PeakBuilder::new(2);
-        builder.push_bytes(&pcm(&[0; 2 * 100]));
+        // 484 stereo frames = 4 full 120-frame blocks + one partial block.
+        builder.push_bytes(&pcm(&[0; 2 * 484]));
         let peaks = builder.finish();
         let bytes = peaks.to_bytes();
         assert_eq!(read_u32(&bytes, 0), MAGIC);
@@ -231,7 +232,7 @@ mod tests {
         let peaks = builder.finish();
         let bytes = peaks.to_bytes();
         let blocks = peaks.blocks();
-        assert_eq!(blocks, 10);
+        assert_eq!(blocks, 2);
         assert_eq!(read_i16(&bytes, 16), -20000);
         assert_eq!(read_i16(&bytes, 16 + blocks * 2), 30000);
     }
