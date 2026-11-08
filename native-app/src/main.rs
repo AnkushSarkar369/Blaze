@@ -649,10 +649,6 @@ impl eframe::App for BlazeApp {
                 ui.separator();
                 ui.add_space(8.0);
                 ui.label(self.active_tool_tab.description());
-                ui.add_space(12.0);
-                if ui.button("Quick Help").on_hover_text("Keyboard shortcuts and editing modes (Ctrl + H)").clicked() {
-                    self.show_help = true;
-                }
             });
 
         egui::CentralPanel::default()
