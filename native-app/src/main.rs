@@ -36,7 +36,7 @@ impl ToolTab {
     fn description(self) -> &'static str {
         match self {
             Self::BlazeMode => "Fast, keyframe-aligned cutting for near-instant edits.",
-            Self::PreciseMode => "Frame-accurate cutting for edits that need exact timing.",
+            Self::PreciseMode => "Create and adjust precise cut regions directly on the timeline.",
             Self::Export => "Configure and export the finished video.",
         }
     }
@@ -64,6 +64,12 @@ fn mark_first_run_help_seen() {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct EditRegion {
+    start: f64,
+    end: f64,
+}
+
 type ProbeResult = (u64, Result<(PathBuf, MediaInfo), String>);
 enum WaveformMessage {
     Progress { generation: u64, fraction: f32 },
@@ -86,6 +92,8 @@ struct BlazeApp {
     waveform_progress: Option<f32>,
     timeline_zoom: f32,
     timeline_offset: f64,
+    edit_regions: Vec<EditRegion>,
+    pending_region_start: Option<f64>,
     active_tool_tab: ToolTab,
     show_help: bool,
     first_run_help_seen: bool,
@@ -126,6 +134,8 @@ impl BlazeApp {
             waveform_progress: None,
             timeline_zoom: 1.0,
             timeline_offset: 0.0,
+            edit_regions: Vec::new(),
+            pending_region_start: None,
             active_tool_tab: ToolTab::BlazeMode,
             show_help: !has_seen_first_run_help(),
             first_run_help_seen: has_seen_first_run_help(),
@@ -144,6 +154,8 @@ impl BlazeApp {
         self.playback_position = 0.0;
         self.timeline_zoom = 1.0;
         self.timeline_offset = 0.0;
+        self.edit_regions.clear();
+        self.pending_region_start = None;
         self.media_info = None;
         self.waveform = None;
         self.waveform_progress = Some(0.0);
@@ -271,6 +283,28 @@ impl eframe::App for BlazeApp {
         let help_shortcut = ctx.input_mut(|input| {
             input.consume_key(egui::Modifiers::CTRL, egui::Key::H)
         });
+        let mark_start_pressed = ctx.input_mut(|input| {
+            input.consume_key(egui::Modifiers::NONE, egui::Key::N)
+        });
+        let mark_end_pressed = ctx.input_mut(|input| {
+            input.consume_key(egui::Modifiers::NONE, egui::Key::M)
+        });
+        if self.selected_path.is_some() && mark_start_pressed {
+            if self.pending_region_start.is_some() {
+                self.pending_region_start = None;
+            } else {
+                self.pending_region_start = Some(self.playback_position);
+            }
+        }
+        if self.selected_path.is_some() && mark_end_pressed {
+            if let Some(start) = self.pending_region_start {
+                let end = self.playback_position;
+                if end > start {
+                    self.edit_regions.push(EditRegion { start, end });
+                    self.pending_region_start = None;
+                }
+            }
+        }
         if help_shortcut {
             self.show_help = !self.show_help;
         }
@@ -394,6 +428,100 @@ impl eframe::App for BlazeApp {
                     );
                 }
 
+                // Edit regions are independent of their origin (manual now,
+                // silence analysis later). Their two boundary handles remain
+                // freely movable in Precise Mode.
+                let mut handle_interaction = false;
+                for (index, region) in self.edit_regions.iter_mut().enumerate() {
+                    let start_x = lane.left()
+                        + (((region.start - self.timeline_offset) / visible_duration) as f32) * lane.width();
+                    let end_x = lane.left()
+                        + (((region.end - self.timeline_offset) / visible_duration) as f32) * lane.width();
+                    let region_rect = egui::Rect::from_min_max(
+                        egui::pos2(start_x, lane.top()),
+                        egui::pos2(end_x, lane.bottom()),
+                    );
+                    if region_rect.intersects(lane) {
+                        ui.painter().rect_filled(
+                            region_rect.intersect(lane),
+                            egui::CornerRadius::same(2),
+                            egui::Color32::from_rgba_unmultiplied(190, 66, 62, 105),
+                        );
+                    }
+
+                    for (is_start, x) in [(true, start_x), (false, end_x)] {
+                        if x < lane.left() - 8.0 || x > lane.right() + 8.0 {
+                            continue;
+                        }
+                        let handle_rect = egui::Rect::from_center_size(
+                            egui::pos2(x, lane.center().y),
+                            egui::vec2(14.0, lane.height().max(18.0)),
+                        );
+                        let id = ui.id().with(("edit-region-handle", index, is_start));
+                        let handle_response = ui.interact(handle_rect, id, egui::Sense::drag());
+                        handle_interaction |= handle_response.hovered() || handle_response.dragged();
+                        if handle_response.dragged() {
+                            if let Some(pointer) = handle_response.interact_pointer_pos() {
+                                let time = (timeline_offset
+                                    + ((pointer.x - lane.left()) / lane.width()).clamp(0.0, 1.0) as f64
+                                        * visible_duration)
+                                    .clamp(0.0, duration);
+                                if is_start {
+                                    region.start = time.min(region.end - 0.001);
+                                } else {
+                                    region.end = time.max(region.start + 0.001).min(duration);
+                                }
+                            }
+                        }
+                        let color = if handle_response.hovered() || handle_response.dragged() {
+                            egui::Color32::from_rgb(255, 190, 145)
+                        } else {
+                            egui::Color32::from_rgb(238, 115, 83)
+                        };
+                        ui.painter().line_segment(
+                            [egui::pos2(x, lane.top()), egui::pos2(x, lane.bottom())],
+                            egui::Stroke::new(if handle_response.hovered() { 4.0 } else { 3.0 }, color),
+                        );
+                        ui.painter().rect_filled(
+                            egui::Rect::from_center_size(egui::pos2(x, lane.center().y), egui::vec2(7.0, 15.0)),
+                            egui::CornerRadius::same(2),
+                            color,
+                        );
+                    }
+                }
+
+                // An unpaired N marker is shown as a draggable starting jaw.
+                if let Some(start) = self.pending_region_start {
+                    let x = lane.left()
+                        + (((start - self.timeline_offset) / visible_duration) as f32) * lane.width();
+                    if x >= lane.left() - 8.0 && x <= lane.right() + 8.0 {
+                        let handle_rect = egui::Rect::from_center_size(
+                            egui::pos2(x, lane.center().y),
+                            egui::vec2(14.0, lane.height().max(18.0)),
+                        );
+                        let response = ui.interact(
+                            handle_rect,
+                            ui.id().with("pending-region-start"),
+                            egui::Sense::drag(),
+                        );
+                        handle_interaction |= response.hovered() || response.dragged();
+                        if response.dragged() {
+                            if let Some(pointer) = response.interact_pointer_pos() {
+                                self.pending_region_start = Some(
+                                    (timeline_offset
+                                        + ((pointer.x - lane.left()) / lane.width()).clamp(0.0, 1.0) as f64
+                                            * visible_duration)
+                                        .clamp(0.0, duration),
+                                );
+                            }
+                        }
+                        ui.painter().line_segment(
+                            [egui::pos2(x, lane.top()), egui::pos2(x, lane.bottom())],
+                            egui::Stroke::new(3.0, egui::Color32::from_rgb(235, 165, 75)),
+                        );
+                    }
+                }
+
                 if self.selected_path.is_some() && self.waveform_progress.is_none()
                     && self.playback_position >= self.timeline_offset
                     && self.playback_position <= self.timeline_offset + visible_duration
@@ -409,7 +537,7 @@ impl eframe::App for BlazeApp {
                     );
                 }
 
-                if can_seek {
+                if can_seek && !handle_interaction {
                     let timeline_offset = self.timeline_offset;
                     let pointer_time = |position: egui::Pos2| {
                         let progress = ((position.x - lane.left()) / lane.width()).clamp(0.0, 1.0);
@@ -637,6 +765,12 @@ impl eframe::App for BlazeApp {
                             ui.end_row();
                             ui.monospace("Ctrl + H");
                             ui.label("Open this help window");
+                            ui.end_row();
+                            ui.monospace("N");
+                            ui.label("Create / cancel a starting jaw");
+                            ui.end_row();
+                            ui.monospace("M");
+                            ui.label("Create an ending jaw");
                             ui.end_row();
                         });
 
