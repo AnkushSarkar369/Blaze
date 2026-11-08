@@ -859,12 +859,6 @@ impl eframe::App for BlazeApp {
                 });
 
                 ui.add_space(8.0);
-                
-                ui.add_space(8.0);
-                if let Some(mode) = self.active_mode {
-                    ui.heading(mode.label());
-                    ui.add_space(8.0);
-                }
 
                 if self.active_mode.is_some() {
                     egui::Frame::group(ui.style()).show(ui, |ui| {
