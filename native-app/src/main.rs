@@ -206,6 +206,18 @@ impl eframe::App for BlazeApp {
         self.poll_probe(ctx);
         self.poll_waveform();
 
+        // Global transport shortcut: handle Space at the app level rather
+        // than inside a particular panel, so it works regardless of focus
+        // or which part of the interface the user is interacting with.
+        let space_pressed = ctx.input_mut(|input| {
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Space)
+        });
+        if space_pressed && self.selected_path.is_some() {
+            if let Err(error) = self.playback.toggle_pause() {
+                eprintln!("Blaze: {error}");
+            }
+        }
+
         if let Some(error) = self.playback.poll_error() {
             eprintln!("Blaze: {error}");
             self.loading = false;
