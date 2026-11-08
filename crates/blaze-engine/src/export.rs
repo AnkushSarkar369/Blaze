@@ -322,8 +322,10 @@ fn build_edl(source: &Path, info: &MediaInfo, rate: FrameRate, segments: &[Segme
     for (index, segment) in segments.iter().enumerate() {
         let n = index + 1;
         let timecode_base = rate.nominal as i64 * 3600;
-        let source_in = timecode_base + segment.source_in;
-        let source_out = timecode_base + segment.source_out;
+        // Without an embedded source timecode field, source media is addressed
+        // from frame zero; the record timeline convention starts at 01:00:00:00.
+        let source_in = segment.source_in;
+        let source_out = segment.source_out;
         let record_in = timecode_base + segment.record_in;
         let record_out = record_in + segment.duration();
         let channels: &[&str] = if info.has_audio { &["V", "A"] } else { &["V"] };
