@@ -3,7 +3,7 @@ use std::{
     io,
     os::raw::c_void,
     path::Path,
-    sync::{Arc, Mutex, Weak},
+    sync::{Arc, Mutex},
 };
 
 use eframe::egui;
@@ -125,7 +125,7 @@ impl Playback {
         let mpv = Arc::new(
             Mpv::builder()?
                 .set_property("vo", "libmpv")?
-                .set_property("hwdec", "auto-safe")?
+                .set_property("hwdec", "vaapi-copy")?
                 .set_property("video-timing-offset", 0.0_f64)?
                 .set_property("keep-open", "yes")?
                 .set_property("osc", false)?
@@ -205,15 +205,15 @@ impl Playback {
         while let Some(event) = self.mpv.poll_event() {
             match event {
                 Event::LogMessage(message) => {
-                    if message.level == "warn" {
-                        eprintln!("Blaze MPV [{}]: {}", message.prefix, message.text.trim());
-                    } else if message.level == "error" || message.level == "fatal" {
-                        latest_error = Some(format!(
-                            "Playback error [{}]: {}",
-                            message.prefix,
-                            message.text.trim()
-                        ));
-                    }
+                    // Optional hardware-backend failures can be logged even when
+                    // software decoding successfully continues. Keep diagnostics in
+                    // the terminal; only EndFile events are surfaced as failures.
+                    eprintln!(
+                        "Blaze MPV [{}] {}: {}",
+                        message.level,
+                        message.prefix,
+                        message.text.trim()
+                    );
                 }
                 Event::EndFile {
                     error: Some(error),
@@ -280,7 +280,7 @@ impl Playback {
                     internal_format: glow::RGBA8 as i32,
                 };
 
-                match renderer.render_opengl(target, false, false) {
+                match renderer.render_opengl(target, true, false) {
                     Ok(()) => surface.has_frame = true,
                     Err(error) => {
                         surface.has_frame = false;
@@ -291,6 +291,10 @@ impl Playback {
 
             if surface.has_frame {
                 unsafe {
+                    let scissor_was_enabled = gl.is_enabled(glow::SCISSOR_TEST);
+                    let mut previous_scissor_box = [0_i32; 4];
+                    gl.get_parameter_i32_slice(glow::SCISSOR_BOX, &mut previous_scissor_box);
+
                     gl.enable(glow::SCISSOR_TEST);
                     gl.scissor(
                         viewport.left_px,
@@ -312,6 +316,16 @@ impl Playback {
                         glow::COLOR_BUFFER_BIT,
                         glow::LINEAR,
                     );
+
+                    gl.scissor(
+                        previous_scissor_box[0],
+                        previous_scissor_box[1],
+                        previous_scissor_box[2],
+                        previous_scissor_box[3],
+                    );
+                    if !scissor_was_enabled {
+                        gl.disable(glow::SCISSOR_TEST);
+                    }
                 }
             }
             unsafe {
