@@ -92,6 +92,7 @@ impl BlazeApp {
             self.playback.stop();
             self.selected_path = None;
             self.loading = false;
+            self.waveform_progress = None;
             return;
         }
 
@@ -272,7 +273,7 @@ impl eframe::App for BlazeApp {
                     .unwrap_or_else(|| self.playback.duration())
                     .max(0.01);
 
-                if self.selected_path.is_some() {
+                if self.selected_path.is_some() && self.waveform_progress.is_none() {
                     let progress = (self.playback_position / duration).clamp(0.0, 1.0) as f32;
                     let playhead_x = lane.left() + lane.width() * progress;
                     ui.painter().line_segment(
@@ -284,7 +285,7 @@ impl eframe::App for BlazeApp {
                     );
                 }
 
-                let can_seek = self.selected_path.is_some();
+                let can_seek = self.selected_path.is_some() && self.waveform_progress.is_none();
                 let sense = if can_seek {
                     egui::Sense::click_and_drag()
                 } else {
