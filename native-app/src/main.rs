@@ -34,6 +34,25 @@ impl EditingMode {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ToolTab {
+    ModeSelector,
+    BlazeMode,
+    PreciseMode,
+    Export,
+}
+
+impl ToolTab {
+    fn label(self) -> &'static str {
+        match self {
+            Self::ModeSelector => "Mode Selector",
+            Self::BlazeMode => "Blaze Mode",
+            Self::PreciseMode => "Precise Mode",
+            Self::Export => "Export",
+        }
+    }
+}
+
 fn help_seen_path() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|home| {
         PathBuf::from(home)
@@ -109,6 +128,7 @@ struct BlazeApp {
     pending_region_start: Option<f64>,
     skip_cuts_enabled: bool,
     active_mode: Option<EditingMode>,
+    active_tool_tab: ToolTab,
     show_help: bool,
     first_run_help_seen: bool,
 }
@@ -185,6 +205,7 @@ impl BlazeApp {
             pending_region_start: None,
             skip_cuts_enabled: false,
             active_mode: None,
+            active_tool_tab: ToolTab::ModeSelector,
             show_help: !has_seen_first_run_help(),
             first_run_help_seen: has_seen_first_run_help(),
         })
@@ -815,201 +836,209 @@ impl eframe::App for BlazeApp {
             .default_size(310.0)
             .min_size(240.0)
             .show(ui, |ui| {
-                egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.heading("Mode Selector");
-                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    let mut tabs = vec![ToolTab::ModeSelector];
+                    if let Some(mode) = self.active_mode {
+                        tabs.push(match mode {
+                            EditingMode::Blaze => ToolTab::BlazeMode,
+                            EditingMode::Precise => ToolTab::PreciseMode,
+                        });
+                    }
+                    tabs.push(ToolTab::Export);
 
-                let blaze_ready = self.selected_path.is_none()
-                    || (!self.keyframes_running && self.keyframe_error.is_none() && !self.keyframes.is_empty());
-                let blaze_button = egui::Button::new(
-                    egui::RichText::new("⚡  Blaze Mode").strong().size(15.0)
-                )
-                .selected(self.active_mode == Some(EditingMode::Blaze))
-                .min_size(egui::vec2(ui.available_width(), 52.0));
-                if ui.add_enabled(blaze_ready, blaze_button).clicked() {
-                    let keyframes = self.keyframes.clone();
-                    self.edit_regions = self.edit_regions.iter().filter_map(|region| {
-                        let start = nearest_keyframe(&keyframes, region.start)?;
-                        let end = nearest_boundary_keyframe(&keyframes, region.end, start, false)?;
-                        (end > start).then_some(EditRegion { start, end })
-                    }).collect();
-                    self.pending_region_start = self.pending_region_start
-                        .and_then(|start| nearest_keyframe(&keyframes, start));
-                    self.active_mode = Some(EditingMode::Blaze);
-                }
-                ui.label("Keyframe-aligned cuts. Faster stream-copy editing at the cost of boundary precision.");
-                if self.keyframes_running && self.selected_path.is_some() {
-                    ui.horizontal(|ui| { ui.spinner(); ui.small("Analysing GOP / keyframe structure…"); });
-                } else if let Some(error) = &self.keyframe_error {
-                    ui.colored_label(egui::Color32::LIGHT_RED, format!("Keyframe analysis failed: {error}"));
-                } else if !self.keyframes.is_empty() {
-                    ui.small(format!("{} video keyframes available.", self.keyframes.len()));
-                }
-
-                ui.add_space(12.0);
-                let precise_button = egui::Button::new(
-                    egui::RichText::new("◎  Precise Mode").strong().size(15.0)
-                )
-                .selected(self.active_mode == Some(EditingMode::Precise))
-                .min_size(egui::vec2(ui.available_width(), 52.0));
-                if ui.add(precise_button).clicked() {
-                    self.active_mode = Some(EditingMode::Precise);
-                }
-                ui.label("Unrestricted cut boundaries. Use when exact edit placement matters more than stream-copy constraints.");
+                    for tab in tabs {
+                        if ui.selectable_label(self.active_tool_tab == tab, tab.label()).clicked() {
+                            self.active_tool_tab = tab;
+                        }
+                    }
                 });
-
+                ui.separator();
                 ui.add_space(8.0);
 
-                if self.active_mode.is_some() {
-                    egui::Frame::group(ui.style()).show(ui, |ui| {
-                    ui.heading(self.active_mode.unwrap().label());
-                    ui.add_space(12.0);
-                    
-                    ui.checkbox(&mut self.expert_mode, "Expert Mode");
-                    ui.add_space(12.0);
+                match self.active_tool_tab {
+                    ToolTab::ModeSelector => {
+                        ui.heading("Choose an editing mode");
+                        ui.add_space(12.0);
 
-                    if self.expert_mode {
-                        ui.strong("Detection Threshold");
-                        ui.label("Level below the adaptive programme baseline");
-                        ui.add(
-                            egui::Slider::new(&mut self.custom_threshold_db, 3.0..=60.0)
-                                .suffix(" dB")
-                                .fixed_decimals(1),
-                        );
-
-                        ui.add_space(14.0);
-                        ui.strong("Peak Ceiling");
-                        ui.checkbox(&mut self.custom_peak_gate_enabled, "Enable peak ceiling");
-                        if self.custom_peak_gate_enabled {
-                            ui.add(
-                                egui::Slider::new(&mut self.custom_peak_ceiling_dbfs, -90.0..=0.0)
-                                    .suffix(" dBFS")
-                                    .fixed_decimals(1),
-                            );
+                        let blaze_ready = self.selected_path.is_none()
+                            || (!self.keyframes_running && self.keyframe_error.is_none() && !self.keyframes.is_empty());
+                        let blaze_button = egui::Button::new(
+                            egui::RichText::new("⚡  Blaze Mode").strong().size(15.0)
+                        ).min_size(egui::vec2(ui.available_width(), 48.0));
+                        if ui.add_enabled(blaze_ready, blaze_button).clicked() {
+                            let keyframes = self.keyframes.clone();
+                            self.edit_regions = self.edit_regions.iter().filter_map(|region| {
+                                let start = nearest_keyframe(&keyframes, region.start)?;
+                                let end = nearest_boundary_keyframe(&keyframes, region.end, start, false)?;
+                                (end > start).then_some(EditRegion { start, end })
+                            }).collect();
+                            self.pending_region_start = self.pending_region_start
+                                .and_then(|start| nearest_keyframe(&keyframes, start));
+                            self.active_mode = Some(EditingMode::Blaze);
+                            self.active_tool_tab = ToolTab::BlazeMode;
+                        }
+                        ui.label("Keyframe-aligned cuts. Faster stream-copy editing at the cost of boundary precision.");
+                        if self.keyframes_running && self.selected_path.is_some() {
+                            ui.horizontal(|ui| { ui.spinner(); ui.small("Analysing GOP / keyframe structure…"); });
+                        } else if let Some(error) = &self.keyframe_error {
+                            ui.colored_label(egui::Color32::LIGHT_RED, format!("Keyframe analysis failed: {error}"));
+                        } else if !self.keyframes.is_empty() {
+                            ui.small(format!("{} video keyframes available.", self.keyframes.len()));
                         }
 
-                        ui.add_space(14.0);
-                        ui.strong("Padding");
-                        ui.label("Preserve audio around detected silence");
-                        egui::Grid::new("expert_padding_controls")
-                            .num_columns(2)
-                            .spacing([12.0, 8.0])
-                            .show(ui, |ui| {
-                                ui.label("Before");
-                                ui.horizontal(|ui| {
-                                    ui.add(egui::DragValue::new(&mut self.custom_padding_before_ms)
-                                        .range(0..=2000)
-                                        .speed(10));
-                                    ui.label("ms");
-                                });
-                                ui.end_row();
+                        ui.add_space(16.0);
+                        let precise_button = egui::Button::new(
+                            egui::RichText::new("◎  Precise Mode").strong().size(15.0)
+                        ).min_size(egui::vec2(ui.available_width(), 48.0));
+                        if ui.add(precise_button).clicked() {
+                            self.active_mode = Some(EditingMode::Precise);
+                            self.active_tool_tab = ToolTab::PreciseMode;
+                        }
+                        ui.label("Unrestricted cut boundaries. Use when exact edit placement matters more than stream-copy constraints.");
+                    }
+                    ToolTab::BlazeMode | ToolTab::PreciseMode => {
+                ui.checkbox(&mut self.expert_mode, "Expert Mode");
+                ui.add_space(12.0);
 
-                                ui.label("After");
-                                ui.horizontal(|ui| {
-                                    ui.add(egui::DragValue::new(&mut self.custom_padding_after_ms)
-                                        .range(0..=2000)
-                                        .speed(10));
-                                    ui.label("ms");
-                                });
-                                ui.end_row();
+                if self.expert_mode {
+                    ui.strong("Detection Threshold");
+                    ui.label("Level below the adaptive programme baseline");
+                    ui.add(
+                        egui::Slider::new(&mut self.custom_threshold_db, 3.0..=60.0)
+                            .suffix(" dB")
+                            .fixed_decimals(1),
+                    );
+
+                    ui.add_space(14.0);
+                    ui.strong("Peak Ceiling");
+                    ui.checkbox(&mut self.custom_peak_gate_enabled, "Enable peak ceiling");
+                    if self.custom_peak_gate_enabled {
+                        ui.add(
+                            egui::Slider::new(&mut self.custom_peak_ceiling_dbfs, -90.0..=0.0)
+                                .suffix(" dBFS")
+                                .fixed_decimals(1),
+                        );
+                    }
+
+                    ui.add_space(14.0);
+                    ui.strong("Padding");
+                    ui.label("Preserve audio around detected silence");
+                    egui::Grid::new("expert_padding_controls")
+                        .num_columns(2)
+                        .spacing([12.0, 8.0])
+                        .show(ui, |ui| {
+                            ui.label("Before");
+                            ui.horizontal(|ui| {
+                                ui.add(egui::DragValue::new(&mut self.custom_padding_before_ms)
+                                    .range(0..=2000)
+                                    .speed(10));
+                                ui.label("ms");
                             });
+                            ui.end_row();
 
-                        ui.add_space(14.0);
+                            ui.label("After");
+                            ui.horizontal(|ui| {
+                                ui.add(egui::DragValue::new(&mut self.custom_padding_after_ms)
+                                    .range(0..=2000)
+                                    .speed(10));
+                                ui.label("ms");
+                            });
+                            ui.end_row();
+                        });
+
+                    ui.add_space(14.0);
+                    ui.strong("Minimum Silence Duration");
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut self.minimum_silence_ms)
+                            .range(10..=10_000)
+                            .speed(10));
+                        ui.label("ms");
+                    });
+                } else {
+                    ui.strong("Detection Level");
+                    ui.add(
+                        egui::Slider::new(&mut self.detection_level, 0..=4)
+                            .step_by(1.0)
+                            .show_value(false),
+                    );
+                    egui::Grid::new("detection_level_labels")
+                        .num_columns(5)
+                        .spacing([4.0, 4.0])
+                        .show(ui, |ui| {
+                            for (index, label) in ["Comfortable", "Optimal", "Default", "Tight", "Aggressive"].iter().enumerate() {
+                                ui.label(egui::RichText::new(*label).size(10.0).color(
+                                    if self.detection_level == index {
+                                        ui.visuals().strong_text_color()
+                                    } else {
+                                        ui.visuals().weak_text_color()
+                                    }
+                                ));
+                            }
+                            ui.end_row();
+                        });
+
+                    ui.add_space(18.0);
+                    ui.strong("Padding");
+                    ui.add(
+                        egui::Slider::new(&mut self.padding_level, 0..=2)
+                            .step_by(1.0)
+                            .show_value(false),
+                    );
+                    egui::Grid::new("padding_level_labels")
+                        .num_columns(3)
+                        .spacing([8.0, 4.0])
+                        .show(ui, |ui| {
+                            for (index, label) in ["Comfortable", "Normal", "Tight"].iter().enumerate() {
+                                ui.label(egui::RichText::new(*label).size(10.0).color(
+                                    if self.padding_level == index {
+                                        ui.visuals().strong_text_color()
+                                    } else {
+                                        ui.visuals().weak_text_color()
+                                    }
+                                ));
+                            }
+                            ui.end_row();
+                        });
+
+                    ui.add_space(18.0);
+                    ui.horizontal(|ui| {
                         ui.strong("Minimum Silence Duration");
-                        ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label("ms");
                             ui.add(egui::DragValue::new(&mut self.minimum_silence_ms)
                                 .range(10..=10_000)
                                 .speed(10));
-                            ui.label("ms");
                         });
-                    } else {
-                        ui.strong("Detection Level");
-                        ui.add(
-                            egui::Slider::new(&mut self.detection_level, 0..=4)
-                                .step_by(1.0)
-                                .show_value(false),
-                        );
-                        egui::Grid::new("detection_level_labels")
-                            .num_columns(5)
-                            .spacing([4.0, 4.0])
-                            .show(ui, |ui| {
-                                for (index, label) in ["Comfortable", "Optimal", "Default", "Tight", "Aggressive"].iter().enumerate() {
-                                    ui.label(egui::RichText::new(*label).size(10.0).color(
-                                        if self.detection_level == index {
-                                            ui.visuals().strong_text_color()
-                                        } else {
-                                            ui.visuals().weak_text_color()
-                                        }
-                                    ));
-                                }
-                                ui.end_row();
-                            });
-
-                        ui.add_space(18.0);
-                        ui.strong("Padding");
-                        ui.add(
-                            egui::Slider::new(&mut self.padding_level, 0..=2)
-                                .step_by(1.0)
-                                .show_value(false),
-                        );
-                        egui::Grid::new("padding_level_labels")
-                            .num_columns(3)
-                            .spacing([8.0, 4.0])
-                            .show(ui, |ui| {
-                                for (index, label) in ["Comfortable", "Normal", "Tight"].iter().enumerate() {
-                                    ui.label(egui::RichText::new(*label).size(10.0).color(
-                                        if self.padding_level == index {
-                                            ui.visuals().strong_text_color()
-                                        } else {
-                                            ui.visuals().weak_text_color()
-                                        }
-                                    ));
-                                }
-                                ui.end_row();
-                            });
-
-                        ui.add_space(18.0);
-                        ui.horizontal(|ui| {
-                            ui.strong("Minimum Silence Duration");
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label("ms");
-                                ui.add(egui::DragValue::new(&mut self.minimum_silence_ms)
-                                    .range(10..=10_000)
-                                    .speed(10));
-                            });
-                        });
-                        ui.small("Default is 300 ms.");
-                    }
-
-                    ui.add_space(20.0);
-                    let blaze_ready = self.active_mode != Some(EditingMode::Blaze)
-                        || (!self.keyframes_running && self.keyframe_error.is_none() && !self.keyframes.is_empty());
-                    let can_detect = self.selected_path.is_some()
-                        && self.media_info.as_ref().is_some_and(|info| info.has_audio)
-                        && !self.silence_running
-                        && blaze_ready;
-                    if ui.add_enabled(
-                        can_detect,
-                        egui::Button::new(if self.silence_running { "Analysing Audio…" } else { "Detect Silence" })
-                            .min_size(egui::vec2(ui.available_width(), 36.0)),
-                    ).clicked() {
-                        self.start_silence_detection(ui.ctx());
-                    }
-                    if self.silence_running {
-                        ui.add_space(6.0);
-                        ui.spinner();
-                        ui.small("Analysing audio. A rescan replaces existing regions.");
-                    }
                     });
-                } else {
-                    ui.add_space(12.0);
-                    ui.label("Select an editing mode to configure silence detection and timeline editing.");
+                    ui.small("Default is 300 ms.");
                 }
 
-                egui::Frame::group(ui.style()).show(ui, |ui| {
-                    ui.heading("Export");
-                    ui.label("Export configuration will appear here.");
-                });
+                ui.add_space(20.0);
+                let blaze_ready = self.active_mode != Some(EditingMode::Blaze)
+                    || (!self.keyframes_running && self.keyframe_error.is_none() && !self.keyframes.is_empty());
+                let can_detect = self.selected_path.is_some()
+                    && self.media_info.as_ref().is_some_and(|info| info.has_audio)
+                    && !self.silence_running
+                    && blaze_ready;
+                if ui.add_enabled(
+                    can_detect,
+                    egui::Button::new(if self.silence_running { "Analysing Audio…" } else { "Detect Silence" })
+                        .min_size(egui::vec2(ui.available_width(), 36.0)),
+                ).clicked() {
+                    self.start_silence_detection(ui.ctx());
+                }
+                if self.silence_running {
+                    ui.add_space(6.0);
+                    ui.spinner();
+                    ui.small("Analysing audio. A rescan replaces existing regions.");
+                }
+
+                    }
+                    ToolTab::Export => {
+                        ui.heading("Export");
+                        ui.label("Export configuration will appear here.");
+                    }
+                }
 
                 // Keep the resizable panel at the user-selected width instead of
                 // allowing its contents to shrink it to their intrinsic width.
