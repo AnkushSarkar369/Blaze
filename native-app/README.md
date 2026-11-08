@@ -6,7 +6,7 @@ Blaze is a native Rust desktop application built with eframe/egui and OpenGL. It
 
 Embedded playback is provided by libmpv through the mpv render API. Video is rendered directly into the existing egui preview; audio is handled by mpv and remains the source's original audio stream. FFmpeg remains responsible for media probing and the editing/export operations built on the existing `blaze-engine`.
 
-The player uses MPV's `auto-safe` hardware-decoding mode. Hardware decoding depends on the GPU, driver, and source codec; unsupported formats fall back to software decoding.
+The player uses MPV's `vaapi-copy` hardware-decoding path for broad compatibility with Intel and AMD Linux graphics. Hardware decoding depends on the GPU, driver, and source codec; unsupported formats use software decoding.
 
 ## Fedora playback dependency
 
