@@ -10,7 +10,7 @@ use eframe::egui;
 use glow::HasContext;
 use rsmpv::{
     render::{OpenGlFbo, OwnedRenderContext},
-    Mpv,
+    Event, Mpv,
 };
 
 #[derive(Default)]
@@ -134,6 +134,7 @@ impl Playback {
                 .set_property("input-vo-keyboard", false)?
                 .build()?,
         );
+        mpv.request_log_messages("warn")?;
 
         let get_proc_address = Box::new(move |name: &str| -> *mut c_void {
             let name = CString::new(name).expect("OpenGL function names cannot contain NUL");
@@ -197,6 +198,33 @@ impl Playback {
 
     pub fn is_paused(&self) -> bool {
         self.mpv.get_property::<bool>("pause").unwrap_or(true)
+    }
+
+    pub fn poll_error(&self) -> Option<String> {
+        let mut latest_error = None;
+        while let Some(event) = self.mpv.poll_event() {
+            match event {
+                Event::LogMessage(message) => {
+                    if message.level == "warn" {
+                        eprintln!("Blaze MPV [{}]: {}", message.prefix, message.text.trim());
+                    } else if message.level == "error" || message.level == "fatal" {
+                        latest_error = Some(format!(
+                            "Playback error [{}]: {}",
+                            message.prefix,
+                            message.text.trim()
+                        ));
+                    }
+                }
+                Event::EndFile {
+                    error: Some(error),
+                    ..
+                } => {
+                    latest_error = Some(format!("Playback ended with an error: {error}"));
+                }
+                _ => {}
+            }
+        }
+        latest_error
     }
 
     pub fn paint(&self, painter: &egui::Painter, rect: egui::Rect) {
