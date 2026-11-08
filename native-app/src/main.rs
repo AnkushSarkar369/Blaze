@@ -189,11 +189,18 @@ impl eframe::App for BlazeApp {
 
                         ui.add_space(8.0);
 
-                        let duration = self
-                            .playback
-                            .duration()
-                            .max(self.media_info.as_ref().map(|info| info.duration).unwrap_or(0.0))
-                            .max(0.01);
+                        let player_duration = self.playback.duration();
+                        let probed_duration = self
+                            .media_info
+                            .as_ref()
+                            .map(|info| info.duration)
+                            .unwrap_or(0.0);
+                        let duration = if player_duration.is_finite() && player_duration > 0.0 {
+                            player_duration
+                        } else {
+                            probed_duration
+                        }
+                        .max(0.01);
                         self.playback_position = self.playback_position.clamp(0.0, duration);
 
                         let time_label = format!(
@@ -201,7 +208,7 @@ impl eframe::App for BlazeApp {
                             format_time(self.playback_position),
                             format_time(duration)
                         );
-                        let time_width = 104.0;
+                        let time_width = if duration >= 3600.0 { 148.0 } else { 104.0 };
                         let slider_width = (ui.available_width() - time_width - 28.0).max(80.0);
 
                         let response = ui.add_sized(
