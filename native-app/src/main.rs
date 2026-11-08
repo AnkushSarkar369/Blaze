@@ -71,6 +71,9 @@ impl BlazeApp {
 
         if let Err(error) = self.playback.load(&path) {
             eprintln!("Blaze: {error}");
+            self.selected_path = None;
+            self.loading = false;
+            return;
         }
 
         let sender = self.probe_tx.clone();
@@ -100,6 +103,10 @@ impl BlazeApp {
                 }
                 Err(error) => {
                     self.loading = false;
+                    self.selected_path = None;
+                    self.media_info = None;
+                    self.playback_position = 0.0;
+                    self.playback.stop();
                     eprintln!("Blaze: media analysis failed: {error}");
                 }
             }
@@ -114,6 +121,9 @@ impl eframe::App for BlazeApp {
         if let Some(error) = self.playback.poll_error() {
             eprintln!("Blaze: {error}");
             self.loading = false;
+            self.selected_path = None;
+            self.media_info = None;
+            self.playback_position = 0.0;
         }
 
         if self.selected_path.is_some() && !self.seeking {
