@@ -253,18 +253,22 @@ impl eframe::App for BlazeApp {
                 // Timeline navigation is deliberately modifier-based so ordinary
                 // wheel input does not interfere with the rest of the interface.
                 if can_seek && response.hovered() {
-                    let (modifiers, scroll) = ui.input(|input| {
-                        (input.modifiers, input.smooth_scroll_delta)
+                    let (modifiers, scroll, zoom_delta) = ui.input(|input| {
+                        (input.modifiers, input.smooth_scroll_delta, input.zoom_delta())
                     });
                     let visible_duration = (duration / self.timeline_zoom as f64).max(0.01);
-                    if modifiers.ctrl && scroll.y.abs() > 0.0 {
+
+                    // egui consumes Ctrl+wheel as its native zoom gesture and
+                    // exposes it through zoom_delta(), not smooth_scroll_delta.
+                    // Use that signal directly; it is 1.0 when no zoom gesture
+                    // occurred (including ordinary wheel scrolling).
+                    if (zoom_delta - 1.0).abs() > 0.0001 {
                         let pointer_x = ui.input(|input| input.pointer.hover_pos())
                             .map(|position| position.x)
                             .unwrap_or_else(|| lane.center().x);
                         let anchor = ((pointer_x - lane.left()) / lane.width()).clamp(0.0, 1.0) as f64;
                         let anchor_time = self.timeline_offset + anchor * visible_duration;
-                        let zoom_factor = (scroll.y * 0.003).exp();
-                        self.timeline_zoom = (self.timeline_zoom * zoom_factor as f32).clamp(1.0, 128.0);
+                        self.timeline_zoom = (self.timeline_zoom * zoom_delta).clamp(1.0, 128.0);
                         let new_visible = duration / self.timeline_zoom as f64;
                         self.timeline_offset = anchor_time - anchor * new_visible;
                     } else if modifiers.alt && scroll.y.abs() > 0.0 {
