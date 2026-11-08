@@ -1055,7 +1055,79 @@ impl eframe::App for BlazeApp {
                     }
                     ToolTab::Export => {
                         ui.heading("Export");
-                        ui.label("Export configuration will appear here.");
+                        ui.add_space(12.0);
+
+                        ui.strong("Video Export");
+                        ui.add_space(6.0);
+
+                        let blaze_reason = if self.selected_path.is_none() {
+                            Some("Import a video to begin.")
+                        } else if self.active_mode != Some(EditingMode::Blaze) {
+                            Some("Requires Blaze Mode. Switch modes to enable Blaze Export.")
+                        } else if self.keyframes_running {
+                            Some("Waiting for keyframe analysis to finish.")
+                        } else if self.keyframe_error.is_some() || self.keyframes.is_empty() {
+                            Some("Blaze Export requires usable video keyframes.")
+                        } else if self.edit_regions.is_empty() {
+                            Some("Create at least one cut region before exporting.")
+                        } else {
+                            Some("Blaze Export pipeline is awaiting integration.")
+                        };
+
+                        let blaze_eligible = self.selected_path.is_some()
+                            && self.active_mode == Some(EditingMode::Blaze)
+                            && !self.keyframes_running
+                            && self.keyframe_error.is_none()
+                            && !self.keyframes.is_empty()
+                            && !self.edit_regions.is_empty();
+
+                        ui.add_enabled(
+                            false,
+                            egui::Button::new(egui::RichText::new("Blaze Export").strong())
+                                .min_size(egui::vec2(ui.available_width(), 38.0)),
+                        );
+                        if let Some(reason) = blaze_reason {
+                            ui.label(egui::RichText::new(reason).small().color(ui.visuals().weak_text_color()));
+                        } else if blaze_eligible {
+                            ui.label(egui::RichText::new("Ready for stream-copy export.").small());
+                        }
+
+                        ui.add_space(8.0);
+                        ui.add_enabled(
+                            false,
+                            egui::Button::new("Precision Export")
+                                .min_size(egui::vec2(ui.available_width(), 38.0)),
+                        );
+                        ui.label(
+                            egui::RichText::new("Coming Soon — re-encoded export for Precise Mode.")
+                                .small()
+                                .color(ui.visuals().weak_text_color()),
+                        );
+
+                        ui.add_space(22.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+                        ui.strong("Timestamp Export");
+                        ui.label(
+                            egui::RichText::new("Export edit decisions for use in a non-linear editor.")
+                                .small()
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                        ui.add_space(8.0);
+
+                        let timestamp_formats = ["DaVinci", "EDL", "FCPXML", "Premiere XML"];
+                        for format in timestamp_formats {
+                            ui.add_enabled(
+                                false,
+                                egui::Button::new(format)
+                                    .min_size(egui::vec2(ui.available_width(), 34.0)),
+                            );
+                        }
+                        ui.label(
+                            egui::RichText::new("Interchange export is not connected yet.")
+                                .small()
+                                .color(ui.visuals().weak_text_color()),
+                        );
                     }
                 }
 
