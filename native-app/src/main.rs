@@ -409,11 +409,11 @@ impl eframe::App for BlazeApp {
                 };
                 let response = ui.allocate_rect(lane, sense);
 
-                // Timeline navigation is deliberately modifier-based so ordinary
-                // wheel input does not interfere with the rest of the interface.
+                // Ctrl+wheel zooms; ordinary wheel input pans the timeline
+                // horizontally. Horizontal trackpad input is also supported.
                 if can_seek && response.hovered() {
-                    let (modifiers, scroll, zoom_delta) = ui.input(|input| {
-                        (input.modifiers, input.smooth_scroll_delta, input.zoom_delta())
+                    let (scroll, zoom_delta) = ui.input(|input| {
+                        (input.smooth_scroll_delta, input.zoom_delta())
                     });
                     let visible_duration = (duration / self.timeline_zoom as f64).max(0.01);
 
@@ -430,8 +430,15 @@ impl eframe::App for BlazeApp {
                         self.timeline_zoom = (self.timeline_zoom * zoom_delta).clamp(1.0, 128.0);
                         let new_visible = duration / self.timeline_zoom as f64;
                         self.timeline_offset = anchor_time - anchor * new_visible;
-                    } else if modifiers.alt && scroll.y.abs() > 0.0 {
-                        self.timeline_offset -= scroll.y as f64 * visible_duration * 0.0015;
+                    } else {
+                        let pan_delta = if scroll.x.abs() > 0.0 {
+                            scroll.x
+                        } else {
+                            scroll.y
+                        };
+                        if pan_delta.abs() > 0.0 {
+                            self.timeline_offset -= pan_delta as f64 * visible_duration * 0.0015;
+                        }
                     }
 
                     let visible_duration = duration / self.timeline_zoom as f64;
@@ -642,6 +649,10 @@ impl eframe::App for BlazeApp {
                 ui.separator();
                 ui.add_space(8.0);
                 ui.label(self.active_tool_tab.description());
+                ui.add_space(12.0);
+                if ui.button("Quick Help").on_hover_text("Keyboard shortcuts and editing modes (Ctrl + H)").clicked() {
+                    self.show_help = true;
+                }
             });
 
         egui::CentralPanel::default()
