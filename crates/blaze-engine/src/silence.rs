@@ -142,11 +142,13 @@ pub fn detect_silence_pcm(
         let raw_start = start as f64 * WINDOW_MS as f64 / 1000.0;
         let raw_end = (end * WINDOW_MS) as f64 / 1000.0;
         if raw_end - raw_start < min_duration { return None; }
-        let padded_start = (raw_start + before).min(raw_end);
-        let padded_end = (raw_end - after).max(padded_start);
+        // Padding preserves audio around a detected quiet interval. The cut
+        // therefore begins earlier and ends later than the raw silence.
+        let padded_start = (raw_start - before).max(0.0);
+        let padded_end = (raw_end + after).min(total_duration);
         (padded_end > padded_start).then_some(SilenceInterval {
-            start: padded_start.clamp(0.0, total_duration),
-            end: padded_end.clamp(0.0, total_duration),
+            start: padded_start,
+            end: padded_end,
         })
     }).collect()
 }
@@ -219,7 +221,7 @@ mod tests {
         config.padding_after_ms = 150;
         let found = detect_silence_pcm(&samples, config);
         assert_eq!(found.len(), 1);
-        assert!((found[0].start - 1.1).abs() < 0.02);
-        assert!((found[0].end - 1.85).abs() < 0.02);
+        assert!((found[0].start - 0.9).abs() < 0.02);
+        assert!((found[0].end - 2.15).abs() < 0.02);
     }
 }
