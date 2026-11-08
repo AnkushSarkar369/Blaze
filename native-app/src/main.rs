@@ -138,6 +138,7 @@ struct BlazeApp {
     active_tool_tab: ToolTab,
     show_help: bool,
     first_run_help_seen: bool,
+    pending_preview_fit: bool,
 }
 
 fn nearest_keyframe(keyframes: &[f64], time: f64) -> Option<f64> {
@@ -172,6 +173,19 @@ impl BlazeApp {
         visuals.selection.bg_fill = egui::Color32::from_rgb(92, 45, 39);
         visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 104, 79));
         cc.egui_ctx.set_visuals(visuals);
+
+        // A single rounded geometric sans-serif system, with restrained hierarchy.
+        cc.egui_ctx.all_styles_mut(|style| {
+            use egui::{FontFamily, FontId, TextStyle};
+            style.animation_time = 0.14;
+            style.spacing.item_spacing = egui::vec2(8.0, 5.0);
+            style.spacing.button_padding = egui::vec2(12.0, 7.0);
+            style.text_styles.insert(TextStyle::Body, FontId::new(14.0, FontFamily::Proportional));
+            style.text_styles.insert(TextStyle::Button, FontId::new(13.5, FontFamily::Proportional));
+            style.text_styles.insert(TextStyle::Small, FontId::new(11.5, FontFamily::Proportional));
+            style.text_styles.insert(TextStyle::Heading, FontId::new(22.0, FontFamily::Proportional));
+            style.text_styles.insert(TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace));
+        });
 
         let playback = Playback::new(cc)?;
         let (probe_tx, probe_rx) = mpsc::channel();
@@ -227,6 +241,7 @@ impl BlazeApp {
             active_tool_tab: ToolTab::ModeSelector,
             show_help: !has_seen_first_run_help(),
             first_run_help_seen: has_seen_first_run_help(),
+            pending_preview_fit: false,
         })
     }
 
@@ -372,6 +387,7 @@ impl BlazeApp {
         self.waveform = None;
         self.waveform_progress = Some(0.0);
         self.selected_path = Some(path.clone());
+        self.pending_preview_fit = false;
         self.start_keyframe_analysis(path.clone(), ctx);
 
         if let Err(error) = self.playback.load(&path) {
@@ -435,6 +451,7 @@ impl BlazeApp {
                     }
 
                     self.media_info = Some(info);
+                    self.pending_preview_fit = true;
                 }
                 Err(error) => {
                     self.loading = false;
@@ -675,15 +692,51 @@ impl eframe::App for BlazeApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // Make panel splitters easier to grab without changing their saved sizes.
-        ui.style_mut().interaction.resize_grab_radius_side = 7.0;
+        ui.style_mut().interaction.resize_grab_radius_side = 10.0;
+        let root_rect = ui.available_rect_before_wrap();
 
-        egui::Panel::bottom("timeline")
+        // Fit the initial preview width to the imported video's aspect ratio.
+        // This runs once per import; later manual resizing remains untouched.
+        if self.pending_preview_fit {
+            if let Some(info) = self.media_info.as_ref() {
+                let aspect = if info.width > 0 && info.height > 0 {
+                    info.width as f32 / info.height as f32
+                } else { 16.0 / 9.0 };
+                let preview_height = (root_rect.height() - 220.0 - 54.0).max(160.0);
+                let preview_width = (preview_height * aspect + 14.0)
+                    .clamp(360.0, (root_rect.width() - 240.0).max(360.0));
+                let tools_width = (root_rect.width() - preview_width).max(240.0);
+                let panel_id = ui.scope_id().with("tools");
+                let panel_rect = egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(tools_width, root_rect.height()),
+                );
+                ui.ctx().data_mut(|data| {
+                    data.insert_persisted(panel_id, egui::containers::panel::PanelState {
+                        outer_rect: panel_rect,
+                    });
+                });
+                self.pending_preview_fit = false;
+            }
+        }
+
+        let mut timeline_split_rect = None;
+        let mut tools_split_rect = None;
+
+        let timeline_panel = egui::Panel::bottom("timeline")
             .resizable(true)
             .default_size(220.0)
             .min_size(140.0)
             .show(ui, |ui| {
                 let available = ui.available_rect_before_wrap();
-                let lane = available.shrink2(egui::vec2(10.0, 8.0));
+                let ruler = egui::Rect::from_min_max(
+                    egui::pos2(available.left() + 10.0, available.top() + 3.0),
+                    egui::pos2(available.right() - 10.0, available.top() + 27.0),
+                );
+                let lane = egui::Rect::from_min_max(
+                    egui::pos2(available.left() + 10.0, ruler.bottom() + 3.0),
+                    egui::pos2(available.right() - 10.0, available.bottom() - 8.0),
+                );
 
                 let duration = self.media_duration();
 
@@ -734,6 +787,40 @@ impl eframe::App for BlazeApp {
                 let visible_duration = duration / self.timeline_zoom as f64;
                 let view_start = self.timeline_offset / duration;
                 let view_end = ((self.timeline_offset + visible_duration) / duration).min(1.0);
+
+                // Adaptive time ruler: choose a clean 1–2–5 interval based on
+                // available pixels, so labels remain legible at every zoom level.
+                let raw_step = (visible_duration * 105.0 / lane.width().max(1.0)).max(0.001);
+                let magnitude = 10.0_f64.powf(raw_step.log10().floor());
+                let normalized = raw_step / magnitude;
+                let step = if normalized <= 1.0 { magnitude }
+                    else if normalized <= 2.0 { 2.0 * magnitude }
+                    else if normalized <= 5.0 { 5.0 * magnitude }
+                    else { 10.0 * magnitude };
+                let first_tick = (self.timeline_offset / step).ceil() * step;
+                let mut tick = first_tick;
+                while tick <= (self.timeline_offset + visible_duration).min(duration) + step * 0.0001 {
+                    let x = lane.left()
+                        + (((tick - self.timeline_offset) / visible_duration) as f32) * lane.width();
+                    if x >= ruler.left() && x <= ruler.right() {
+                        ui.painter().line_segment(
+                            [egui::pos2(x, ruler.bottom() - 5.0), egui::pos2(x, ruler.bottom())],
+                            egui::Stroke::new(1.0, egui::Color32::from_rgb(91, 94, 98)),
+                        );
+                        ui.painter().text(
+                            egui::pos2(x + 4.0, ruler.top() + 3.0),
+                            egui::Align2::LEFT_TOP,
+                            format_ruler_time(tick, step),
+                            egui::FontId::proportional(11.5),
+                            egui::Color32::from_rgb(145, 149, 153),
+                        );
+                    }
+                    tick += step;
+                }
+                ui.painter().line_segment(
+                    [ruler.left(), ruler.bottom(), ruler.right(), ruler.bottom()],
+                    egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 46, 49)),
+                );
 
                 ui.painter().rect_filled(
                     lane,
@@ -878,13 +965,25 @@ impl eframe::App for BlazeApp {
                 {
                     let progress = ((self.playback_position - self.timeline_offset) / visible_duration) as f32;
                     let playhead_x = lane.left() + lane.width() * progress;
+                    let playhead_color = egui::Color32::from_rgb(255, 104, 79);
                     ui.painter().line_segment(
                         [
-                            egui::pos2(playhead_x, lane.top()),
+                            egui::pos2(playhead_x, lane.top() + 7.0),
                             egui::pos2(playhead_x, lane.bottom()),
                         ],
-                        egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 104, 79)),
+                        egui::Stroke::new(1.5, playhead_color),
                     );
+                    ui.painter().add(egui::Shape::convex_polygon(
+                        vec![
+                            egui::pos2(playhead_x - 6.0, lane.top() - 2.0),
+                            egui::pos2(playhead_x + 6.0, lane.top() - 2.0),
+                            egui::pos2(playhead_x + 6.0, lane.top() + 2.0),
+                            egui::pos2(playhead_x, lane.top() + 9.0),
+                            egui::pos2(playhead_x - 6.0, lane.top() + 2.0),
+                        ],
+                        playhead_color,
+                        egui::Stroke::NONE,
+                    ));
                 }
 
                 if can_seek && !handle_interaction {
@@ -922,8 +1021,9 @@ impl eframe::App for BlazeApp {
                 // Keep the panel's requested height after a resize.
                 ui.allocate_space(ui.available_size());
             });
+        timeline_split_rect = Some(timeline_panel.response.rect);
 
-        egui::Panel::right("tools")
+        let tools_panel = egui::Panel::right("tools")
             .resizable(true)
             .default_size(310.0)
             .min_size(240.0)
@@ -1272,6 +1372,7 @@ impl eframe::App for BlazeApp {
                 // allowing its contents to shrink it to their intrinsic width.
                 ui.allocate_space(ui.available_size());
             });
+        tools_split_rect = Some(tools_panel.response.rect);
 
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(egui::Color32::from_rgb(16, 17, 18)))
@@ -1476,6 +1577,39 @@ impl eframe::App for BlazeApp {
                     });
             });
 
+        // Visible resize affordances sit over the existing native egui splitters.
+        // The underlying splitter remains responsible for the actual drag.
+        let handle_fill = egui::Color32::from_rgb(42, 45, 48);
+        let handle_mark = egui::Color32::from_rgb(126, 130, 134);
+        if let Some(rect) = tools_split_rect {
+            let handle = egui::Rect::from_center_size(
+                egui::pos2(rect.left(), rect.center().y),
+                egui::vec2(10.0, 62.0),
+            );
+            ui.painter().rect_filled(handle, egui::CornerRadius::same(5), handle_fill);
+            for offset in [-8.0_f32, 0.0, 8.0] {
+                ui.painter().circle_filled(
+                    egui::pos2(handle.center().x, handle.center().y + offset),
+                    1.25,
+                    handle_mark,
+                );
+            }
+        }
+        if let Some(rect) = timeline_split_rect {
+            let handle = egui::Rect::from_center_size(
+                egui::pos2(rect.center().x, rect.top()),
+                egui::vec2(62.0, 10.0),
+            );
+            ui.painter().rect_filled(handle, egui::CornerRadius::same(5), handle_fill);
+            for offset in [-8.0_f32, 0.0, 8.0] {
+                ui.painter().circle_filled(
+                    egui::pos2(handle.center().x + offset, handle.center().y),
+                    1.25,
+                    handle_mark,
+                );
+            }
+        }
+
         if self.show_help {
             egui::Window::new("Quick Help")
                 .collapsible(false)
@@ -1635,6 +1769,23 @@ fn format_time(seconds: f64) -> String {
         format!("{hours:02}:{minutes:02}:{seconds:02}")
     } else {
         format!("{minutes:02}:{seconds:02}")
+    }
+}
+
+fn format_ruler_time(seconds: f64, step: f64) -> String {
+    let seconds = seconds.max(0.0);
+    if step >= 60.0 {
+        let whole_minutes = (seconds / 60.0).floor() as u64;
+        let remainder = (seconds - whole_minutes as f64 * 60.0).round() as u64;
+        if remainder == 0 {
+            format!("{whole_minutes}m")
+        } else {
+            format!("{whole_minutes}m {remainder}s")
+        }
+    } else if step >= 1.0 {
+        format!("{}s", seconds.round() as u64)
+    } else {
+        format!("{:.1}s", seconds)
     }
 }
 
