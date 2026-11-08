@@ -94,6 +94,7 @@ struct BlazeApp {
     timeline_offset: f64,
     edit_regions: Vec<EditRegion>,
     pending_region_start: Option<f64>,
+    skip_cuts_enabled: bool,
     active_tool_tab: ToolTab,
     show_help: bool,
     first_run_help_seen: bool,
@@ -136,6 +137,7 @@ impl BlazeApp {
             timeline_offset: 0.0,
             edit_regions: Vec::new(),
             pending_region_start: None,
+            skip_cuts_enabled: false,
             active_tool_tab: ToolTab::BlazeMode,
             show_help: !has_seen_first_run_help(),
             first_run_help_seen: has_seen_first_run_help(),
@@ -335,6 +337,36 @@ impl eframe::App for BlazeApp {
 
         if self.selected_path.is_some() && !self.seeking {
             self.playback_position = self.playback.position();
+
+            // Skip completed N–M regions during active playback. Extend the target
+            // through overlapping or directly adjacent regions so no marked content
+            // is played between consecutive cuts.
+            if self.skip_cuts_enabled && !self.playback.is_paused() {
+                let mut skip_target = self.playback_position;
+                loop {
+                    let next_target = self
+                        .edit_regions
+                        .iter()
+                        .filter(|region| {
+                            region.start <= skip_target && region.end > skip_target
+                        })
+                        .map(|region| region.end)
+                        .fold(skip_target, f64::max);
+
+                    if next_target <= skip_target {
+                        break;
+                    }
+                    skip_target = next_target;
+                }
+
+                if skip_target > self.playback_position {
+                    if let Err(error) = self.playback.seek(skip_target) {
+                        eprintln!("Blaze: could not skip cut region: {error}");
+                    } else {
+                        self.playback_position = skip_target;
+                    }
+                }
+            }
 
             // Keep the playhead visible while playing. If playback starts outside
             // the zoomed viewport, jump to it; once it reaches the right edge,
@@ -700,7 +732,12 @@ impl eframe::App for BlazeApp {
                                             format_time(duration)
                                         );
                                         let time_width = if duration >= 3600.0 { 148.0 } else { 104.0 };
-                                        let slider_width = (ui.available_width() - time_width - 28.0).max(40.0);
+                                        let skip_button_width = 112.0;
+                                        let slider_width = (ui.available_width()
+                                            - time_width
+                                            - skip_button_width
+                                            - 48.0)
+                                            .max(32.0);
 
                                         // egui Slider has its own preferred width. Override it
                                         // locally so the seek track truly fills the preview.
@@ -751,6 +788,27 @@ impl eframe::App for BlazeApp {
                                                 egui::RichText::new(time_label).monospace().small(),
                                             ),
                                         );
+
+                                        ui.add_space(8.0);
+                                        let skip_button = egui::Button::new(if self.skip_cuts_enabled {
+                                            "Skip Cuts: ON"
+                                        } else {
+                                            "Skip Cuts: OFF"
+                                        })
+                                        .fill(if self.skip_cuts_enabled {
+                                            egui::Color32::from_rgb(35, 112, 72)
+                                        } else {
+                                            egui::Color32::from_rgb(130, 55, 48)
+                                        });
+                                        if ui
+                                            .add_sized([skip_button_width, 26.0], skip_button)
+                                            .on_hover_text(
+                                                "Automatically skip all completed N–M cut regions during playback",
+                                            )
+                                            .clicked()
+                                        {
+                                            self.skip_cuts_enabled = !self.skip_cuts_enabled;
+                                        }
                                         ui.add_space(8.0);
                                     },
                                 );
