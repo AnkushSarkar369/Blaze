@@ -126,6 +126,7 @@ impl Playback {
             Mpv::builder()?
                 .set_property("vo", "libmpv")?
                 .set_property("hwdec", "auto-safe")?
+                .set_property("video-timing-offset", 0.0_f64)?
                 .set_property("keep-open", "yes")?
                 .set_property("osc", false)?
                 .set_property("osd-level", 0_i64)?
