@@ -766,7 +766,6 @@ impl eframe::App for BlazeApp {
                     });
                     egui::Grid::new("detection_level_labels")
                         .num_columns(5)
-                        .min_col_width(ui.available_width() / 5.0)
                         .show(ui, |ui| {
                             for (index, label) in ["Comfortable", "Optimal", "Default", "Tight", "Aggressive"].iter().enumerate() {
                                 ui.label(egui::RichText::new(*label).size(10.0).color(
@@ -787,7 +786,6 @@ impl eframe::App for BlazeApp {
                     });
                     egui::Grid::new("padding_level_labels")
                         .num_columns(3)
-                        .min_col_width(ui.available_width() / 3.0)
                         .show(ui, |ui| {
                             for (index, label) in ["Comfortable", "Normal", "Tight"].iter().enumerate() {
                                 ui.label(egui::RichText::new(*label).size(10.0).color(
@@ -854,6 +852,10 @@ impl eframe::App for BlazeApp {
                             });
                     }
                 }
+
+                // Keep the resizable panel at the user-selected width instead of
+                // allowing its contents to shrink it to their intrinsic width.
+                ui.allocate_space(ui.available_size());
             });
 
         egui::CentralPanel::default()
