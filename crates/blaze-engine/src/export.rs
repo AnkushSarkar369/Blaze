@@ -310,6 +310,7 @@ pub fn export_interchange(
 fn build_edl(source: &Path, info: &MediaInfo, rate: FrameRate, segments: &[Segment]) -> String {
     let mut out = String::new();
     let reel = reel_name(source);
+    let name = source.file_name().and_then(|s| s.to_str()).unwrap_or("Source");
     out.push_str(&format!("TITLE: {}\nFCM: NON-DROP FRAME\n\n",
         source.file_stem().and_then(|s| s.to_str()).unwrap_or("Blaze Edit")));
     for (index, segment) in segments.iter().enumerate() {
@@ -319,13 +320,15 @@ fn build_edl(source: &Path, info: &MediaInfo, rate: FrameRate, segments: &[Segme
         let source_out = timecode_base + segment.source_out;
         let record_in = timecode_base + segment.record_in;
         let record_out = record_in + segment.duration();
-        out.push_str(&format!("{n:03}  {reel:<8} V     C        {} {} {} {}\n",
-            timecode(source_in, rate), timecode(source_out, rate),
-            timecode(record_in, rate), timecode(record_out, rate)));
-        out.push_str(&format!("* FROM CLIP NAME: {}\n* SOURCE FILE: {}\n\n",
-            source.file_name().and_then(|s| s.to_str()).unwrap_or("Source"), source.display()));
+        let channels: &[&str] = if info.has_audio { &["V", "A"] } else { &["V"] };
+        for channel in channels {
+            out.push_str(&format!("{n:03}  {reel:<8} {channel}     C        {} {} {} {}\n",
+                timecode(source_in, rate), timecode(source_out, rate),
+                timecode(record_in, rate), timecode(record_out, rate)));
+            out.push_str(&format!("* FROM CLIP NAME: {name}\n"));
+            out.push_str(&format!("* SOURCE FILE: {}\n\n", source.display()));
+        }
     }
-    if info.has_audio { out.push_str("* Audio is linked to the source in the XML interchange exports.\n"); }
     out
 }
 
@@ -349,9 +352,21 @@ fn build_fcp7_xml(
     out.push_str(&format!("<media><video><format><samplecharacteristics><width>{width}</width><height>{height}</height><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate><fielddominance>none</fielddominance><pixelaspectratio>square</pixelaspectratio></samplecharacteristics></format><track>\n",
         rate.nominal));
     for (i, segment) in segments.iter().enumerate() {
-        out.push_str(&format!("<clipitem id=\"video-{}\"><name>{name_xml}</name><duration>{}</duration><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate><start>{}</start><end>{}</end><in>{}</in><out>{}</out><file id=\"file-1\"><name>{name_xml}</name><pathurl>{path_url}</pathurl><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate><duration>{source_duration}</duration><media><video><samplecharacteristics><width>{width}</width><height>{height}</height></samplecharacteristics></video></media></file>\n",
+        out.push_str(&format!("<clipitem id=\"video-{}\"><name>{name_xml}</name><duration>{}</duration><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate><start>{}</start><end>{}</end><in>{}</in><out>{}</out>",
             i + 1, segment.duration(), rate.nominal, segment.record_in,
-            segment.record_in + segment.duration(), segment.source_in, segment.source_out, rate.nominal));
+            segment.record_in + segment.duration(), segment.source_in, segment.source_out));
+        if i == 0 {
+            out.push_str(&format!("<file id=\"file-1\"><name>{name_xml}</name><pathurl>{path_url}</pathurl><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate><duration>{source_duration}</duration><media><video><samplecharacteristics><width>{width}</width><height>{height}</height></samplecharacteristics></video>",
+                rate.nominal));
+            if info.has_audio {
+                let channels = info.audio_channels.unwrap_or(2);
+                let sample_rate = info.audio_sample_rate.unwrap_or(48000);
+                out.push_str(&format!("<audio><channelcount>{channels}</channelcount><samplecharacteristics><samplerate>{sample_rate}</samplerate></samplecharacteristics></audio>"));
+            }
+            out.push_str("</media></file>\n");
+        } else {
+            out.push_str("<file id=\"file-1\"/>\n");
+        }
         if info.has_audio {
             out.push_str(&format!("<link><linkclipref>audio-{}</linkclipref><mediatype>audio</mediatype><trackindex>1</trackindex><clipindex>{}</clipindex></link>\n",
                 i + 1, i + 1));
@@ -362,13 +377,13 @@ fn build_fcp7_xml(
     if info.has_audio {
         let channels = info.audio_channels.unwrap_or(2);
         let sample_rate = info.audio_sample_rate.unwrap_or(48000);
-        out.push_str(&format!("<audio><numOutputChannels>{channels}</numOutputChannels><format><samplecharacteristics><depth>16</depth><samplerate>{sample_rate}</samplerate></samplecharacteristics></format><tracks><track>\n"));
+        out.push_str(&format!("<audio><numOutputChannels>{channels}</numOutputChannels><format><samplecharacteristics><samplerate>{sample_rate}</samplerate></samplecharacteristics></format><track>\n"));
         for (i, segment) in segments.iter().enumerate() {
             out.push_str(&format!("<clipitem id=\"audio-{}\"><name>{name_xml}</name><duration>{}</duration><rate><timebase>{}</timebase><ntsc>{ntsc}</ntsc></rate><start>{}</start><end>{}</end><in>{}</in><out>{}</out><file id=\"file-1\"><name>{name_xml}</name><pathurl>{path_url}</pathurl></file><sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack><link><linkclipref>video-{}</linkclipref><mediatype>video</mediatype><trackindex>1</trackindex><clipindex>{}</clipindex></link></clipitem>\n",
                 i + 1, segment.duration(), rate.nominal, segment.record_in,
                 segment.record_in + segment.duration(), segment.source_in, segment.source_out, i + 1, i + 1));
         }
-        out.push_str("</track></tracks></audio>\n");
+        out.push_str("</track></audio>\n");
     }
     out.push_str("</media></sequence></children></project></xmeml>\n");
     Ok(out)
