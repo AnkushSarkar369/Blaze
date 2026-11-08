@@ -1,4 +1,5 @@
 name: Build Linux AppImage
+# Stage 1 verifies the extracted engine with real FFmpeg integration coverage.
 
 on:
   push:
