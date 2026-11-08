@@ -281,9 +281,6 @@ impl eframe::App for BlazeApp {
                         ));
                     } else {
                         ui.label("No footage loaded");
-                        if ui.button("Open video").clicked() {
-                            self.open_video(ui.ctx());
-                        }
                     }
                 });
             });
