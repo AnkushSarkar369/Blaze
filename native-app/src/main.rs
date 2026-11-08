@@ -93,7 +93,7 @@ impl BlazeApp {
     fn filename(&self) -> &str {
         self.selected_path
             .as_deref()
-            .and_then(PathBuf::file_name)
+            .and_then(|path| path.file_name())
             .and_then(|name| name.to_str())
             .unwrap_or("No footage loaded")
     }
@@ -143,7 +143,7 @@ impl eframe::App for BlazeApp {
                 );
                 ui.painter().rect_filled(
                     lane,
-                    3.0,
+                    egui::CornerRadius::same(3),
                     egui::Color32::from_rgb(17, 19, 21),
                 );
                 ui.painter().line_segment(
@@ -187,11 +187,11 @@ impl eframe::App for BlazeApp {
                     let preview = ui.available_rect_before_wrap();
                     ui.painter().rect_filled(
                         preview.shrink(8.0),
-                        4.0,
+                        egui::CornerRadius::same(4),
                         egui::Color32::from_rgb(8, 9, 10),
                     );
 
-                    ui.allocate_ui_at_rect(preview.shrink(8.0), |ui| {
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(preview.shrink(8.0)), |ui| {
                         ui.centered_and_justified(|ui| {
                             if self.loading {
                                 ui.spinner();
