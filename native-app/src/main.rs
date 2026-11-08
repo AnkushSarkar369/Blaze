@@ -735,12 +735,10 @@ impl eframe::App for BlazeApp {
                 ui.allocate_space(ui.available_size());
             });
 
-        let tools_max_width = (ui.available_width() * 0.5).max(340.0);
         egui::Panel::right("tools")
             .resizable(true)
             .default_size(310.0)
             .min_size(240.0)
-            .max_size(tools_max_width)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     for tab in ToolTab::ALL {
