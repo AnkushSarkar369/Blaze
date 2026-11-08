@@ -346,7 +346,13 @@ fn paint_player_icon(
                 [
                     egui::pos2(center.x - 4.0, center.y - 1.0),
                     egui::pos2(center.x, center.y - 6.0),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
                     egui::pos2(center.x + 4.0, center.y - 1.0),
+                    egui::pos2(center.x, center.y - 6.0),
                 ],
                 stroke,
             );
@@ -354,6 +360,18 @@ fn paint_player_icon(
                 [
                     egui::pos2(center.x - 8.0, center.y + 4.0),
                     egui::pos2(center.x - 8.0, center.y + 7.0),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    egui::pos2(center.x - 8.0, center.y + 7.0),
+                    egui::pos2(center.x + 8.0, center.y + 7.0),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
                     egui::pos2(center.x + 8.0, center.y + 7.0),
                     egui::pos2(center.x + 8.0, center.y + 4.0),
                 ],
