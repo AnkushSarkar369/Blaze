@@ -1207,6 +1207,7 @@ impl eframe::App for BlazeApp {
                                 .small()
                                 .color(ui.visuals().weak_text_color()),
                         );
+                        ui.small("DaVinci Resolve and Premiere use FCP 7 XML interchange.");
                         ui.add_space(8.0);
 
                         let timestamp_available = self.selected_path.is_some()
@@ -1453,7 +1454,7 @@ impl eframe::App for BlazeApp {
                             ui.monospace("Ctrl + Scroll");
                             ui.label("Zoom timeline in / out");
                             ui.end_row();
-                            ui.monospace("Alt + Scroll");
+                            ui.monospace("Scroll");
                             ui.label("Move timeline left / right");
                             ui.end_row();
                             ui.monospace("Space");
@@ -1484,7 +1485,7 @@ impl eframe::App for BlazeApp {
                             ui.label("Unrestricted boundary placement");
                             ui.end_row();
                             ui.strong("Export");
-                            ui.label("Render the finished video");
+                            ui.label("Export video or an editable NLE timeline");
                             ui.end_row();
                         });
                     ui.add_space(10.0);
