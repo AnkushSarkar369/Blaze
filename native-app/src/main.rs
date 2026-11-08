@@ -187,7 +187,7 @@ impl eframe::App for BlazeApp {
                     available.max,
                 );
 
-                ui.allocate_ui_at_rect(preview_rect, |ui| {
+                ui.scope_builder(egui::UiBuilder::new().max_rect(preview_rect), |ui| {
                     let preview_rect = ui.max_rect();
                     ui.painter().rect_filled(
                         preview_rect,
@@ -211,7 +211,7 @@ impl eframe::App for BlazeApp {
                     }
                 });
 
-                ui.allocate_ui_at_rect(transport_rect, |ui| {
+                ui.scope_builder(egui::UiBuilder::new().max_rect(transport_rect), |ui| {
                     ui.painter().rect_filled(
                         ui.max_rect(),
                         0.0,
@@ -354,8 +354,6 @@ fn paint_player_icon(
 
     let center = rect.center();
     let color = visuals.text_color();
-    let stroke = egui::Stroke::new(1.8, color);
-
     match icon {
         PlayerIcon::Play => {
             painter.add(egui::Shape::convex_polygon(
