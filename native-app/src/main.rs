@@ -739,6 +739,7 @@ impl eframe::App for BlazeApp {
             .resizable(true)
             .default_size(310.0)
             .min_size(240.0)
+            .max_size(340.0)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     for tab in ToolTab::ALL {
