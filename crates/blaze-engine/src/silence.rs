@@ -111,7 +111,7 @@ pub fn detect_silence_pcm(
     levels.sort_by(f64::total_cmp);
     // The upper-middle distribution estimates normal programme loudness while
     // remaining robust to long silent sections.
-    let baseline = percentile(&levels, 0.65);
+    let baseline = percentile(&levels, 0.85);
     let offset = config.threshold_below_baseline_db
         .unwrap_or_else(|| config.level.threshold_below_baseline_db())
         .clamp(3.0, 60.0);
