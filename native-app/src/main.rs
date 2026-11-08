@@ -39,10 +39,182 @@ impl ToolTab {
         match self {
             Self::ModeSelector => "Mode Selector",
             Self::BlazeMode => "Blaze Mode",
-            Self::PreciseMode => "Precise Mode",
+            Self::PreciseMode => "Precision Mode",
             Self::Export => "Export",
         }
     }
+}
+
+
+fn mode_selection_card(
+    ui: &mut egui::Ui,
+    title: &str,
+    description: &str,
+    icon: ModeCardIcon,
+    selected: bool,
+    enabled: bool,
+) -> egui::Response {
+    let width = ui.available_width().max(1.0);
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, 116.0), egui::Sense::click());
+
+    let visuals = ui.visuals();
+    let accent = match icon {
+        ModeCardIcon::Blaze => egui::Color32::from_rgb(255, 120, 92),
+        ModeCardIcon::Precision => egui::Color32::from_rgb(132, 177, 218),
+    };
+    let fill = if !enabled {
+        egui::Color32::from_rgb(25, 26, 28)
+    } else if selected {
+        egui::Color32::from_rgb(43, 34, 32)
+    } else if response.hovered() {
+        egui::Color32::from_rgb(39, 41, 44)
+    } else {
+        egui::Color32::from_rgb(30, 32, 35)
+    };
+    let border = if selected {
+        accent
+    } else if response.hovered() && enabled {
+        egui::Color32::from_rgb(91, 94, 98)
+    } else {
+        egui::Color32::from_rgb(57, 59, 63)
+    };
+
+    let painter = ui.painter();
+    painter.rect_filled(rect, egui::CornerRadius::same(8), fill);
+    painter.rect_stroke(
+        rect,
+        egui::CornerRadius::same(8),
+        egui::Stroke::new(if selected { 1.5 } else { 1.0 }, border),
+        egui::StrokeKind::Inside,
+    );
+
+    let icon_color = if enabled {
+        accent
+    } else {
+        visuals.weak_text_color()
+    };
+    let title_color = if enabled {
+        visuals.text_color()
+    } else {
+        visuals.weak_text_color()
+    };
+    let description_color = visuals.weak_text_color();
+
+    let title_galley = painter.layout_no_wrap(
+        title.to_owned(),
+        egui::FontId::proportional(15.0),
+        title_color,
+    );
+    let group_width = 22.0 + 9.0 + title_galley.size().x;
+    let group_left = rect.center().x - group_width * 0.5;
+    let icon_center = egui::pos2(group_left + 10.0, rect.top() + 27.0);
+
+    match icon {
+        ModeCardIcon::Blaze => {
+            let points = vec![
+                icon_center + egui::vec2(-2.5, -10.0),
+                icon_center + egui::vec2(5.0, -1.5),
+                icon_center + egui::vec2(1.0, -1.5),
+                icon_center + egui::vec2(3.0, 10.0),
+                icon_center + egui::vec2(-5.5, 0.0),
+                icon_center + egui::vec2(-1.5, 0.0),
+            ];
+            painter.add(egui::Shape::convex_polygon(
+                points,
+                icon_color,
+                egui::Stroke::NONE,
+            ));
+        }
+        ModeCardIcon::Precision => {
+            painter.circle_stroke(icon_center, 7.0, egui::Stroke::new(1.7, icon_color));
+            painter.circle_filled(icon_center, 1.8, icon_color);
+            let arm = 10.0;
+            let inner = 5.0;
+            for direction in [-1.0_f32, 1.0] {
+                painter.line_segment(
+                    [
+                        icon_center + egui::vec2(direction * inner, 0.0),
+                        icon_center + egui::vec2(direction * arm, 0.0),
+                    ],
+                    egui::Stroke::new(1.5, icon_color),
+                );
+                painter.line_segment(
+                    [
+                        icon_center + egui::vec2(0.0, direction * inner),
+                        icon_center + egui::vec2(0.0, direction * arm),
+                    ],
+                    egui::Stroke::new(1.5, icon_color),
+                );
+            }
+        }
+    }
+
+    painter.galley(
+        egui::pos2(
+            group_left + 31.0,
+            icon_center.y - title_galley.size().y * 0.5,
+        ),
+        title_galley,
+        title_color,
+    );
+
+    let description_galley = painter.layout(
+        description.to_owned(),
+        egui::FontId::proportional(12.0),
+        description_color,
+        (rect.width() - 30.0).max(100.0),
+    );
+    painter.galley(
+        egui::pos2(
+            rect.center().x - description_galley.size().x * 0.5,
+            rect.top() + 52.0,
+        ),
+        description_galley,
+        description_color,
+    );
+
+    if selected {
+        painter.circle_filled(
+            egui::pos2(rect.right() - 14.0, rect.top() + 14.0),
+            3.5,
+            accent,
+        );
+    }
+
+    response.on_hover_text(if enabled {
+        format!("Select {title}")
+    } else {
+        "Blaze Mode is unavailable until keyframe analysis completes.".to_owned()
+    })
+}
+
+#[derive(Clone, Copy)]
+enum ModeCardIcon {
+    Blaze,
+    Precision,
+}
+
+fn preset_scale_labels(ui: &mut egui::Ui, labels: &[&str], selected: usize) {
+    ui.columns(labels.len(), |columns| {
+        for (index, label) in labels.iter().enumerate() {
+            let color = if index == selected {
+                columns[index].visuals().text_color()
+            } else {
+                columns[index].visuals().weak_text_color()
+            };
+            columns[index].with_layout(
+                egui::Layout::top_down(egui::Align::Center),
+                |column| {
+                    column.add(
+                        egui::Label::new(egui::RichText::new(*label).size(11.5).color(color))
+                            .wrap()
+                            .halign(egui::Align::Center),
+                    );
+                },
+            );
+        }
+    });
 }
 
 fn help_seen_path() -> Option<PathBuf> {
@@ -1054,18 +1226,27 @@ impl eframe::App for BlazeApp {
                 });
                 ui.separator();
                 ui.add_space(8.0);
+                ui.set_width(ui.available_width());
 
                 match self.active_tool_tab {
                     ToolTab::ModeSelector => {
                         ui.heading("Choose an editing mode");
-                        ui.add_space(12.0);
+                        ui.add_space(14.0);
 
                         let blaze_ready = self.selected_path.is_none()
-                            || (!self.keyframes_running && self.keyframe_error.is_none() && !self.keyframes.is_empty());
-                        let blaze_button = egui::Button::new(
-                            egui::RichText::new("⚡  Blaze Mode").strong().size(15.0)
-                        ).min_size(egui::vec2(ui.available_width(), 48.0));
-                        if ui.add_enabled(blaze_ready, blaze_button).clicked() {
+                            || (!self.keyframes_running
+                                && self.keyframe_error.is_none()
+                                && !self.keyframes.is_empty());
+
+                        let blaze_response = mode_selection_card(
+                            ui,
+                            "Blaze Mode",
+                            "Keyframe-aligned cuts for faster stream-copy editing.",
+                            ModeCardIcon::Blaze,
+                            self.active_mode == Some(EditingMode::Blaze),
+                            blaze_ready,
+                        );
+                        if blaze_response.clicked() && blaze_ready {
                             let keyframes = self.keyframes.clone();
                             self.edit_regions = self.edit_regions.iter().filter_map(|region| {
                                 let start = nearest_keyframe(&keyframes, region.start)?;
@@ -1077,181 +1258,271 @@ impl eframe::App for BlazeApp {
                             self.active_mode = Some(EditingMode::Blaze);
                             self.active_tool_tab = ToolTab::BlazeMode;
                         }
-                        ui.label("Keyframe-aligned cuts. Faster stream-copy editing at the cost of boundary precision.");
+
                         if self.keyframes_running && self.selected_path.is_some() {
-                            ui.horizontal(|ui| { ui.spinner(); ui.small("Analysing GOP / keyframe structure…"); });
+                            ui.add_space(5.0);
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.small("Analysing GOP / keyframe structure…");
+                            });
                         } else if let Some(error) = &self.keyframe_error {
-                            ui.colored_label(egui::Color32::LIGHT_RED, format!("Keyframe analysis failed: {error}"));
+                            ui.add_space(5.0);
+                            ui.colored_label(
+                                egui::Color32::LIGHT_RED,
+                                format!("Keyframe analysis failed: {error}"),
+                            );
                         } else if !self.keyframes.is_empty() {
+                            ui.add_space(5.0);
                             ui.small(format!("{} video keyframes available.", self.keyframes.len()));
                         }
 
-                        ui.add_space(16.0);
-                        let precise_button = egui::Button::new(
-                            egui::RichText::new("◎  Precise Mode").strong().size(15.0)
-                        ).min_size(egui::vec2(ui.available_width(), 48.0));
-                        if ui.add(precise_button).clicked() {
+                        ui.add_space(12.0);
+                        let precise_response = mode_selection_card(
+                            ui,
+                            "Precision Mode",
+                            "Unrestricted cut boundaries when exact edit placement matters.",
+                            ModeCardIcon::Precision,
+                            self.active_mode == Some(EditingMode::Precise),
+                            true,
+                        );
+                        if precise_response.clicked() {
                             self.active_mode = Some(EditingMode::Precise);
                             self.active_tool_tab = ToolTab::PreciseMode;
                         }
-                        ui.label("Unrestricted cut boundaries. Use when exact edit placement matters more than stream-copy constraints.");
                     }
                     ToolTab::BlazeMode | ToolTab::PreciseMode => {
-                let expert_mode_changed = ui.checkbox(&mut self.expert_mode, "Expert Mode").changed();
-                if expert_mode_changed && self.expert_mode {
-                    // Initialize Expert Mode from the currently selected presets,
-                    // rather than exposing unrelated hard-coded defaults.
-                    let level = match self.detection_level {
-                        0 => DetectionLevel::Comfortable,
-                        1 => DetectionLevel::Optimal,
-                        2 => DetectionLevel::Default,
-                        3 => DetectionLevel::Tight,
-                        _ => DetectionLevel::Aggressive,
-                    };
-                    self.custom_threshold_db = level.threshold_below_baseline_db();
-                    let padding = match self.padding_level {
-                        0 => PaddingPreset::Comfortable.milliseconds(),
-                        2 => PaddingPreset::Tight.milliseconds(),
-                        _ => PaddingPreset::Normal.milliseconds(),
-                    };
-                    self.custom_padding_before_ms = padding;
-                    self.custom_padding_after_ms = padding;
-                }
-                ui.add_space(12.0);
+                        let expert_mode_changed =
+                            ui.checkbox(&mut self.expert_mode, "Expert Mode").changed();
+                        if expert_mode_changed && self.expert_mode {
+                            // Initialize Expert Mode from the currently selected presets,
+                            // rather than exposing unrelated hard-coded defaults.
+                            let level = match self.detection_level {
+                                0 => DetectionLevel::Comfortable,
+                                1 => DetectionLevel::Optimal,
+                                2 => DetectionLevel::Default,
+                                3 => DetectionLevel::Tight,
+                                _ => DetectionLevel::Aggressive,
+                            };
+                            self.custom_threshold_db = level.threshold_below_baseline_db();
+                            let padding = match self.padding_level {
+                                0 => PaddingPreset::Comfortable.milliseconds(),
+                                2 => PaddingPreset::Tight.milliseconds(),
+                                _ => PaddingPreset::Normal.milliseconds(),
+                            };
+                            self.custom_padding_before_ms = padding;
+                            self.custom_padding_after_ms = padding;
+                        }
 
-                if self.expert_mode {
-                    ui.strong("Detection Threshold");
-                    ui.label("Level below the adaptive programme baseline");
-                    ui.add(
-                        egui::Slider::new(&mut self.custom_threshold_db, 3.0..=60.0)
-                            .suffix(" dB")
-                            .fixed_decimals(1),
-                    );
+                        ui.add_space(12.0);
 
-                    ui.add_space(14.0);
-                    ui.strong("Peak Ceiling");
-                    ui.checkbox(&mut self.custom_peak_gate_enabled, "Enable peak ceiling");
-                    if self.custom_peak_gate_enabled {
-                        ui.add(
-                            egui::Slider::new(&mut self.custom_peak_ceiling_dbfs, -90.0..=0.0)
-                                .suffix(" dBFS")
-                                .fixed_decimals(1),
-                        );
-                    }
-
-                    ui.add_space(14.0);
-                    ui.strong("Padding");
-                    ui.label("Preserve audio around detected silence");
-                    egui::Grid::new("expert_padding_controls")
-                        .num_columns(2)
-                        .spacing([12.0, 8.0])
-                        .show(ui, |ui| {
-                            ui.label("Before");
+                        if self.expert_mode {
                             ui.horizontal(|ui| {
-                                ui.add(egui::DragValue::new(&mut self.custom_padding_before_ms)
-                                    .range(0..=2000)
-                                    .speed(10));
-                                ui.label("ms");
+                                ui.strong("Detection Threshold");
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(format!("{:.1} dB", self.custom_threshold_db));
+                                    },
+                                );
                             });
-                            ui.end_row();
+                            ui.label("Offset below the adaptive programme baseline");
+                            ui.add_sized(
+                                [ui.available_width(), 30.0],
+                                egui::Slider::new(&mut self.custom_threshold_db, 3.0..=60.0)
+                                    .suffix(" dB")
+                                    .fixed_decimals(1)
+                                    .show_value(false)
+                                    .trailing_fill(false),
+                            );
 
-                            ui.label("After");
+                            ui.add_space(14.0);
                             ui.horizontal(|ui| {
-                                ui.add(egui::DragValue::new(&mut self.custom_padding_after_ms)
-                                    .range(0..=2000)
-                                    .speed(10));
-                                ui.label("ms");
+                                ui.strong("Peak Ceiling");
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(format!("{:.1} dBFS", self.custom_peak_ceiling_dbfs));
+                                    },
+                                );
                             });
-                            ui.end_row();
-                        });
-
-                    ui.add_space(14.0);
-                    ui.strong("Minimum Silence Duration");
-                    ui.horizontal(|ui| {
-                        ui.add(egui::DragValue::new(&mut self.minimum_silence_ms)
-                            .range(10..=10_000)
-                            .speed(10));
-                        ui.label("ms");
-                    });
-                } else {
-                    ui.strong("Detection Level");
-                    ui.add(
-                        egui::Slider::new(&mut self.detection_level, 0..=4)
-                            .step_by(1.0)
-                            .show_value(false),
-                    );
-                    egui::Grid::new("detection_level_labels")
-                        .num_columns(5)
-                        .spacing([4.0, 4.0])
-                        .show(ui, |ui| {
-                            for (index, label) in ["Comfortable", "Optimal", "Default", "Tight", "Aggressive"].iter().enumerate() {
-                                ui.label(egui::RichText::new(*label).size(10.0).color(
-                                    if self.detection_level == index {
-                                        ui.visuals().strong_text_color()
-                                    } else {
-                                        ui.visuals().weak_text_color()
-                                    }
-                                ));
+                            ui.checkbox(&mut self.custom_peak_gate_enabled, "Enable peak ceiling");
+                            if self.custom_peak_gate_enabled {
+                                ui.add_sized(
+                                    [ui.available_width(), 30.0],
+                                    egui::Slider::new(
+                                        &mut self.custom_peak_ceiling_dbfs,
+                                        -90.0..=0.0,
+                                    )
+                                    .suffix(" dBFS")
+                                    .fixed_decimals(1)
+                                    .show_value(false)
+                                    .trailing_fill(false),
+                                );
                             }
-                            ui.end_row();
-                        });
 
-                    ui.add_space(18.0);
-                    ui.strong("Padding");
-                    ui.add(
-                        egui::Slider::new(&mut self.padding_level, 0..=2)
-                            .step_by(1.0)
-                            .show_value(false),
-                    );
-                    egui::Grid::new("padding_level_labels")
-                        .num_columns(3)
-                        .spacing([8.0, 4.0])
-                        .show(ui, |ui| {
-                            for (index, label) in ["Comfortable", "Normal", "Tight"].iter().enumerate() {
-                                ui.label(egui::RichText::new(*label).size(10.0).color(
-                                    if self.padding_level == index {
-                                        ui.visuals().strong_text_color()
-                                    } else {
-                                        ui.visuals().weak_text_color()
-                                    }
-                                ));
-                            }
-                            ui.end_row();
-                        });
+                            ui.add_space(14.0);
+                            ui.strong("Padding");
+                            ui.label("Preserve audio around detected silence");
+                            ui.add_space(4.0);
+                            ui.columns(2, |columns| {
+                                columns[0].strong("Before");
+                                columns[0].horizontal(|ui| {
+                                    ui.add(
+                                        egui::DragValue::new(&mut self.custom_padding_before_ms)
+                                            .range(0..=2000)
+                                            .speed(10),
+                                    );
+                                    ui.label("ms");
+                                });
+                                columns[1].strong("After");
+                                columns[1].horizontal(|ui| {
+                                    ui.add(
+                                        egui::DragValue::new(&mut self.custom_padding_after_ms)
+                                            .range(0..=2000)
+                                            .speed(10),
+                                    );
+                                    ui.label("ms");
+                                });
+                            });
 
-                    ui.add_space(18.0);
-                    ui.horizontal(|ui| {
-                        ui.strong("Minimum Silence Duration");
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label("ms");
-                            ui.add(egui::DragValue::new(&mut self.minimum_silence_ms)
-                                .range(10..=10_000)
-                                .speed(10));
-                        });
-                    });
-                    ui.small("Default is 300 ms.");
-                }
+                            ui.add_space(14.0);
+                            ui.horizontal(|ui| {
+                                ui.strong("Minimum Silence Duration");
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(format!("{} ms", self.minimum_silence_ms));
+                                    },
+                                );
+                            });
+                            ui.add_sized(
+                                [ui.available_width(), 30.0],
+                                egui::Slider::new(
+                                    &mut self.minimum_silence_ms,
+                                    10..=10_000,
+                                )
+                                .suffix(" ms")
+                                .show_value(false)
+                                .trailing_fill(false),
+                            );
+                        } else {
+                            const DETECTION_LABELS: [&str; 5] = [
+                                "Comfortable",
+                                "Optimal",
+                                "Default",
+                                "Tight",
+                                "Aggressive",
+                            ];
+                            ui.horizontal(|ui| {
+                                ui.strong("Detection Level");
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "{} / 5 · {}",
+                                                self.detection_level + 1,
+                                                DETECTION_LABELS[self.detection_level],
+                                            ))
+                                            .strong()
+                                            .color(egui::Color32::from_rgb(255, 133, 105)),
+                                        );
+                                    },
+                                );
+                            });
+                            ui.add_sized(
+                                [ui.available_width(), 32.0],
+                                egui::Slider::new(&mut self.detection_level, 0..=4)
+                                    .step_by(1.0)
+                                    .show_value(false)
+                                    .trailing_fill(false),
+                            );
+                            preset_scale_labels(ui, &DETECTION_LABELS, self.detection_level);
+                            ui.small("Default is the midpoint. Adjust in either direction.");
 
-                ui.add_space(20.0);
-                let blaze_ready = self.active_mode != Some(EditingMode::Blaze)
-                    || (!self.keyframes_running && self.keyframe_error.is_none() && !self.keyframes.is_empty());
-                let can_detect = self.selected_path.is_some()
-                    && self.media_info.as_ref().is_some_and(|info| info.has_audio)
-                    && !self.silence_running
-                    && blaze_ready;
-                if ui.add_enabled(
-                    can_detect,
-                    egui::Button::new(if self.silence_running { "Analysing Audio…" } else { "Detect Silence" })
-                        .min_size(egui::vec2(ui.available_width(), 36.0)),
-                ).clicked() {
-                    self.start_silence_detection(ui.ctx());
-                }
-                if self.silence_running {
-                    ui.add_space(6.0);
-                    ui.spinner();
-                    ui.small("Analysing audio. A rescan replaces existing regions.");
-                }
+                            ui.add_space(18.0);
+                            const PADDING_LABELS: [&str; 3] = [
+                                "Comfortable",
+                                "Normal",
+                                "Tight",
+                            ];
+                            ui.horizontal(|ui| {
+                                ui.strong("Padding");
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "{} / 3 · {}",
+                                                self.padding_level + 1,
+                                                PADDING_LABELS[self.padding_level],
+                                            ))
+                                            .strong()
+                                            .color(egui::Color32::from_rgb(255, 133, 105)),
+                                        );
+                                    },
+                                );
+                            });
+                            ui.add_sized(
+                                [ui.available_width(), 32.0],
+                                egui::Slider::new(&mut self.padding_level, 0..=2)
+                                    .step_by(1.0)
+                                    .show_value(false)
+                                    .trailing_fill(false),
+                            );
+                            preset_scale_labels(ui, &PADDING_LABELS, self.padding_level);
+                            ui.small("Normal is the midpoint. Move either way to preserve more or less audio.");
 
+                            ui.add_space(18.0);
+                            ui.horizontal(|ui| {
+                                ui.strong("Minimum Silence Duration");
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(format!("{} ms", self.minimum_silence_ms));
+                                    },
+                                );
+                            });
+                            ui.add_sized(
+                                [ui.available_width(), 30.0],
+                                egui::Slider::new(
+                                    &mut self.minimum_silence_ms,
+                                    10..=10_000,
+                                )
+                                .suffix(" ms")
+                                .show_value(false)
+                                .trailing_fill(false),
+                            );
+                            ui.small("Default is 300 ms.");
+                        }
+
+                        ui.add_space(20.0);
+                        let blaze_ready = self.active_mode != Some(EditingMode::Blaze)
+                            || (!self.keyframes_running
+                                && self.keyframe_error.is_none()
+                                && !self.keyframes.is_empty());
+                        let can_detect = self.selected_path.is_some()
+                            && self.media_info.as_ref().is_some_and(|info| info.has_audio)
+                            && !self.silence_running
+                            && blaze_ready;
+                        if ui.add_enabled(
+                            can_detect,
+                            egui::Button::new(if self.silence_running {
+                                "Analysing Audio…"
+                            } else {
+                                "Detect Silence"
+                            })
+                            .min_size(egui::vec2(ui.available_width(), 40.0)),
+                        ).clicked() {
+                            self.start_silence_detection(ui.ctx());
+                        }
+                        if self.silence_running {
+                            ui.add_space(6.0);
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.small("Analysing audio. A rescan replaces existing regions.");
+                            });
+                        }
                     }
                     ToolTab::Export => {
                         ui.heading("Export");
