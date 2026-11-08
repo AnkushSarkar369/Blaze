@@ -281,6 +281,8 @@ impl Playback {
                         glow::LINEAR,
                     );
                 }
+            }
+            unsafe {
                 gl.bind_framebuffer(glow::FRAMEBUFFER, target_framebuffer);
             }
         });
