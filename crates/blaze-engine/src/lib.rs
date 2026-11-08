@@ -241,8 +241,9 @@ impl MediaEngine {
     }
 
     pub fn generate_waveform(&self, path: &str, channels: usize) -> Result<Vec<u8>, String> {
-        // Mono stays mono; anything wider is mixed down to a stereo pair.
-        let channels = channels.clamp(1, 2);
+        // Preserve the decoded channel count. PeakBuilder merges every channel
+        // into one envelope without downmixing or phase cancellation.
+        let channels = channels.clamp(1, 32);
         let channel_arg = channels.to_string();
         let rate_arg = peaks::SAMPLE_RATE.to_string();
 
