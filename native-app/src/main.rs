@@ -260,6 +260,8 @@ impl BlazeApp {
         };
 
         self.probe_generation = self.probe_generation.wrapping_add(1);
+        self.silence_generation = self.silence_generation.wrapping_add(1);
+        self.silence_running = false;
         let generation = self.probe_generation;
         self.loading = true;
         self.seeking = false;
