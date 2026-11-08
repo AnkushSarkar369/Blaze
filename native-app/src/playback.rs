@@ -192,6 +192,19 @@ impl Playback {
     }
 
     pub fn toggle_pause(&self) -> Result<(), String> {
+        let at_end = self
+            .mpv
+            .get_property::<bool>("eof-reached")
+            .unwrap_or(false);
+
+        if at_end {
+            self.seek(0.0)?;
+            return self
+                .mpv
+                .set_property("pause", false)
+                .map_err(|error| format!("Could not restart playback: {error}"));
+        }
+
         let paused = self.mpv.get_property::<bool>("pause").unwrap_or(false);
         self.mpv
             .set_property("pause", !paused)
@@ -214,7 +227,13 @@ impl Playback {
     }
 
     pub fn is_paused(&self) -> bool {
-        self.mpv.get_property::<bool>("pause").unwrap_or(true)
+        self.mpv
+            .get_property::<bool>("pause")
+            .unwrap_or(true)
+            || self
+                .mpv
+                .get_property::<bool>("eof-reached")
+                .unwrap_or(false)
     }
 
     pub fn poll_error(&self) -> Option<String> {
