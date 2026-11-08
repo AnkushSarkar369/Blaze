@@ -166,7 +166,7 @@ impl MediaEngine {
                 "-v",
                 "error",
                 "-show_entries",
-                "format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate,duration,channels,sample_rate",
+                "format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,duration,channels,sample_rate",
                 "-of",
                 "json",
                 path,
@@ -203,7 +203,7 @@ impl MediaEngine {
             duration,
             width: video["width"].as_u64().map(|value| value as u32),
             height: video["height"].as_u64().map(|value| value as u32),
-            fps: parse_rate(video.get("avg_frame_rate")),
+            fps: parse_rate(video.get("avg_frame_rate")).or_else(|| parse_rate(video.get("r_frame_rate"))),
             video_codec: video["codec_name"].as_str().map(str::to_string),
             audio_codec: audio
                 .and_then(|stream| stream["codec_name"].as_str())
