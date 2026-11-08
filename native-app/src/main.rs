@@ -699,9 +699,10 @@ impl eframe::App for BlazeApp {
         // This runs once per import; later manual resizing remains untouched.
         if self.pending_preview_fit {
             if let Some(info) = self.media_info.as_ref() {
-                let aspect = if info.width > 0 && info.height > 0 {
-                    info.width as f32 / info.height as f32
-                } else { 16.0 / 9.0 };
+                let aspect = info.width.zip(info.height)
+                    .filter(|(width, height)| *width > 0 && *height > 0)
+                    .map(|(width, height)| width as f32 / height as f32)
+                    .unwrap_or(16.0 / 9.0);
                 let preview_height = (root_rect.height() - 220.0 - 54.0).max(160.0);
                 let preview_width = (preview_height * aspect + 14.0)
                     .clamp(240.0, (root_rect.width() - 240.0).max(240.0));
@@ -790,7 +791,7 @@ impl eframe::App for BlazeApp {
 
                 // Adaptive time ruler: choose a clean 1–2–5 interval based on
                 // available pixels, so labels remain legible at every zoom level.
-                let raw_step = (visible_duration * 105.0 / lane.width().max(1.0)).max(0.001);
+                let raw_step = (visible_duration * 105.0 / lane.width().max(1.0) as f64).max(0.001);
                 let magnitude = 10.0_f64.powf(raw_step.log10().floor());
                 let normalized = raw_step / magnitude;
                 let step = if normalized <= 1.0 { magnitude }
@@ -818,7 +819,7 @@ impl eframe::App for BlazeApp {
                     tick += step;
                 }
                 ui.painter().line_segment(
-                    [ruler.left(), ruler.bottom(), ruler.right(), ruler.bottom()],
+                    [ruler.left_bottom(), ruler.right_bottom()],
                     egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 46, 49)),
                 );
 
@@ -1588,7 +1589,7 @@ impl eframe::App for BlazeApp {
             );
             let response = ui.interact(
                 handle,
-                egui::Id::new("tools-resize-affordance"),
+                ui.scope_id().with("tools-resize-affordance"),
                 egui::Sense::hover(),
             ).on_hover_text("Drag to resize");
             let fill = if response.hovered() {
@@ -1610,7 +1611,7 @@ impl eframe::App for BlazeApp {
             );
             let response = ui.interact(
                 handle,
-                egui::Id::new("timeline-resize-affordance"),
+                ui.scope_id().with("timeline-resize-affordance"),
                 egui::Sense::hover(),
             ).on_hover_text("Drag to resize");
             let fill = if response.hovered() {
