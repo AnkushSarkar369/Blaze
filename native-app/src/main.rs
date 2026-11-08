@@ -9,9 +9,9 @@ use eframe::egui;
 use playback::Playback;
 use rfd::FileDialog;
 
-mod playback;
+mod playback;\nmod waveform;\n\nuse waveform::Waveform;
 
-type ProbeResult = (u64, Result<(PathBuf, MediaInfo), String>);
+type ProbeResult = (u64, Result<(PathBuf, MediaInfo), String>);\ntype WaveformResult = (u64, Result<Vec<u8>, String>);
 
 struct BlazeApp {
     playback: Playback,
@@ -23,6 +23,9 @@ struct BlazeApp {
     probe_generation: u64,
     probe_tx: Sender<ProbeResult>,
     probe_rx: Receiver<ProbeResult>,
+    waveform: Option<Waveform>,
+    waveform_tx: Sender<WaveformResult>,
+    waveform_rx: Receiver<WaveformResult>,
 }
 
 impl BlazeApp {
@@ -42,6 +45,7 @@ impl BlazeApp {
 
         let playback = Playback::new(cc)?;
         let (probe_tx, probe_rx) = mpsc::channel();
+        let (waveform_tx, waveform_rx) = mpsc::channel();
 
         Ok(Self {
             playback,
@@ -53,6 +57,9 @@ impl BlazeApp {
             probe_generation: 0,
             probe_tx,
             probe_rx,
+            waveform: None,
+            waveform_tx,
+            waveform_rx,
         })
     }
 
@@ -67,6 +74,7 @@ impl BlazeApp {
         self.seeking = false;
         self.playback_position = 0.0;
         self.media_info = None;
+        self.waveform = None;
         self.selected_path = Some(path.clone());
 
         if let Err(error) = self.playback.load(&path) {
@@ -90,7 +98,7 @@ impl BlazeApp {
         });
     }
 
-    fn poll_probe(&mut self) {
+    fn poll_probe(&mut self, ctx: &egui::Context) {
         while let Ok((generation, result)) = self.probe_rx.try_recv() {
             if generation != self.probe_generation {
                 continue;
@@ -98,17 +106,54 @@ impl BlazeApp {
 
             match result {
                 Ok((path, info)) => {
-                    self.selected_path = Some(path);
-                    self.media_info = Some(info);
+                    self.selected_path = Some(path.clone());
                     self.loading = false;
+
+                    if info.has_audio {
+                        let channels = info.audio_channels.unwrap_or(2).clamp(1, 32) as usize;
+                        let sender = self.waveform_tx.clone();
+                        let repaint = ctx.clone();
+                        std::thread::spawn(move || {
+                            let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
+                            let engine = MediaEngine::new([tools]);
+                            let result = engine.generate_waveform(&path.to_string_lossy(), channels);
+                            let _ = sender.send((generation, result));
+                            repaint.request_repaint();
+                        });
+                    }
+
+                    self.media_info = Some(info);
                 }
                 Err(error) => {
                     self.loading = false;
                     self.selected_path = None;
                     self.media_info = None;
+                    self.waveform = None;
                     self.playback_position = 0.0;
                     self.playback.stop();
                     eprintln!("Blaze: media analysis failed: {error}");
+                }
+            }
+        }
+    }
+
+    fn poll_waveform(&mut self) {
+        while let Ok((generation, result)) = self.waveform_rx.try_recv() {
+            if generation != self.probe_generation {
+                continue;
+            }
+
+            match result {
+                Ok(bytes) => match Waveform::from_bytes(&bytes) {
+                    Ok(waveform) => self.waveform = Some(waveform),
+                    Err(error) => {
+                        self.waveform = None;
+                        eprintln!("Blaze: waveform data was invalid: {error}");
+                    }
+                },
+                Err(error) => {
+                    self.waveform = None;
+                    eprintln!("Blaze: waveform generation failed: {error}");
                 }
             }
         }
@@ -117,13 +162,14 @@ impl BlazeApp {
 
 impl eframe::App for BlazeApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.poll_probe();
+        self.poll_probe(ctx);\n        self.poll_waveform();
 
         if let Some(error) = self.playback.poll_error() {
             eprintln!("Blaze: {error}");
             self.loading = false;
             self.selected_path = None;
             self.media_info = None;
+            self.waveform = None;
             self.playback_position = 0.0;
         }
 
@@ -142,26 +188,75 @@ impl eframe::App for BlazeApp {
             .default_size(220.0)
             .min_size(140.0)
             .show(ui, |ui| {
-                ui.heading("Timeline");
-                ui.add_space(12.0);
                 let available = ui.available_rect_before_wrap();
-                let lane = egui::Rect::from_min_size(
-                    egui::pos2(available.left(), available.center().y - 28.0),
-                    egui::vec2(available.width(), 56.0),
-                );
+                let lane = available.shrink2(egui::vec2(10.0, 8.0));
+
                 ui.painter().rect_filled(
                     lane,
                     egui::CornerRadius::same(3),
                     egui::Color32::from_rgb(17, 19, 21),
                 );
-                ui.painter().line_segment(
-                    [lane.left_center(), lane.right_center()],
-                    egui::Stroke::new(1.0, egui::Color32::from_rgb(55, 61, 62)),
-                );
-                ui.allocate_rect(lane, egui::Sense::hover());
 
-                // Keep the panel's requested height instead of letting egui
-                // shrink it back to the height of its contents after a drag.
+                if let Some(waveform) = &self.waveform {
+                    waveform.paint(ui.painter(), lane);
+                } else {
+                    ui.painter().line_segment(
+                        [lane.left_center(), lane.right_center()],
+                        egui::Stroke::new(1.0, egui::Color32::from_rgb(55, 61, 62)),
+                    );
+                }
+
+                let duration = self
+                    .media_info
+                    .as_ref()
+                    .map(|info| info.duration)
+                    .filter(|duration| duration.is_finite() && *duration > 0.0)
+                    .unwrap_or_else(|| self.playback.duration())
+                    .max(0.01);
+
+                if self.selected_path.is_some() {
+                    let progress = (self.playback_position / duration).clamp(0.0, 1.0) as f32;
+                    let playhead_x = lane.left() + lane.width() * progress;
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(playhead_x, lane.top()),
+                            egui::pos2(playhead_x, lane.bottom()),
+                        ],
+                        egui::Stroke::new(1.5, egui::Color32::from_rgb(235, 133, 83)),
+                    );
+                }
+
+                let response = ui.allocate_rect(lane, egui::Sense::click_and_drag());
+                let pointer_time = |position: egui::Pos2| {
+                    let progress = ((position.x - lane.left()) / lane.width()).clamp(0.0, 1.0);
+                    progress as f64 * duration
+                };
+
+                if response.dragged() {
+                    self.seeking = true;
+                    if let Some(position) = response.interact_pointer_pos() {
+                        self.playback_position = pointer_time(position);
+                    }
+                }
+
+                if response.drag_stopped() {
+                    if let Some(position) = response.interact_pointer_pos() {
+                        self.playback_position = pointer_time(position);
+                    }
+                    self.seeking = false;
+                    if let Err(error) = self.playback.seek(self.playback_position) {
+                        eprintln!("Blaze: {error}");
+                    }
+                } else if response.clicked() {
+                    if let Some(position) = response.interact_pointer_pos() {
+                        self.playback_position = pointer_time(position);
+                        if let Err(error) = self.playback.seek(self.playback_position) {
+                            eprintln!("Blaze: {error}");
+                        }
+                    }
+                }
+
+                // Keep the panel's requested height after a resize.
                 ui.allocate_space(ui.available_size());
             });
 
