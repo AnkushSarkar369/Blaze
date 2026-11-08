@@ -47,7 +47,7 @@ fn help_seen_path() -> Option<PathBuf> {
         PathBuf::from(home)
             .join(".config")
             .join("blaze")
-            .join("first_run_help_seen")
+            .join("first_run_help_seen_v2")
     })
 }
 
@@ -140,6 +140,15 @@ impl BlazeApp {
             show_help: !has_seen_first_run_help(),
             first_run_help_seen: has_seen_first_run_help(),
         })
+    }
+
+    fn media_duration(&self) -> f64 {
+        self.media_info
+            .as_ref()
+            .map(|info| info.duration)
+            .filter(|duration| duration.is_finite() && *duration > 0.0)
+            .unwrap_or_else(|| self.playback.duration())
+            .max(0.01)
     }
 
     fn open_video(&mut self, ctx: &egui::Context) {
@@ -326,6 +335,22 @@ impl eframe::App for BlazeApp {
 
         if self.selected_path.is_some() && !self.seeking {
             self.playback_position = self.playback.position();
+
+            // Keep the playhead visible while playing. If playback starts outside
+            // the zoomed viewport, jump to it; once it reaches the right edge,
+            // advance the viewport while keeping the playhead comfortably in view.
+            if !self.playback.is_paused() {
+                let duration = self.media_duration();
+                let visible_duration = duration / self.timeline_zoom as f64;
+                let view_end = self.timeline_offset + visible_duration;
+                if self.playback_position < self.timeline_offset
+                    || self.playback_position > view_end
+                {
+                    self.timeline_offset = (self.playback_position - visible_duration * 0.8)
+                        .clamp(0.0, (duration - visible_duration).max(0.0));
+                }
+                ctx.request_repaint_after(Duration::from_millis(16));
+            }
         }
 
         if self.loading {
@@ -342,13 +367,7 @@ impl eframe::App for BlazeApp {
                 let available = ui.available_rect_before_wrap();
                 let lane = available.shrink2(egui::vec2(10.0, 8.0));
 
-                let duration = self
-                    .media_info
-                    .as_ref()
-                    .map(|info| info.duration)
-                    .filter(|duration| duration.is_finite() && *duration > 0.0)
-                    .unwrap_or_else(|| self.playback.duration())
-                    .max(0.01);
+                let duration = self.media_duration();
 
                 let can_seek = self.selected_path.is_some() && self.waveform_progress.is_none();
                 let sense = if can_seek {
@@ -672,18 +691,7 @@ impl eframe::App for BlazeApp {
 
                                         ui.add_space(10.0);
 
-                                        let player_duration = self.playback.duration();
-                                        let probed_duration = self
-                                            .media_info
-                                            .as_ref()
-                                            .map(|info| info.duration)
-                                            .unwrap_or(0.0);
-                                        let duration = if player_duration.is_finite() && player_duration > 0.0 {
-                                            player_duration
-                                        } else {
-                                            probed_duration
-                                        }
-                                        .max(0.01);
+                                        let duration = self.media_duration();
                                         self.playback_position = self.playback_position.clamp(0.0, duration);
 
                                         let time_label = format!(
