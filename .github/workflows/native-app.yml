@@ -31,8 +31,11 @@ jobs:
             libxi-dev \
             libxcursor-dev \
             libxinerama-dev \
-            pkg-config
+            pkg-config \
+            ffmpeg
       - name: Check native application
         run: cargo check --manifest-path native-app/Cargo.toml
-      - name: Test native application and media engine
+      - name: Test native application package
         run: cargo test --manifest-path native-app/Cargo.toml
+      - name: Test the existing media engine
+        run: cargo test -p blaze-engine --locked
