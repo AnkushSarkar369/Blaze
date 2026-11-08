@@ -132,6 +132,8 @@ impl Playback {
                 // Add a small buffer cushion for low-power systems without changing
                 // the source audio or resampling it.
                 .set_property("audio-buffer", 0.30_f64)?
+                // Keep audio/video in sync on weak CPUs by dropping late decoded frames.
+                .set_property("framedrop", "decoder+vo")?
                 .set_property("video-timing-offset", 0.0_f64)?
                 .set_property("keep-open", "yes")?
                 .set_property("osc", false)?
