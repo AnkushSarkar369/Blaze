@@ -5,6 +5,7 @@
 //! primitives used to stream numbered MJPEG preview frames.
 
 pub mod peaks;
+pub mod silence;
 pub mod player;
 mod frames;
 
