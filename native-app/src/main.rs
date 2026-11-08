@@ -6,21 +6,29 @@ use std::{
 
 use blaze_engine::{MediaEngine, MediaInfo};
 use eframe::egui;
+use playback::Playback;
 use rfd::FileDialog;
+
+mod playback;
 
 type ProbeResult = Result<(PathBuf, MediaInfo), String>;
 
 struct BlazeApp {
+    playback: Playback,
     selected_path: Option<PathBuf>,
     media_info: Option<MediaInfo>,
     loading: bool,
+    seeking: bool,
+    playback_position: f64,
     status: String,
     probe_tx: Sender<ProbeResult>,
     probe_rx: Receiver<ProbeResult>,
 }
 
 impl BlazeApp {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(
+        cc: &eframe::CreationContext<'_>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = egui::Color32::from_rgb(22, 23, 25);
         visuals.window_fill = egui::Color32::from_rgb(25, 26, 28);
@@ -32,30 +40,37 @@ impl BlazeApp {
         visuals.widgets.active.bg_fill = egui::Color32::from_rgb(218, 105, 49);
         cc.egui_ctx.set_visuals(visuals);
 
+        let playback = Playback::new(cc)?;
         let (probe_tx, probe_rx) = mpsc::channel();
 
-        Self {
+        Ok(Self {
+            playback,
             selected_path: None,
             media_info: None,
             loading: false,
+            seeking: false,
+            playback_position: 0.0,
             status: "Ready".to_owned(),
             probe_tx,
             probe_rx,
-        }
+        })
     }
 
     fn open_video(&mut self, ctx: &egui::Context) {
-        let Some(path) = FileDialog::new()
-            .add_filter("Video files", &["mp4", "mkv", "mov", "webm", "avi", "m4v", "mts", "m2ts"])
-            .pick_file()
-        else {
+        let Some(path) = FileDialog::new().pick_file() else {
             return;
         };
 
         self.loading = true;
-        self.status = "Reading media information…".to_owned();
+        self.seeking = false;
+        self.playback_position = 0.0;
+        self.status = "Opening media…".to_owned();
         self.media_info = None;
         self.selected_path = Some(path.clone());
+
+        if let Err(error) = self.playback.load(&path) {
+            self.status = error;
+        }
 
         let sender = self.probe_tx.clone();
         let repaint = ctx.clone();
@@ -102,34 +117,31 @@ impl BlazeApp {
 impl eframe::App for BlazeApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_probe();
+
+        if self.selected_path.is_some() {
+            if !self.seeking {
+                self.playback_position = self.playback.position();
+            }
+
+            if !self.playback.is_paused() {
+                ctx.request_repaint_after(Duration::from_millis(16));
+            }
+        }
+
         if self.loading {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::Panel::top("toolbar")
-            .exact_size(48.0)
-            .show(ui, |ui| {
-                ui.horizontal_centered(|ui| {
-                    ui.heading(egui::RichText::new("BLAZE").strong().size(18.0));
-                    ui.separator();
-                    if ui.button("Open video").clicked() {
-                        self.open_video(ui.ctx());
-                    }
-                    ui.separator();
-                    ui.label(egui::RichText::new(self.filename()).color(egui::Color32::LIGHT_GRAY));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new("NATIVE BUILD").small().weak());
-                    });
-                });
-            });
-
         egui::Panel::bottom("status")
             .exact_size(24.0)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(&self.status).small().weak());
+                    ui.separator();
+                    ui.label(egui::RichText::new(self.filename()).small().weak());
+
                     if let Some(info) = &self.media_info {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let audio = if info.has_audio {
@@ -171,7 +183,7 @@ impl eframe::App for BlazeApp {
                 ui.allocate_rect(lane, egui::Sense::hover());
                 ui.add_space(8.0);
                 ui.label(
-                    egui::RichText::new("Timeline interaction and waveform rendering are not connected yet.")
+                    egui::RichText::new("Waveform rendering and timeline interaction come next.")
                         .small()
                         .weak(),
                 );
@@ -185,63 +197,113 @@ impl eframe::App for BlazeApp {
                 ui.heading("Tools");
                 ui.separator();
                 ui.add_space(8.0);
-                ui.label("The existing Tools workflow is intentionally not being migrated in this stage.");
+                ui.label("The Tools workflow follows native playback and the timeline.");
                 ui.add_space(8.0);
                 ui.label(
-                    egui::RichText::new("It comes after native playback and the timeline are working.")
+                    egui::RichText::new("No tools have been migrated yet.")
                         .small()
                         .weak(),
                 );
             });
 
-
-
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(egui::Color32::from_rgb(14, 15, 17)))
             .show(ui, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(18.0);
-                    ui.label(egui::RichText::new("PREVIEW").small().weak());
-                    ui.add_space(12.0);
+                let controls_height = 36.0;
+                let preview_height = (ui.available_height() - controls_height - 10.0).max(80.0);
+                let preview_size = egui::vec2(ui.available_width(), preview_height);
+                let (preview_rect, _) =
+                    ui.allocate_exact_size(preview_size, egui::Sense::hover());
 
-                    let preview = ui.available_rect_before_wrap();
-                    ui.painter().rect_filled(
-                        preview.shrink(8.0),
-                        egui::CornerRadius::same(4),
-                        egui::Color32::from_rgb(8, 9, 10),
+                ui.painter().rect_filled(
+                    preview_rect,
+                    egui::CornerRadius::same(4),
+                    egui::Color32::from_rgb(8, 9, 10),
+                );
+
+                if self.selected_path.is_some() {
+                    self.playback.paint(ui.painter(), preview_rect);
+                } else {
+                    let button_rect = egui::Rect::from_center_size(
+                        preview_rect.center(),
+                        egui::vec2(148.0, 40.0),
                     );
+                    if ui
+                        .put(button_rect, egui::Button::new("Open video"))
+                        .clicked()
+                    {
+                        self.open_video(ui.ctx());
+                    }
+                }
 
-                    ui.scope_builder(egui::UiBuilder::new().max_rect(preview.shrink(8.0)), |ui| {
-                        ui.centered_and_justified(|ui| {
-                            if self.loading {
-                                ui.spinner();
-                            } else if let Some(info) = &self.media_info {
-                                ui.vertical_centered(|ui| {
-                                    ui.heading(egui::RichText::new(self.filename()).size(20.0));
-                                    ui.add_space(8.0);
-                                    let dimensions = match (info.width, info.height) {
-                                        (Some(w), Some(h)) => format!("{w} × {h}"),
-                                        _ => "Unknown dimensions".to_owned(),
-                                    };
-                                    let fps = info.fps.map(|v| format!("{v:.3} fps")).unwrap_or_else(|| "Unknown frame rate".to_owned());
-                                    ui.label(format!("{dimensions}  ·  {fps}"));
-                                    ui.label(format!("Duration: {:.2} seconds", info.duration));
-                                    ui.add_space(12.0);
-                                    ui.label("Media probing works. Native video playback is the next integration.");
-                                });
-                            } else {
-                                ui.vertical_centered(|ui| {
-                                    ui.heading("No footage loaded");
-                                    ui.add_space(6.0);
-                                    ui.label("Open a video to inspect its media information.");
-                                });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if self.selected_path.is_some() {
+                        if ui.button("Open").clicked() {
+                            self.open_video(ui.ctx());
+                        }
+
+                        let paused = self.playback.is_paused();
+                        if ui.button(if paused { "Play" } else { "Pause" }).clicked() {
+                            if let Err(error) = self.playback.toggle_pause() {
+                                self.status = error;
                             }
-                        });
-                    });
+                        }
+
+                        let duration = self
+                            .playback
+                            .duration()
+                            .max(self.media_info.as_ref().map(|info| info.duration).unwrap_or(0.0));
+                        let duration = duration.max(0.01);
+                        self.playback_position = self.playback_position.clamp(0.0, duration);
+
+                        let response = ui.add(
+                            egui::Slider::new(&mut self.playback_position, 0.0..=duration)
+                                .show_value(false),
+                        );
+
+                        if response.dragged() {
+                            self.seeking = true;
+                        }
+                        if response.drag_stopped()
+                            || (response.changed() && !response.dragged() && !self.seeking)
+                        {
+                            self.seeking = false;
+                            if let Err(error) = self.playback.seek(self.playback_position) {
+                                self.status = error;
+                            }
+                        }
+
+                        ui.label(format!(
+                            "{} / {}",
+                            format_time(self.playback_position),
+                            format_time(duration)
+                        ));
+                    } else {
+                        ui.label("No footage loaded");
+                        if ui.button("Open video").clicked() {
+                            self.open_video(ui.ctx());
+                        }
+                    }
                 });
             });
+    }
 
+    fn on_exit(&mut self, _gl: Option<&glow::Context>) {
+        self.playback.shutdown();
+    }
+}
 
+fn format_time(seconds: f64) -> String {
+    let total = seconds.max(0.0) as u64;
+    let hours = total / 3600;
+    let minutes = (total % 3600) / 60;
+    let seconds = total % 60;
+
+    if hours > 0 {
+        format!("{hours:02}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes:02}:{seconds:02}")
     }
 }
 
@@ -258,6 +320,9 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Blaze",
         options,
-        Box::new(|cc| Ok(Box::new(BlazeApp::new(cc)))),
+        Box::new(|cc| {
+            let app = BlazeApp::new(cc)?;
+            Ok(Box::new(app))
+        }),
     )
 }
