@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "crates/blaze-engine",
+    "src-tauri",
+]
+resolver = "2"

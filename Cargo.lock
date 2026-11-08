@@ -125,9 +125,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "blaze-engine"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "blaze"
 version = "0.1.0"
 dependencies = [
+ "blaze-engine",
  "serde",
  "serde_json",
  "tauri",
