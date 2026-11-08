@@ -194,7 +194,7 @@ mod tests {
         assert_eq!(read_u32(&bytes, 4), 1);
         assert_eq!(read_u32(&bytes, 8), BLOCKS_PER_SECOND);
         let blocks = read_u32(&bytes, 12) as usize;
-        // 100 stereo frames = 4 full blocks + a partial block of 4.
+        // 484 stereo frames = 4 full blocks + a partial block of 4 frames.
         assert_eq!(blocks, 5);
         assert_eq!(bytes.len(), 16 + blocks * 6);
     }
