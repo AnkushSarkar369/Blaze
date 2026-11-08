@@ -162,83 +162,6 @@ impl eframe::App for BlazeApp {
 
             });
 
-        egui::Panel::bottom("transport")
-            .exact_size(46.0)
-            .show(ui, |ui| {
-                ui.horizontal_centered(|ui| {
-                    ui.add_space(8.0);
-
-                    if self.selected_path.is_some() {
-                        let paused = self.playback.is_paused();
-                        let icon = if paused { PlayerIcon::Play } else { PlayerIcon::Pause };
-                        let tooltip = if paused { "Play" } else { "Pause" };
-
-                        if allocated_icon_button(
-                            ui,
-                            "transport-play-pause",
-                            egui::vec2(34.0, 30.0),
-                            icon,
-                            tooltip,
-                        )
-                        .clicked()
-                        {
-                            if let Err(error) = self.playback.toggle_pause() {
-                                eprintln!("Blaze: {error}");
-                            }
-                        }
-
-                        ui.add_space(8.0);
-
-                        let player_duration = self.playback.duration();
-                        let probed_duration = self
-                            .media_info
-                            .as_ref()
-                            .map(|info| info.duration)
-                            .unwrap_or(0.0);
-                        let duration = if player_duration.is_finite() && player_duration > 0.0 {
-                            player_duration
-                        } else {
-                            probed_duration
-                        }
-                        .max(0.01);
-                        self.playback_position = self.playback_position.clamp(0.0, duration);
-
-                        let time_label = format!(
-                            "{} / {}",
-                            format_time(self.playback_position),
-                            format_time(duration)
-                        );
-                        let time_width = if duration >= 3600.0 { 148.0 } else { 104.0 };
-                        let slider_width = (ui.available_width() - time_width - 28.0).max(80.0);
-
-                        let response = ui.add_sized(
-                            [slider_width, 22.0],
-                            egui::Slider::new(&mut self.playback_position, 0.0..=duration)
-                                .show_value(false),
-                        ).on_hover_text("Seek");
-
-                        if response.dragged() {
-                            self.seeking = true;
-                        }
-                        if response.drag_stopped()
-                            || (response.changed() && !response.dragged() && !self.seeking)
-                        {
-                            self.seeking = false;
-                            if let Err(error) = self.playback.seek(self.playback_position) {
-                                eprintln!("Blaze: {error}");
-                            }
-                        }
-
-                        ui.add_space(10.0);
-                        ui.add_sized(
-                            [time_width, 22.0],
-                            egui::Label::new(egui::RichText::new(time_label).monospace().small()),
-                        );
-                        ui.add_space(10.0);
-                    }
-                });
-            });
-
         egui::Panel::right("tools")
             .resizable(true)
             .default_size(310.0)
@@ -251,46 +174,129 @@ impl eframe::App for BlazeApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(egui::Color32::from_rgb(14, 15, 17)))
             .show(ui, |ui| {
-                let preview_size = ui.available_size();
-                let (preview_rect, _) =
-                    ui.allocate_exact_size(preview_size, egui::Sense::hover());
-
-                ui.painter().rect_filled(
-                    preview_rect,
-                    egui::CornerRadius::same(4),
-                    egui::Color32::from_rgb(8, 9, 10),
+                // Preview and transport form one column. The right Tools panel is
+                // outside this central area, so both automatically share its width.
+                let available = ui.available_rect_before_wrap();
+                let transport_height = 46.0_f32.min(available.height());
+                let preview_rect = egui::Rect::from_min_max(
+                    available.min,
+                    egui::pos2(available.max.x, available.max.y - transport_height),
+                );
+                let transport_rect = egui::Rect::from_min_max(
+                    egui::pos2(available.min.x, preview_rect.max.y),
+                    available.max,
                 );
 
-                if self.selected_path.is_some() {
-                    self.playback.paint(ui.painter(), preview_rect);
+                ui.allocate_ui_at_rect(preview_rect, |ui| {
+                    let preview_rect = ui.max_rect();
+                    ui.painter().rect_filled(
+                        preview_rect,
+                        egui::CornerRadius::same(4),
+                        egui::Color32::from_rgb(8, 9, 10),
+                    );
 
-                    let import_rect = egui::Rect::from_min_size(
-                        preview_rect.left_top() + egui::vec2(12.0, 12.0),
-                        egui::vec2(34.0, 30.0),
-                    );
-                    if icon_button_at(
-                        ui,
-                        import_rect,
-                        egui::Id::new("preview-import"),
-                        PlayerIcon::Import,
-                        "Import video",
-                    )
-                    .clicked()
-                    {
-                        self.open_video(ui.ctx());
+                    if self.selected_path.is_some() {
+                        self.playback.paint(ui.painter(), preview_rect);
+                    } else {
+                        let button_rect = egui::Rect::from_center_size(
+                            preview_rect.center(),
+                            egui::vec2(156.0, 42.0),
+                        );
+                        if ui
+                            .put(button_rect, egui::Button::new("Import video"))
+                            .clicked()
+                        {
+                            self.open_video(ui.ctx());
+                        }
                     }
-                } else {
-                    let button_rect = egui::Rect::from_center_size(
-                        preview_rect.center(),
-                        egui::vec2(156.0, 42.0),
+                });
+
+                ui.allocate_ui_at_rect(transport_rect, |ui| {
+                    ui.painter().rect_filled(
+                        ui.max_rect(),
+                        0.0,
+                        egui::Color32::from_rgb(22, 23, 25),
                     );
-                    if ui
-                        .put(button_rect, egui::Button::new("Import video"))
-                        .clicked()
-                    {
-                        self.open_video(ui.ctx());
+
+                    if self.selected_path.is_some() {
+                        ui.with_layout(
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                ui.add_space(12.0);
+
+                                let paused = self.playback.is_paused();
+                                let icon = if paused { PlayerIcon::Play } else { PlayerIcon::Pause };
+                                let tooltip = if paused { "Play" } else { "Pause" };
+
+                                if allocated_icon_button(
+                                    ui,
+                                    "transport-play-pause",
+                                    egui::vec2(34.0, 30.0),
+                                    icon,
+                                    tooltip,
+                                )
+                                .clicked()
+                                {
+                                    if let Err(error) = self.playback.toggle_pause() {
+                                        eprintln!("Blaze: {error}");
+                                    }
+                                }
+
+                                ui.add_space(12.0);
+
+                                let player_duration = self.playback.duration();
+                                let probed_duration = self
+                                    .media_info
+                                    .as_ref()
+                                    .map(|info| info.duration)
+                                    .unwrap_or(0.0);
+                                let duration = if player_duration.is_finite() && player_duration > 0.0 {
+                                    player_duration
+                                } else {
+                                    probed_duration
+                                }
+                                .max(0.01);
+                                self.playback_position = self.playback_position.clamp(0.0, duration);
+
+                                let time_label = format!(
+                                    "{} / {}",
+                                    format_time(self.playback_position),
+                                    format_time(duration)
+                                );
+                                let time_width = if duration >= 3600.0 { 148.0 } else { 104.0 };
+                                let remaining = ui.available_width() - time_width - 36.0;
+                                let slider_width = remaining.max(40.0);
+
+                                let response = ui.add_sized(
+                                    [slider_width, 22.0],
+                                    egui::Slider::new(&mut self.playback_position, 0.0..=duration)
+                                        .show_value(false),
+                                ).on_hover_text("Seek");
+
+                                if response.dragged() {
+                                    self.seeking = true;
+                                }
+                                if response.drag_stopped()
+                                    || (response.changed() && !response.dragged() && !self.seeking)
+                                {
+                                    self.seeking = false;
+                                    if let Err(error) = self.playback.seek(self.playback_position) {
+                                        eprintln!("Blaze: {error}");
+                                    }
+                                }
+
+                                ui.add_space(12.0);
+                                ui.add_sized(
+                                    [time_width, 22.0],
+                                    egui::Label::new(
+                                        egui::RichText::new(time_label).monospace().small(),
+                                    ),
+                                );
+                                ui.add_space(12.0);
+                            },
+                        );
                     }
-                }
+                });
             });
     }
 
@@ -301,7 +307,6 @@ impl eframe::App for BlazeApp {
 
 #[derive(Clone, Copy)]
 enum PlayerIcon {
-    Import,
     Play,
     Pause,
 }
@@ -352,50 +357,6 @@ fn paint_player_icon(
     let stroke = egui::Stroke::new(1.8, color);
 
     match icon {
-        PlayerIcon::Import => {
-            painter.line_segment(
-                [
-                    egui::pos2(center.x, center.y - 7.0),
-                    egui::pos2(center.x, center.y + 3.0),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    egui::pos2(center.x - 4.0, center.y - 1.0),
-                    egui::pos2(center.x, center.y - 6.0),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    egui::pos2(center.x + 4.0, center.y - 1.0),
-                    egui::pos2(center.x, center.y - 6.0),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    egui::pos2(center.x - 8.0, center.y + 4.0),
-                    egui::pos2(center.x - 8.0, center.y + 7.0),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    egui::pos2(center.x - 8.0, center.y + 7.0),
-                    egui::pos2(center.x + 8.0, center.y + 7.0),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    egui::pos2(center.x + 8.0, center.y + 7.0),
-                    egui::pos2(center.x + 8.0, center.y + 4.0),
-                ],
-                stroke,
-            );
-        }
         PlayerIcon::Play => {
             painter.add(egui::Shape::convex_polygon(
                 vec![
