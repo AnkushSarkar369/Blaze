@@ -233,7 +233,29 @@ impl eframe::App for BlazeApp {
                     egui::Color32::from_rgb(17, 19, 21),
                 );
 
-                if let Some(waveform) = &self.waveform {
+                if let Some(progress) = self.waveform_progress {
+                    let fill_width = lane.width() * progress.clamp(0.0, 1.0);
+                    if fill_width > 0.0 {
+                        let fill = egui::Rect::from_min_size(
+                            lane.min,
+                            egui::vec2(fill_width, lane.height()),
+                        );
+                        ui.painter().rect_filled(
+                            fill,
+                            egui::CornerRadius::same(3),
+                            egui::Color32::from_rgb(105, 55, 37),
+                        );
+                    }
+
+                    let label = format!("Generating Waveform Data  ·  {}%", (progress * 100.0).round() as u32);
+                    ui.painter().text(
+                        lane.center(),
+                        egui::Align2::CENTER_CENTER,
+                        label,
+                        egui::FontId::proportional(13.0),
+                        egui::Color32::from_rgb(220, 220, 220),
+                    );
+                } else if let Some(waveform) = &self.waveform {
                     waveform.paint(ui.painter(), lane);
                 } else {
                     ui.painter().line_segment(
