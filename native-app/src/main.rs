@@ -1587,11 +1587,7 @@ impl eframe::App for BlazeApp {
                     painter.rect_filled(
                         thumb,
                         egui::CornerRadius::same(2),
-                        if scrollbar_response.hovered() || scrollbar_response.dragged() {
-                            egui::Color32::from_rgb(185, 190, 196)
-                        } else {
-                            egui::Color32::from_rgb(112, 118, 124)
-                        },
+                        egui::Color32::from_rgb(145, 151, 157),
                     );
                 }
 
@@ -1637,11 +1633,16 @@ impl eframe::App for BlazeApp {
                 {
                     let scroll = &mut ui.style_mut().spacing.scroll;
                     scroll.floating = true;
-                    scroll.bar_width = 5.0;
+                    scroll.bar_width = 4.0;
+                    scroll.bar_inner_margin = 8.0;
                     scroll.floating_width = 2.0;
-                    scroll.foreground_color = true;
+                    scroll.foreground_color = false;
                     scroll.dormant_background_opacity = 0.0;
+                    scroll.active_background_opacity = 0.0;
+                    scroll.interact_background_opacity = 0.0;
                     scroll.dormant_handle_opacity = 0.0;
+                    scroll.active_handle_opacity = 0.55;
+                    scroll.interact_handle_opacity = 0.55;
                 }
                 egui::ScrollArea::vertical()
                     .id_salt("tools-content-scroll")
