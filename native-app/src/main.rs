@@ -2348,10 +2348,11 @@ impl eframe::App for BlazeApp {
                             && !self.loading
                             && !self.export_running;
                         let timestamp_formats = [
-                            ("Adobe Premiere Pro XML", "xml", "Premiere", InterchangeFormat::PremiereXml),
-                            ("DaVinci Resolve XML", "xml", "DaVinci_Resolve", InterchangeFormat::DavinciResolve),
-                            ("Final Cut Pro XML", "fcpxml", "Final_Cut_Pro", InterchangeFormat::Fcpxml),
-                            ("Edit Decision List", "edl", "EDL", InterchangeFormat::Edl),
+                            ("Adobe Premiere Pro (FCP7 XML)", "xml", "Premiere_FCP7_XML", InterchangeFormat::PremiereXml),
+                            ("DaVinci Resolve (FCP7 XML)", "xml", "DaVinci_Resolve_FCP7_XML", InterchangeFormat::DavinciResolve),
+                            ("Final Cut Pro XML (1.14)", "fcpxml", "Final_Cut_Pro", InterchangeFormat::Fcpxml),
+                            ("OpenTimelineIO", "otio", "OpenTimelineIO", InterchangeFormat::OpenTimelineIo),
+                            ("Edit Decision List (CMX 3600)", "edl", "EDL", InterchangeFormat::Edl),
                         ];
 
                         for (label, extension, suffix, format) in timestamp_formats {
@@ -3017,8 +3018,8 @@ impl eframe::App for BlazeApp {
                                         HelpTab::Export => {
                                             help_page_heading(ui, "Export & interchange", "Choose between a rendered video and an editable timeline handoff.");
                                             help_card(ui, "Blaze Export", "In Blaze Mode, export uses stream-copy operations. It preserves the original encoded video quality without re-encoding. A loaded source, usable keyframes and at least one completed edit region are required.");
-                                            help_card(ui, "NLE timeline interchange", "Export the edit as an editable timeline for DaVinci Resolve XML, EDL, FCPXML or Premiere XML. These are interchange files containing edit decisions and source references, not rendered video.");
-                                            help_card(ui, "Current interchange model", "The current edit model supports one source media file, one linked video track and an optional linked audio track. Effects, transitions, multiple source clips and multi-track timelines are not currently represented. FCPXML output targets version 1.10.");
+                                            help_card(ui, "NLE timeline interchange", "Export an editable timeline for Adobe Premiere Pro or DaVinci Resolve using FCP7 XML, Final Cut Pro using FCPXML 1.14, OpenTimelineIO using .otio, or CMX 3600 EDL. These files contain edit decisions and source-media references; they are not rendered videos.");
+                                            help_card(ui, "Current interchange model", "Blaze exports one source media file as a single video track with an optional linked audio track. The current model does not include effects, transitions, multiple source clips or multi-track edits. OpenTimelineIO is supported by current Premiere Pro and DaVinci Resolve releases.");
                                             help_card(ui, "Precision Export", "A re-encoded video export for Precision Mode is not available yet and is shown as Coming Soon.");
                                             help_section_label(ui, "BEFORE EXPORTING");
                                             help_card(ui, "Review the cut list", "Check every region on the timeline and confirm the start and end boundaries.");
