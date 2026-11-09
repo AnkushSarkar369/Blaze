@@ -2969,12 +2969,14 @@ impl eframe::App for BlazeApp {
                                 ui.add_space(12.0);
                                 ui.separator();
                                 ui.add_space(8.0);
-                                ui.label(
-                                    egui::RichText::new("QUICK TIP")
-                                        .font(FontId::new(10.5, FontFamily::Proportional))
-                                        .strong()
-                                        .color(egui::Color32::from_rgb(255, 132, 108)),
-                                );
+                                ui.vertical_centered(|ui| {
+                                    ui.label(
+                                        egui::RichText::new("QUICK TIP")
+                                            .font(FontId::new(10.5, FontFamily::Proportional))
+                                            .strong()
+                                            .color(egui::Color32::from_rgb(255, 132, 108)),
+                                    );
+                                });
                                 ui.label(
                                     egui::RichText::new("Hover over controls in Blaze for tooltips.")
                                         .font(FontId::new(12.0, FontFamily::Proportional))
