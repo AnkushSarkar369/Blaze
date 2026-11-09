@@ -2072,9 +2072,9 @@ impl eframe::App for BlazeApp {
                             visuals.active.fg_stroke =
                                 egui::Stroke::new(1.0, button_text);
 
-                            ui.horizontal_centered(|ui| {
-                                ui.add_enabled(
-                                    can_detect,
+                            ui.add_enabled_ui(can_detect, |ui| {
+                                ui.add_sized(
+                                    [ui.available_width(), 40.0],
                                     egui::Button::new(
                                         egui::RichText::new(detect_label)
                                             .size(14.0)
