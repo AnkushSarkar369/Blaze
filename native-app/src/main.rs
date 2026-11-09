@@ -141,51 +141,50 @@ fn slider_handle_double_clicked(
     })
 }
 
-fn value_field_frame(
+fn take_wheel_step(ui: &mut egui::Ui, response: &egui::Response) -> Option<f64> {
+    if !response.hovered() { return None; }
+    ui.input_mut(|input| {
+        let delta: f32 = input.raw.events.iter().filter_map(|event| match event {
+            egui::Event::MouseWheel { delta, .. } => Some(delta.y),
+            _ => None,
+        }).sum();
+        if delta.abs() <= f32::EPSILON { return None; }
+        input.smooth_scroll_delta.y = 0.0;
+        Some(if delta < 0.0 { 1.0 } else { -1.0 })
+    })
+}
+
+fn numeric_field_scope(
     ui: &mut egui::Ui,
     width: f32,
     add_field: impl FnOnce(&mut egui::Ui),
 ) {
-    egui::Frame::new()
-        .fill(egui::Color32::from_rgb(18, 20, 23))
-        .stroke(egui::Stroke::new(
-            1.0,
-            egui::Color32::from_rgb(55, 59, 64),
-        ))
-        .corner_radius(egui::CornerRadius::same(5))
-        .inner_margin(egui::Margin::symmetric(5, 1))
-        .show(ui, |ui| {
-            ui.set_width(width - 12.0);
-            let visuals = ui.visuals_mut();
-            visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
-            visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
-            visuals.widgets.hovered.bg_fill = egui::Color32::TRANSPARENT;
-            visuals.widgets.hovered.bg_stroke =
-                egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 133, 105));
-            visuals.widgets.active.bg_fill = egui::Color32::TRANSPARENT;
-            visuals.widgets.active.bg_stroke =
-                egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 104, 79));
-            ui.with_layout(
-                egui::Layout::right_to_left(egui::Align::Center),
-                |ui| add_field(ui),
-            );
+    ui.scope(|ui| {
+        let style = ui.style_mut();
+        style.spacing.item_spacing.x = 0.0;
+        style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(27, 29, 32);
+        style.visuals.widgets.inactive.bg_stroke =
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(48, 52, 57));
+        style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(34, 36, 40);
+        style.visuals.widgets.hovered.bg_stroke =
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 133, 105));
+        style.visuals.widgets.active.bg_fill = egui::Color32::from_rgb(39, 34, 33);
+        style.visuals.widgets.active.bg_stroke =
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 104, 79));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            add_field(ui);
         });
+    });
 }
 
 fn numeric_field_f64(
-    ui: &mut egui::Ui,
-    value: &mut f64,
-    min: f64,
-    max: f64,
-    step: f64,
-    decimals: usize,
-    suffix: &str,
-    width: f32,
-    tooltip: &str,
+    ui: &mut egui::Ui, value: &mut f64, min: f64, max: f64,
+    step: f64, decimals: usize, suffix: &str, width: f32, tooltip: &str,
 ) {
-    value_field_frame(ui, width, |ui| {
-        ui.add_sized(
-            [width - 12.0, 26.0],
+    let mut response = None;
+    numeric_field_scope(ui, width, |ui| {
+        response = Some(ui.add_sized(
+            [width, 28.0],
             egui::DragValue::new(value)
                 .range(min..=max)
                 .speed(step)
@@ -193,25 +192,23 @@ fn numeric_field_f64(
                 .suffix(suffix)
                 .update_while_editing(false)
                 .clip_text(true),
-        )
-        .on_hover_text(tooltip);
+        ).on_hover_text(tooltip));
     });
+    if let Some(response) = response {
+        if let Some(direction) = take_wheel_step(ui, &response) {
+            *value = (*value + direction * step).clamp(min, max);
+        }
+    }
 }
 
 fn numeric_field_u32(
-    ui: &mut egui::Ui,
-    value: &mut u32,
-    min: u32,
-    max: u32,
-    step: f64,
-    prefix: &str,
-    suffix: &str,
-    width: f32,
-    tooltip: &str,
+    ui: &mut egui::Ui, value: &mut u32, min: u32, max: u32, step: f64,
+    prefix: &str, suffix: &str, width: f32, tooltip: &str,
 ) {
-    value_field_frame(ui, width, |ui| {
-        ui.add_sized(
-            [width - 12.0, 26.0],
+    let mut response = None;
+    numeric_field_scope(ui, width, |ui| {
+        response = Some(ui.add_sized(
+            [width, 28.0],
             egui::DragValue::new(value)
                 .range(min..=max)
                 .speed(step)
@@ -220,22 +217,24 @@ fn numeric_field_u32(
                 .suffix(suffix)
                 .update_while_editing(false)
                 .clip_text(true),
-        )
-        .on_hover_text(tooltip);
+        ).on_hover_text(tooltip));
     });
+    if let Some(response) = response {
+        if let Some(direction) = take_wheel_step(ui, &response) {
+            let next = *value as f64 + direction * step;
+            *value = next.round().clamp(min as f64, max as f64) as u32;
+        }
+    }
 }
 
 fn preset_value_field(
-    ui: &mut egui::Ui,
-    value: &mut usize,
-    choices: &'static [f64],
-    suffix: &str,
-    width: f32,
-    tooltip: &str,
+    ui: &mut egui::Ui, value: &mut usize, choices: &'static [f64],
+    suffix: &str, width: f32, tooltip: &str,
 ) {
-    value_field_frame(ui, width, |ui| {
-        ui.add_sized(
-            [width - 12.0, 26.0],
+    let mut response = None;
+    numeric_field_scope(ui, width, |ui| {
+        response = Some(ui.add_sized(
+            [width, 28.0],
             egui::DragValue::new(value)
                 .range(0..=choices.len().saturating_sub(1))
                 .speed(1.0)
@@ -245,9 +244,7 @@ fn preset_value_field(
                 })
                 .custom_parser(move |text| {
                     let entered = text.trim().parse::<f64>().ok()?;
-                    choices
-                        .iter()
-                        .enumerate()
+                    choices.iter().enumerate()
                         .min_by(|(_, a), (_, b)| {
                             (*a - entered).abs().total_cmp(&(*b - entered).abs())
                         })
@@ -256,9 +253,14 @@ fn preset_value_field(
                 .suffix(suffix)
                 .update_while_editing(false)
                 .clip_text(true),
-        )
-        .on_hover_text(tooltip);
+        ).on_hover_text(tooltip));
     });
+    if let Some(response) = response {
+        if let Some(direction) = take_wheel_step(ui, &response) {
+            let next = *value as f64 + direction;
+            *value = next.round().clamp(0.0, choices.len().saturating_sub(1) as f64) as usize;
+        }
+    }
 }
 
 fn slider_control<T>(
@@ -641,7 +643,7 @@ impl BlazeApp {
         );
 
         let mut visuals = egui::Visuals::dark();
-        let app_background = egui::Color32::from_rgb(16, 17, 18);
+        let app_background = egui::Color32::from_rgb(10, 11, 12);
         let panel_border = egui::Color32::from_rgb(42, 44, 47);
         visuals.panel_fill = app_background;
         visuals.window_fill = app_background;
@@ -1200,7 +1202,7 @@ impl eframe::App for BlazeApp {
         let timeline_panel = egui::Panel::bottom("timeline")
             .frame(
                 egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(23, 25, 28))
+                    .fill(egui::Color32::from_rgb(10, 11, 12))
                     .stroke(egui::Stroke::NONE)
                     .inner_margin(egui::Margin::symmetric(12, 8)),
             )
@@ -1527,6 +1529,7 @@ impl eframe::App for BlazeApp {
         let tools_panel = egui::Panel::right("tools")
             .frame(
                 egui::Frame::new()
+                    .fill(egui::Color32::from_rgb(10, 11, 12))
                     .stroke(egui::Stroke::NONE)
                     .inner_margin(egui::Margin::symmetric(16, 14)),
             )
@@ -1687,6 +1690,8 @@ impl eframe::App for BlazeApp {
                                         .on_hover_text("Drag to adjust · double-click the handle to reset");
                                     if slider_handle_double_clicked(ui, &response, *value, 3.0, 60.0) {
                                         *value = reset_threshold;
+                                    } else if let Some(direction) = take_wheel_step(ui, &response) {
+                                        *value = (*value + direction).clamp(3.0, 60.0);
                                     }
                                 },
                             );
@@ -1779,6 +1784,9 @@ impl eframe::App for BlazeApp {
                                                 0.0,
                                             ) {
                                                 self.custom_peak_ceiling_dbfs = -35.0;
+                                            } else if let Some(direction) = take_wheel_step(ui, &response) {
+                                                self.custom_peak_ceiling_dbfs =
+                                                    (self.custom_peak_ceiling_dbfs + direction).clamp(-90.0, 0.0);
                                             }
                                         });
                                     }
@@ -1866,6 +1874,9 @@ impl eframe::App for BlazeApp {
                                         ui, &response, *value as f64, 10.0, 10_000.0,
                                     ) {
                                         *value = 300;
+                                    } else if let Some(direction) = take_wheel_step(ui, &response) {
+                                        let next = *value as f64 + direction * 10.0;
+                                        *value = next.round().clamp(10.0, 10_000.0) as u32;
                                     }
                                 },
                             );
@@ -1908,6 +1919,9 @@ impl eframe::App for BlazeApp {
                                         ui, &response, *value as f64, 0.0, 4.0,
                                     ) {
                                         *value = 2;
+                                    } else if let Some(direction) = take_wheel_step(ui, &response) {
+                                        let next = *value as f64 + direction;
+                                        *value = next.round().clamp(0.0, 4.0) as usize;
                                     }
                                 },
                             );
@@ -1949,6 +1963,9 @@ impl eframe::App for BlazeApp {
                                         ui, &response, *value as f64, 0.0, 2.0,
                                     ) {
                                         *value = 1;
+                                    } else if let Some(direction) = take_wheel_step(ui, &response) {
+                                        let next = *value as f64 + direction;
+                                        *value = next.round().clamp(0.0, 2.0) as usize;
                                     }
                                 },
                             );
@@ -1980,6 +1997,9 @@ impl eframe::App for BlazeApp {
                                         ui, &response, *value as f64, 10.0, 10_000.0,
                                     ) {
                                         *value = 300;
+                                    } else if let Some(direction) = take_wheel_step(ui, &response) {
+                                        let next = *value as f64 + direction * 10.0;
+                                        *value = next.round().clamp(10.0, 10_000.0) as u32;
                                     }
                                 },
                             );
@@ -2160,7 +2180,7 @@ impl eframe::App for BlazeApp {
             // The timeline splitter is the only visual division between them.
             .frame(
                 egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(23, 25, 28))
+                    .fill(egui::Color32::from_rgb(10, 11, 12))
                     .stroke(egui::Stroke::NONE),
             )
             .show(ui, |ui| {
