@@ -1332,10 +1332,15 @@ impl eframe::App for BlazeApp {
                     }
                 });
                 ui.separator();
-                ui.add_space(8.0);
-                ui.set_width(ui.available_width());
 
-                match self.active_tool_tab {
+                egui::ScrollArea::vertical()
+                    .id_salt("tools-content-scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.add_space(8.0);
+                        ui.set_width(ui.available_width());
+
+                        match self.active_tool_tab {
                     ToolTab::ModeSelector => {
                         ui.heading("Choose an editing mode");
                         ui.add_space(18.0);
@@ -1872,10 +1877,10 @@ impl eframe::App for BlazeApp {
                             ui.colored_label(color, message);
                         }
                     }
-                }
+                        }
+                    });
 
-                // Keep the resizable panel at the user-selected width instead of
-                // allowing its contents to shrink it to their intrinsic width.
+                // Fill the remaining panel area after the scroll viewport.
                 ui.allocate_space(ui.available_size());
             });
         let tools_split_rect = tools_panel.response.rect;
