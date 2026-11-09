@@ -1579,6 +1579,7 @@ impl eframe::App for BlazeApp {
                 ui.separator();
 
                 let tools_content_width = ui.available_width();
+                ui.style_mut().spacing.scroll.floating = false;
                 egui::ScrollArea::vertical()
                     .id_salt("tools-content-scroll")
                     // Expert Mode adds wider controls. Cap the scroll area's outer
