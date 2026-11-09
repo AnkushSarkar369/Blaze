@@ -12,7 +12,7 @@ use crate::{MediaEngine, MediaInfo};
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum InterchangeFormat { DavinciResolve, Edl, Fcpxml, PremiereXml }
+pub enum InterchangeFormat { DavinciResolve, Edl, Fcpxml, OpenTimelineIo, PremiereXml }
 
 #[derive(Clone, Debug)]
 pub struct ExportReport {
@@ -307,6 +307,7 @@ pub fn export_interchange(
     let contents = match format {
         InterchangeFormat::Edl => build_edl(source, info, rate, &segments),
         InterchangeFormat::Fcpxml => build_fcpxml(source, info, rate, &segments)?,
+        InterchangeFormat::OpenTimelineIo => build_otio(source, info, rate, &segments)?,
         InterchangeFormat::DavinciResolve | InterchangeFormat::PremiereXml =>
             build_fcp7_xml(source, info, rate, &segments)?,
     };
@@ -409,6 +410,109 @@ fn build_fcp7_xml(
     Ok(out)
 }
 
+
+fn otio_rational_time(value: i64, rate: FrameRate) -> serde_json::Value {
+    serde_json::json!({
+        "OTIO_SCHEMA": "RationalTime.1",
+        "value": value,
+        "rate": rate.numerator as f64 / rate.denominator as f64
+    })
+}
+
+fn otio_time_range(start: i64, duration: i64, rate: FrameRate) -> serde_json::Value {
+    serde_json::json!({
+        "OTIO_SCHEMA": "TimeRange.1",
+        "start_time": otio_rational_time(start, rate),
+        "duration": otio_rational_time(duration, rate)
+    })
+}
+
+fn build_otio_track(
+    name: &str,
+    kind: &str,
+    source: &Path,
+    info: &MediaInfo,
+    rate: FrameRate,
+    segments: &[Segment],
+) -> serde_json::Value {
+    let source_name = source.file_name().and_then(|value| value.to_str()).unwrap_or("Source");
+    let source_url = file_url(source);
+    let source_duration = seconds_to_frames(info.duration, rate);
+
+    let children: Vec<serde_json::Value> = segments.iter().enumerate().map(|(index, segment)| {
+        serde_json::json!({
+            "OTIO_SCHEMA": "Clip.2",
+            "active_media_reference_key": "DEFAULT_MEDIA",
+            "color": null,
+            "effects": [],
+            "enabled": true,
+            "markers": [],
+            "media_references": {
+                "DEFAULT_MEDIA": {
+                    "OTIO_SCHEMA": "ExternalReference.1",
+                    "available_image_bounds": null,
+                    "available_range": otio_time_range(0, source_duration, rate),
+                    "metadata": {},
+                    "name": source_name,
+                    "target_url": source_url
+                }
+            },
+            "metadata": {},
+            "name": format!("{source_name} — Segment {}", index + 1),
+            "source_range": otio_time_range(segment.source_in, segment.duration(), rate)
+        })
+    }).collect();
+
+    serde_json::json!({
+        "OTIO_SCHEMA": "Track.1",
+        "children": children,
+        "color": null,
+        "effects": [],
+        "enabled": true,
+        "kind": kind,
+        "markers": [],
+        "metadata": {},
+        "name": name,
+        "source_range": null
+    })
+}
+
+/// Writes an OpenTimelineIO JSON timeline referencing the original source media.
+fn build_otio(
+    source: &Path,
+    info: &MediaInfo,
+    rate: FrameRate,
+    segments: &[Segment],
+) -> Result<String, String> {
+    let mut tracks = vec![
+        build_otio_track("Video", "Video", source, info, rate, segments),
+    ];
+    if info.has_audio {
+        tracks.push(build_otio_track("Audio", "Audio", source, info, rate, segments));
+    }
+
+    let timeline = serde_json::json!({
+        "OTIO_SCHEMA": "Timeline.1",
+        "global_start_time": otio_rational_time(0, rate),
+        "metadata": {},
+        "name": source.file_stem().and_then(|value| value.to_str()).unwrap_or("Blaze Edit"),
+        "tracks": {
+            "OTIO_SCHEMA": "Stack.1",
+            "children": tracks,
+            "color": null,
+            "effects": [],
+            "enabled": true,
+            "markers": [],
+            "metadata": {},
+            "name": "Tracks",
+            "source_range": null
+        }
+    });
+
+    serde_json::to_string_pretty(&timeline)
+        .map_err(|error| format!("Could not serialize the OpenTimelineIO timeline: {error}"))
+}
+
 fn build_fcpxml(
     source: &Path, info: &MediaInfo, rate: FrameRate, segments: &[Segment],
 ) -> Result<String, String> {
@@ -428,7 +532,7 @@ fn build_fcpxml(
     } else { format!("FFVideoFormat{}p{}", height, rate.nominal) };
 
     let mut out = String::new();
-    out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE fcpxml>\n<fcpxml version=\"1.10\"><resources>\n");
+    out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE fcpxml>\n<fcpxml version=\"1.14\"><resources>\n");
     out.push_str(&format!("<format id=\"r1\" name=\"{format_name}\" frameDuration=\"{}/{}s\" width=\"{width}\" height=\"{height}\"/>\n",
         rate.denominator, rate.numerator));
     out.push_str(&format!("<asset id=\"r2\" name=\"{name_xml}\" start=\"0s\" duration=\"{}\" hasVideo=\"1\" hasAudio=\"{}\" format=\"r1\"",
@@ -465,6 +569,33 @@ fn build_fcpxml(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn otio_export_contains_video_audio_tracks_and_source_ranges() {
+        let rate = frame_rate(25.0).unwrap();
+        let segments = keep_segments(&[(2.0, 4.0)], 10.0, rate);
+        let info = MediaInfo {
+            duration: 10.0,
+            fps: Some(25.0),
+            width: Some(1920),
+            height: Some(1080),
+            has_audio: true,
+            audio_channels: Some(2),
+            audio_sample_rate: Some(48000),
+        };
+        let timeline = build_otio(Path::new("/tmp/source clip.mp4"), &info, rate, &segments).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&timeline).unwrap();
+        assert_eq!(parsed["OTIO_SCHEMA"], "Timeline.1");
+        let tracks = parsed["tracks"]["children"].as_array().unwrap();
+        assert_eq!(tracks.len(), 2);
+        assert_eq!(tracks[0]["kind"], "Video");
+        assert_eq!(tracks[1]["kind"], "Audio");
+        assert_eq!(tracks[0]["children"][0]["OTIO_SCHEMA"], "Clip.2");
+        assert_eq!(tracks[0]["children"][0]["source_range"]["start_time"]["value"], 0);
+        assert_eq!(tracks[0]["children"][0]["source_range"]["duration"]["value"], 50);
+        assert_eq!(tracks[0]["children"][0]["media_references"]["DEFAULT_MEDIA"]["target_url"],
+            "file:///tmp/source%20clip.mp4");
+    }
 
     #[test]
     fn deletion_ranges_are_merged_and_inverted() {
