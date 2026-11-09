@@ -1203,7 +1203,8 @@ impl eframe::App for BlazeApp {
             tools_panel_id,
         )
         .map(|state| state.outer_rect.width())
-        .unwrap_or(380.0)
+        .map(|width| if (width - 380.0).abs() < 1.0 { 420.0 } else { width })
+        .unwrap_or(420.0)
         .clamp(tools_min_width, tools_max_width);
         let normalized_tools_rect = egui::Rect::from_min_size(
             egui::Pos2::ZERO,
@@ -1555,9 +1556,8 @@ impl eframe::App for BlazeApp {
             )
             .show_separator_line(false)
             .resizable(false)
-            .default_size(380.0)
-            .min_size(tools_min_width)
-            .max_size(saved_tools_width)
+            .default_size(420.0)
+            .exact_size(saved_tools_width)
             .show(ui, |ui| {
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
@@ -1818,17 +1818,11 @@ impl eframe::App for BlazeApp {
                                 });
 
                             ui.add_space(14.0);
-                            egui::Frame::new()
-                                .fill(egui::Color32::from_rgb(23, 25, 28))
-                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 46, 50)))
-                                .corner_radius(egui::CornerRadius::same(7))
-                                .inner_margin(egui::Margin::symmetric(12, 10))
-                                .show(ui, |ui| {
                             slider_control(
                                 ui,
                                 "Minimum Silence Duration",
                                 &mut self.minimum_silence_ms,
-                                None,
+                                Some("Shortest pause that qualifies as silence. Default is 300 ms."),
                                 None,
                                 |ui, value| {
                                     numeric_field_u32(
@@ -1855,6 +1849,13 @@ impl eframe::App for BlazeApp {
                                     }
                                 },
                             );
+                            ui.add_space(14.0);
+                            egui::Frame::new()
+                                .fill(egui::Color32::from_rgb(23, 25, 28))
+                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 46, 50)))
+                                .corner_radius(egui::CornerRadius::same(7))
+                                .inner_margin(egui::Margin::symmetric(12, 10))
+                                .show(ui, |ui| {
                                     ui.horizontal(|ui| {
                                         ui.label(egui::RichText::new("Padding").strong().size(13.0));
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2468,7 +2469,7 @@ impl eframe::App for BlazeApp {
         if tools_resize_response.double_clicked() {
             let width = self.media_info.as_ref()
                 .map(|info| default_tools_width(root_rect, info))
-                .unwrap_or(380.0)
+                .unwrap_or(420.0)
                 .clamp(tools_min_width, tools_max_width);
             let panel_rect = egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
