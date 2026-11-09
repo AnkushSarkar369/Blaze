@@ -231,53 +231,91 @@ fn mode_selection_card(
         egui::FontId::proportional(15.0),
         title_color,
     );
-    let group_width = 22.0 + 9.0 + title_galley.size().x;
+    let group_width = 28.0 + 10.0 + title_galley.size().x;
     let group_left = rect.center().x - group_width * 0.5;
-    let icon_center = egui::pos2(group_left + 10.0, rect.top() + card_height * 0.36);
+    let icon_center = egui::pos2(group_left + 14.0, rect.top() + card_height * 0.36);
+    let icon_stroke = egui::Stroke::new(1.7, icon_color);
 
     match icon {
         ModeCardIcon::Blaze => {
-            let points = vec![
-                icon_center + egui::vec2(-2.5, -10.0),
-                icon_center + egui::vec2(5.0, -1.5),
-                icon_center + egui::vec2(1.0, -1.5),
-                icon_center + egui::vec2(3.0, 10.0),
-                icon_center + egui::vec2(-5.5, 0.0),
-                icon_center + egui::vec2(-1.5, 0.0),
-            ];
+            // A pair of forward-cut chevrons: speed, decisiveness and stream-copy flow.
+            let chevron = |offset_x: f32| {
+                vec![
+                    icon_center + egui::vec2(offset_x - 5.0, -8.0),
+                    icon_center + egui::vec2(offset_x + 1.0, 0.0),
+                    icon_center + egui::vec2(offset_x - 5.0, 8.0),
+                    icon_center + egui::vec2(offset_x - 1.0, 8.0),
+                    icon_center + egui::vec2(offset_x + 6.0, 0.0),
+                    icon_center + egui::vec2(offset_x - 1.0, -8.0),
+                ]
+            };
             painter.add(egui::Shape::convex_polygon(
-                points,
+                chevron(-5.0),
                 icon_color,
                 egui::Stroke::NONE,
             ));
+            painter.add(egui::Shape::convex_polygon(
+                chevron(6.0),
+                icon_color,
+                egui::Stroke::NONE,
+            ));
+            painter.line_segment(
+                [
+                    icon_center + egui::vec2(-13.0, -5.0),
+                    icon_center + egui::vec2(-13.0, 5.0),
+                ],
+                egui::Stroke::new(1.5, icon_color),
+            );
         }
         ModeCardIcon::Precision => {
-            painter.circle_stroke(icon_center, 7.0, egui::Stroke::new(1.7, icon_color));
-            painter.circle_filled(icon_center, 1.8, icon_color);
-            let arm = 10.0;
-            let inner = 5.0;
-            for direction in [-1.0_f32, 1.0] {
-                painter.line_segment(
-                    [
-                        icon_center + egui::vec2(direction * inner, 0.0),
-                        icon_center + egui::vec2(direction * arm, 0.0),
-                    ],
-                    egui::Stroke::new(1.5, icon_color),
-                );
-                painter.line_segment(
-                    [
-                        icon_center + egui::vec2(0.0, direction * inner),
-                        icon_center + egui::vec2(0.0, direction * arm),
-                    ],
-                    egui::Stroke::new(1.5, icon_color),
-                );
+            // Registration brackets, a measured centre ring and a precise target point.
+            let outer = 11.0;
+            let arm = 5.0;
+            for sx in [-1.0_f32, 1.0] {
+                for sy in [-1.0_f32, 1.0] {
+                    let corner = icon_center + egui::vec2(sx * outer, sy * outer);
+                    painter.line_segment(
+                        [
+                            corner,
+                            corner + egui::vec2(-sx * arm, 0.0),
+                        ],
+                        icon_stroke,
+                    );
+                    painter.line_segment(
+                        [
+                            corner,
+                            corner + egui::vec2(0.0, -sy * arm),
+                        ],
+                        icon_stroke,
+                    );
+                }
             }
+            painter.circle_stroke(
+                icon_center,
+                5.0,
+                egui::Stroke::new(1.6, icon_color),
+            );
+            painter.circle_filled(icon_center, 1.7, icon_color);
+            painter.line_segment(
+                [
+                    icon_center + egui::vec2(-2.5, 0.0),
+                    icon_center + egui::vec2(2.5, 0.0),
+                ],
+                egui::Stroke::new(1.0, icon_color),
+            );
+            painter.line_segment(
+                [
+                    icon_center + egui::vec2(0.0, -2.5),
+                    icon_center + egui::vec2(0.0, 2.5),
+                ],
+                egui::Stroke::new(1.0, icon_color),
+            );
         }
     }
 
     painter.galley(
         egui::pos2(
-            group_left + 31.0,
+            group_left + 38.0,
             icon_center.y - title_galley.size().y * 0.5,
         ),
         title_galley,
