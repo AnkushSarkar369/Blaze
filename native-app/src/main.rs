@@ -1640,7 +1640,7 @@ impl eframe::App for BlazeApp {
                     scroll.dormant_background_opacity = 0.0;
                     scroll.active_background_opacity = 0.0;
                     scroll.interact_background_opacity = 0.0;
-                    scroll.dormant_handle_opacity = 0.72;
+                    scroll.dormant_handle_opacity = 0.0;
                     scroll.active_handle_opacity = 0.72;
                     scroll.interact_handle_opacity = 0.72;
                 }
