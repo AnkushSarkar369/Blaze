@@ -1003,7 +1003,16 @@ impl eframe::App for BlazeApp {
         }
 
         let timeline_panel = egui::Panel::bottom("timeline")
-            .frame(egui::Frame::new().stroke(egui::Stroke::NONE))
+            .frame(
+                egui::Frame::new()
+                    .fill(egui::Color32::from_rgb(23, 25, 28))
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        egui::Color32::from_rgb(43, 46, 50),
+                    ))
+                    .corner_radius(egui::CornerRadius::same(7))
+                    .inner_margin(egui::Margin::symmetric(12, 8)),
+            )
             .show_separator_line(false)
             .resizable(false)
             .default_size(220.0)
@@ -1106,8 +1115,17 @@ impl eframe::App for BlazeApp {
 
                 ui.painter().rect_filled(
                     lane,
-                    egui::CornerRadius::same(3),
-                    egui::Color32::from_rgb(19, 20, 22),
+                    egui::CornerRadius::same(5),
+                    egui::Color32::from_rgb(18, 20, 23),
+                );
+                ui.painter().rect_stroke(
+                    lane,
+                    egui::CornerRadius::same(5),
+                    egui::Stroke::new(
+                        1.0,
+                        egui::Color32::from_rgb(38, 41, 45),
+                    ),
+                    egui::StrokeKind::Inside,
                 );
 
                 if let Some(progress) = self.waveform_progress {
@@ -1997,10 +2015,13 @@ impl eframe::App for BlazeApp {
                 // One framed Preview Panel contains both the video viewport
                 // and its transport bar. Tools remains a separate right panel.
                 egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(16, 17, 18))
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(42, 44, 47)))
-                    .corner_radius(egui::CornerRadius::same(2))
-                    .inner_margin(egui::Margin::same(6))
+                    .fill(egui::Color32::from_rgb(23, 25, 28))
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        egui::Color32::from_rgb(43, 46, 50),
+                    ))
+                    .corner_radius(egui::CornerRadius::same(7))
+                    .inner_margin(egui::Margin::same(10))
                     .show(ui, |ui| {
                         let available = ui.available_rect_before_wrap();
                         let transport_height = 46.0_f32.min(available.height());
@@ -2038,10 +2059,21 @@ impl eframe::App for BlazeApp {
                         });
 
                         ui.scope_builder(egui::UiBuilder::new().max_rect(transport_rect), |ui| {
+                            let transport_surface = ui.max_rect();
                             ui.painter().rect_filled(
-                                ui.max_rect(),
-                                0.0,
-                                egui::Color32::from_rgb(16, 17, 18),
+                                transport_surface,
+                                egui::CornerRadius::same(4),
+                                egui::Color32::from_rgb(23, 25, 28),
+                            );
+                            ui.painter().line_segment(
+                                [
+                                    transport_surface.left_top(),
+                                    transport_surface.right_top(),
+                                ],
+                                egui::Stroke::new(
+                                    1.0,
+                                    egui::Color32::from_rgb(43, 46, 50),
+                                ),
                             );
 
                             if self.selected_path.is_some() {
@@ -2163,7 +2195,7 @@ impl eframe::App for BlazeApp {
                                             } else {
                                                 7.0
                                             },
-                                            egui::Color32::WHITE,
+                                            egui::Color32::from_rgb(236, 239, 242),
                                         );
 
                                         ui.add_space(10.0);
