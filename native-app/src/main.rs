@@ -2503,65 +2503,104 @@ impl eframe::App for BlazeApp {
         if self.show_help {
             egui::Window::new("Quick Help")
                 .collapsible(false)
-                .resizable(false)
-                .default_width(430.0)
+                .resizable(true)
+                .default_size(egui::vec2(720.0, 560.0))
+                .min_size(egui::vec2(540.0, 390.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .open(&mut self.show_help)
                 .show(ui.ctx(), |ui| {
-                    ui.label("Keyboard shortcuts");
-                    ui.add_space(6.0);
-                    egui::Grid::new("blaze_quick_help_shortcuts")
-                        .num_columns(2)
-                        .spacing([18.0, 8.0])
-                        .show(ui, |ui| {
-                            ui.monospace("Ctrl + Scroll");
-                            ui.label("Zoom timeline in / out");
-                            ui.end_row();
-                            ui.monospace("Double-click vertical splitter");
-                            ui.label("Reset preview / tools proportions");
-                            ui.end_row();
-                            ui.monospace("Double-click timeline splitter");
-                            ui.label("Reset timeline height");
-                            ui.end_row();
-                            ui.monospace("Scroll");
-                            ui.label("Move timeline left / right");
-                            ui.end_row();
-                            ui.monospace("Space");
-                            ui.label("Play / pause video");
-                            ui.end_row();
-                            ui.monospace("Ctrl + H");
-                            ui.label("Open this help window");
-                            ui.end_row();
-                            ui.monospace("N");
-                            ui.label("Create / cancel a starting jaw");
-                            ui.end_row();
-                            ui.monospace("M");
-                            ui.label("Create an ending jaw");
-                            ui.end_row();
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("BLAZE USER GUIDE").size(10.5).strong()
+                                .color(egui::Color32::from_rgb(255, 120, 96)));
+                            ui.heading("Quick Help");
+                            ui.label(egui::RichText::new("A practical guide to editing, navigating and exporting.")
+                                .size(12.0).color(ui.visuals().weak_text_color()));
                         });
-
-                    ui.separator();
-                    ui.label("Editing modes");
-                    ui.add_space(6.0);
-                    egui::Grid::new("blaze_quick_help_modes")
-                        .num_columns(2)
-                        .spacing([18.0, 8.0])
-                        .show(ui, |ui| {
-                            ui.strong("Blaze Mode");
-                            ui.label("Keyframe-aligned cuts with stream-copy constraints");
-                            ui.end_row();
-                            ui.strong("Precise Mode");
-                            ui.label("Unrestricted boundary placement");
-                            ui.end_row();
-                            ui.strong("Export");
-                            ui.label("Export video or an editable NLE timeline");
-                            ui.end_row();
-                        });
+                    });
                     ui.add_space(10.0);
-                    ui.label("You can reopen this guide anytime with Ctrl + H.");
+
+                    ui.horizontal_wrapped(|ui| {
+                        for tab in [HelpTab::General, HelpTab::Blaze, HelpTab::Precision, HelpTab::Timeline, HelpTab::Export] {
+                            if ui.selectable_label(self.help_tab == tab,
+                                egui::RichText::new(tab.label()).size(12.5)).clicked() {
+                                self.help_tab = tab;
+                            }
+                        }
+                    });
+                    ui.separator();
+
+                    egui::ScrollArea::vertical()
+                        .id_salt("quick-help-documentation")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.add_space(7.0);
+                            match self.help_tab {
+                                HelpTab::General => {
+                                    help_card(ui, "Start with a video",
+                                        "Choose Import video in the preview area. Blaze probes the media, opens the preview and builds waveform data for timeline navigation. Wait for analysis to finish before using mode-specific operations.");
+                                    help_card(ui, "Choose an editing mode",
+                                        "Blaze Mode aligns cut boundaries to usable video keyframes and supports stream-copy export. Precision Mode places boundaries at the current playback position without keyframe snapping.");
+                                    help_card(ui, "Playback and review",
+                                        "Use the preview transport to play, pause and seek. Skip Cuts can automatically jump over marked regions during playback; it does not remove or change those regions.");
+                                    ui.add_space(3.0);
+                                    ui.label(egui::RichText::new("KEYBOARD SHORTCUTS").strong().size(11.0)
+                                        .color(egui::Color32::from_rgb(255, 133, 105)));
+                                    ui.add_space(7.0);
+                                    help_shortcut(ui, "Space", "Play or pause the loaded video.");
+                                    help_shortcut(ui, "N", "Place a starting boundary at the current position, or cancel a pending start.");
+                                    help_shortcut(ui, "M", "Complete the pending cut at the current position.");
+                                    help_shortcut(ui, "Ctrl + H", "Show or hide Quick Help.");
+                                }
+                                HelpTab::Blaze => {
+                                    help_card(ui, "Keyframe-aligned cutting",
+                                        "Blaze Mode aligns cut boundaries to the nearest valid video keyframes. This makes edits suitable for stream-copy export, which keeps the original encoded video rather than re-encoding it.");
+                                    help_card(ui, "Create a cut region",
+                                        "Move the playhead to the start and press N. Move to the end and press M. The resulting region is marked on the timeline. Press N again before completing a region to cancel the pending start.");
+                                    help_card(ui, "Adjust boundaries",
+                                        "Drag either boundary handle on the timeline. In Blaze Mode, the boundary continues to snap to valid keyframes. Silence detection can create candidate regions for review and adjustment.");
+                                    help_card(ui, "Detection settings",
+                                        "Detection Level selects a threshold preset. Padding preserves audio around detected pauses. Minimum Silence Duration filters out pauses shorter than the selected duration. Expert Mode exposes threshold, peak ceiling and separate before/after padding controls.");
+                                    help_card(ui, "Best suited to",
+                                        "Fast cuts where retaining the source streams and avoiding video re-encoding are priorities. Exact cut points are constrained by available keyframes.");
+                                }
+                                HelpTab::Precision => {
+                                    help_card(ui, "Unrestricted cut placement",
+                                        "Precision Mode uses the current playback position for cut boundaries instead of snapping them to keyframes. This gives finer placement control; export may require re-encoding when stream-copy boundaries are unsuitable.");
+                                    help_card(ui, "Create and refine regions",
+                                        "Move the playhead to the desired start and press N. Move to the desired end and press M. Drag the region's start or end handle to refine it; boundaries are not keyframe-snapped in this mode.");
+                                    help_card(ui, "Silence detection",
+                                        "Use the same preset or Expert Mode controls to find candidate pauses. Detection settings determine how silence is identified and how much surrounding audio is retained; review generated regions before exporting.");
+                                    help_card(ui, "Export availability",
+                                        "Precision Export is currently marked Coming Soon. You can still work with precise edit regions and use the available timestamp/NLE interchange exports.");
+                                }
+                                HelpTab::Timeline => {
+                                    help_card(ui, "Navigate the timeline",
+                                        "Click the waveform lane or time ruler to seek. Drag in the lane or ruler to scrub the playhead. The time ruler adapts its tick spacing as the visible time range changes.");
+                                    help_card(ui, "Zoom and pan",
+                                        "Ctrl + Scroll zooms around the pointer position. Ordinary vertical scrolling pans left or right; horizontal trackpad scrolling is supported too. Playback keeps the playhead visible as it advances.");
+                                    help_card(ui, "Edit regions",
+                                        "Each region has a start and end handle. Drag either handle to adjust its boundary. Blaze Mode snaps the boundary to a keyframe; Precision Mode allows unrestricted placement. A pending N start marker can also be dragged before completing the region with M.");
+                                    help_card(ui, "Resize the workspace",
+                                        "Drag the vertical divider between preview and Tools to change their proportions. Drag the horizontal divider above the timeline to change timeline height. Double-click either divider to restore its default size.");
+                                }
+                                HelpTab::Export => {
+                                    help_card(ui, "Blaze Export",
+                                        "Exports the selected edit using stream-copy operations in Blaze Mode. It preserves the original encoded video quality and source container. Usable keyframes and at least one edit region are required.");
+                                    help_card(ui, "NLE timeline interchange",
+                                        "Export the current edit as an editable timeline using DaVinci Resolve XML, EDL, FCPXML or Premiere XML. These are timestamp interchange files, not rendered video. The current edit model supports one source media file, one linked video track and an optional linked audio track.");
+                                    help_card(ui, "Known interchange limits",
+                                        "Effects, transitions, multiple source clips and multi-track timelines are outside the current edit model. FCPXML output currently targets version 1.10.");
+                                    help_card(ui, "Precision Export",
+                                        "A re-encoded video export for Precision Mode is not available yet and is shown as Coming Soon.");
+                                }
+                            }
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new("Press Ctrl + H at any time to reopen this guide.")
+                                .size(11.5).color(ui.visuals().weak_text_color()));
+                        });
                 });
         }
-
 
     }
 
