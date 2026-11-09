@@ -1056,10 +1056,10 @@ impl eframe::App for BlazeApp {
             input.consume_key(egui::Modifiers::CTRL, egui::Key::H)
         });
         let mark_start_pressed = ctx.input_mut(|input| {
-            input.consume_key(egui::Modifiers::NONE, egui::Key::N)
+            input.consume_key(egui::Modifiers::NONE, egui::Key::S)
         });
         let mark_end_pressed = ctx.input_mut(|input| {
-            input.consume_key(egui::Modifiers::NONE, egui::Key::M)
+            input.consume_key(egui::Modifiers::NONE, egui::Key::D)
         });
         let blaze_mode = self.active_mode == Some(EditingMode::Blaze);
         if self.selected_path.is_some() && self.active_mode.is_some() && mark_start_pressed {
@@ -1108,7 +1108,7 @@ impl eframe::App for BlazeApp {
         if self.selected_path.is_some() && !self.seeking {
             self.playback_position = self.playback.position();
 
-            // Skip completed N–M regions during active playback. Extend the target
+            // Skip completed S–D regions during active playback. Extend the target
             // through overlapping or directly adjacent regions so no marked content
             // is played between consecutive cuts.
             if self.skip_cuts_enabled && !self.playback.is_paused() {
@@ -1425,7 +1425,7 @@ impl eframe::App for BlazeApp {
                     }
                 }
 
-                // An unpaired N marker is shown as a draggable starting jaw.
+                // An unpaired S marker is shown as a draggable starting jaw.
                 if let Some(start) = self.pending_region_start {
                     let x = lane.left()
                         + (((start - self.timeline_offset) / visible_duration) as f32) * lane.width();
@@ -2764,15 +2764,15 @@ impl eframe::App for BlazeApp {
                                         .color(egui::Color32::from_rgb(255, 133, 105)));
                                     ui.add_space(7.0);
                                     help_shortcut(ui, "Space", "Play or pause the loaded video.");
-                                    help_shortcut(ui, "N", "Place a starting boundary at the current position, or cancel a pending start.");
-                                    help_shortcut(ui, "M", "Complete the pending cut at the current position.");
+                                    help_shortcut(ui, "S", "Place a starting boundary at the current position, or cancel a pending start.");
+                                    help_shortcut(ui, "D", "Complete the pending cut at the current position.");
                                     help_shortcut(ui, "Ctrl + H", "Show or hide Quick Help.");
                                 }
                                 HelpTab::Blaze => {
                                     help_card(ui, "Keyframe-aligned cutting",
                                         "Blaze Mode aligns cut boundaries to the nearest valid video keyframes. This makes edits suitable for stream-copy export, which keeps the original encoded video rather than re-encoding it.");
                                     help_card(ui, "Create a cut region",
-                                        "Move the playhead to the start and press N. Move to the end and press M. The resulting region is marked on the timeline. Press N again before completing a region to cancel the pending start.");
+                                        "Move the playhead to the start and press S. Move to the end and press D. The resulting region is marked on the timeline. Press S again before completing a region to cancel the pending start.");
                                     help_card(ui, "Adjust boundaries",
                                         "Drag either boundary handle on the timeline. In Blaze Mode, the boundary continues to snap to valid keyframes. Silence detection can create candidate regions for review and adjustment.");
                                     help_card(ui, "Detection settings",
@@ -2784,7 +2784,7 @@ impl eframe::App for BlazeApp {
                                     help_card(ui, "Unrestricted cut placement",
                                         "Precision Mode uses the current playback position for cut boundaries instead of snapping them to keyframes. This gives finer placement control; export may require re-encoding when stream-copy boundaries are unsuitable.");
                                     help_card(ui, "Create and refine regions",
-                                        "Move the playhead to the desired start and press N. Move to the desired end and press M. Drag the region's start or end handle to refine it; boundaries are not keyframe-snapped in this mode.");
+                                        "Move the playhead to the desired start and press S. Move to the desired end and press D. Drag the region's start or end handle to refine it; boundaries are not keyframe-snapped in this mode.");
                                     help_card(ui, "Silence detection",
                                         "Use the same preset or Expert Mode controls to find candidate pauses. Detection settings determine how silence is identified and how much surrounding audio is retained; review generated regions before exporting.");
                                     help_card(ui, "Export availability",
@@ -2796,7 +2796,7 @@ impl eframe::App for BlazeApp {
                                     help_card(ui, "Zoom and pan",
                                         "Ctrl + Scroll zooms around the pointer position. Ordinary vertical scrolling pans left or right; horizontal trackpad scrolling is supported too. Playback keeps the playhead visible as it advances.");
                                     help_card(ui, "Edit regions",
-                                        "Each region has a start and end handle. Drag either handle to adjust its boundary. Blaze Mode snaps the boundary to a keyframe; Precision Mode allows unrestricted placement. A pending N start marker can also be dragged before completing the region with M.");
+                                        "Each region has a start and end handle. Drag either handle to adjust its boundary. Blaze Mode snaps the boundary to a keyframe; Precision Mode allows unrestricted placement. A pending S start marker can also be dragged before completing the region with D.");
                                     help_card(ui, "Resize the workspace",
                                         "Drag the vertical divider between preview and Tools to change their proportions. Drag the horizontal divider above the timeline to change timeline height. Double-click either divider to restore its default size.");
                                 }
