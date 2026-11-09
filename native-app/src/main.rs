@@ -878,6 +878,7 @@ impl eframe::App for BlazeApp {
         }
 
         let timeline_panel = egui::Panel::bottom("timeline")
+            .frame(egui::Frame::new().stroke(egui::Stroke::NONE))
             .resizable(true)
             .default_size(220.0)
             .min_size(140.0)
@@ -1204,6 +1205,7 @@ impl eframe::App for BlazeApp {
         let timeline_split_rect = timeline_panel.response.rect;
 
         let tools_panel = egui::Panel::right("tools")
+            .frame(egui::Frame::new().stroke(egui::Stroke::NONE))
             .resizable(true)
             .default_size(310.0)
             .min_size(240.0)
