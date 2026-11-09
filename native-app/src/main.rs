@@ -1171,25 +1171,59 @@ impl eframe::App for BlazeApp {
         // Make panel splitters easier to grab without changing their saved sizes.
         ui.style_mut().interaction.resize_grab_radius_side = 10.0;
         let root_rect = ui.available_rect_before_wrap();
+        let tools_panel_id = ui.scope_id().with("tools");
+        let tools_min_width = 240.0_f32.min(root_rect.width().max(0.0));
+        // Keep a useful preview workspace while still allowing a generous Tools
+        // panel. The panel's effective max is then locked to its saved width below.
+        let tools_max_width = (root_rect.width() * 0.65)
+            .min((root_rect.width() - 320.0).max(tools_min_width))
+            .max(tools_min_width);
 
         // Fit the initial preview width to the imported video's aspect ratio.
         // This runs once per import; later manual resizing remains untouched.
         if self.pending_preview_fit {
             if let Some(info) = self.media_info.as_ref() {
-                let tools_width = default_tools_width(root_rect, info);
-                let panel_id = ui.scope_id().with("tools");
+                let tools_width = default_tools_width(root_rect, info)
+                    .clamp(tools_min_width, tools_max_width);
                 let panel_rect = egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
                     egui::vec2(tools_width, root_rect.height()),
                 );
                 ui.ctx().data_mut(|data| {
-                    data.insert_persisted(panel_id, egui::containers::panel::PanelState {
-                        outer_rect: panel_rect,
-                    });
+                    data.insert_persisted(
+                        tools_panel_id,
+                        egui::containers::panel::PanelState {
+                            outer_rect: panel_rect,
+                        },
+                    );
                 });
                 self.pending_preview_fit = false;
             }
         }
+
+        // Panel::right can otherwise persist a wider content-measured rect after
+        // Expert Mode lays out its controls. Clamp stale sizes, then use the
+        // user's saved width as this frame's actual maximum. The custom splitter
+        // below is the only code allowed to change that saved width.
+        let saved_tools_width = egui::containers::panel::PanelState::load(
+            ui.ctx(),
+            tools_panel_id,
+        )
+        .map(|state| state.outer_rect.width())
+        .unwrap_or(310.0)
+        .clamp(tools_min_width, tools_max_width);
+        let normalized_tools_rect = egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(saved_tools_width, root_rect.height()),
+        );
+        ui.ctx().data_mut(|data| {
+            data.insert_persisted(
+                tools_panel_id,
+                egui::containers::panel::PanelState {
+                    outer_rect: normalized_tools_rect,
+                },
+            );
+        });
 
         let timeline_panel = egui::Panel::bottom("timeline")
             .frame(
@@ -1529,6 +1563,7 @@ impl eframe::App for BlazeApp {
             .resizable(false)
             .default_size(310.0)
             .min_size(240.0)
+            .max_size(saved_tools_width)
             .show(ui, |ui| {
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
@@ -2439,11 +2474,10 @@ impl eframe::App for BlazeApp {
         }
 
         if tools_resize_response.double_clicked() {
-            let min_width = 240.0_f32.min(root_rect.width());
             let width = self.media_info.as_ref()
                 .map(|info| default_tools_width(root_rect, info))
                 .unwrap_or(310.0)
-                .clamp(min_width, root_rect.width().max(min_width));
+                .clamp(tools_min_width, tools_max_width);
             let panel_rect = egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
                 egui::vec2(width, root_rect.height()),
@@ -2458,9 +2492,8 @@ impl eframe::App for BlazeApp {
             ui.ctx().request_repaint();
         } else if tools_resize_response.dragged() || tools_resize_response.drag_stopped() {
             if let Some(pointer) = tools_resize_response.interact_pointer_pos() {
-                let min_width = 240.0_f32.min(root_rect.width());
                 let width = (root_rect.right() - pointer.x)
-                    .clamp(min_width, root_rect.width().max(min_width));
+                    .clamp(tools_min_width, tools_max_width);
                 let panel_rect = egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
                     egui::vec2(width, root_rect.height()),
