@@ -880,7 +880,7 @@ impl eframe::App for BlazeApp {
         let timeline_panel = egui::Panel::bottom("timeline")
             .frame(egui::Frame::new().stroke(egui::Stroke::NONE))
             .show_separator_line(false)
-            .resizable(true)
+            .resizable(false)
             .default_size(220.0)
             .min_size(140.0)
             .show(ui, |ui| {
@@ -1208,7 +1208,7 @@ impl eframe::App for BlazeApp {
         let tools_panel = egui::Panel::right("tools")
             .frame(egui::Frame::new().stroke(egui::Stroke::NONE))
             .show_separator_line(false)
-            .resizable(true)
+            .resizable(false)
             .default_size(310.0)
             .min_size(240.0)
             .show(ui, |ui| {
@@ -1885,17 +1885,60 @@ impl eframe::App for BlazeApp {
                     });
             });
 
-        // Read the actual native egui splitter responses. These widgets own the
-        // drag and double-click gestures; no overlapping interaction layer is added.
+        // Use explicit splitter hit-zones instead of egui Panel's built-in
+        // resizers. The native panel stroke uses the panel's internal cross-axis
+        // bounds, which can leave a stale-looking separator where the panels meet.
+        // These hit-zones are calculated from the root viewport and never overlap:
+        // the tools splitter ends before the timeline splitter begins.
+        let upper_panel_rect = egui::Rect::from_min_max(
+            root_rect.min,
+            egui::pos2(root_rect.right(), timeline_split_rect.top()),
+        );
+        let tools_split_x = tools_split_rect.left();
+        let timeline_split_y = timeline_split_rect.top();
+
+        let tools_resize_rect = egui::Rect::from_min_max(
+            egui::pos2(tools_split_x - 10.0, upper_panel_rect.top()),
+            egui::pos2(
+                tools_split_x + 10.0,
+                (upper_panel_rect.bottom() - 10.0).max(upper_panel_rect.top()),
+            ),
+        );
         let tools_resize_response = ui
-            .ctx()
-            .read_response(ui.scope_id().with("tools").with("__resize"));
-        if let Some(response) = &tools_resize_response {
-            response.clone().on_hover_text("Drag to resize · Double-click to reset");
-            if response.double_clicked() {
-                let width = self.media_info.as_ref()
-                    .map(|info| default_tools_width(root_rect, info))
-                    .unwrap_or(310.0);
+            .interact(
+                tools_resize_rect,
+                ui.scope_id().with("tools").with("__resize"),
+                egui::Sense::click_and_drag(),
+            )
+            .on_hover_text("Drag to resize · Double-click to reset");
+
+        if tools_resize_response.hovered() || tools_resize_response.dragged() {
+            ui.set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+
+        if tools_resize_response.double_clicked() {
+            let min_width = 240.0_f32.min(root_rect.width());
+            let width = self.media_info.as_ref()
+                .map(|info| default_tools_width(root_rect, info))
+                .unwrap_or(310.0)
+                .clamp(min_width, root_rect.width().max(min_width));
+            let panel_rect = egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(width, root_rect.height()),
+            );
+            let panel_id = ui.scope_id().with("tools");
+            ui.ctx().data_mut(|data| {
+                data.insert_persisted(
+                    panel_id,
+                    egui::containers::panel::PanelState { outer_rect: panel_rect },
+                );
+            });
+            ui.ctx().request_repaint();
+        } else if tools_resize_response.dragged() || tools_resize_response.drag_stopped() {
+            if let Some(pointer) = tools_resize_response.interact_pointer_pos() {
+                let min_width = 240.0_f32.min(root_rect.width());
+                let width = (root_rect.right() - pointer.x)
+                    .clamp(min_width, root_rect.width().max(min_width));
                 let panel_rect = egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
                     egui::vec2(width, root_rect.height()),
@@ -1911,17 +1954,46 @@ impl eframe::App for BlazeApp {
             }
         }
 
+        let timeline_resize_rect = egui::Rect::from_min_max(
+            egui::pos2(root_rect.left(), timeline_split_y - 10.0),
+            egui::pos2(root_rect.right(), timeline_split_y + 10.0),
+        ).intersect(root_rect);
         let timeline_resize_response = ui
-            .ctx()
-            .read_response(ui.scope_id().with("timeline").with("__resize"));
-        if let Some(response) = &timeline_resize_response {
-            response.clone().on_hover_text("Drag to resize · Double-click to reset");
-            if response.double_clicked() {
-                let panel_id = ui.scope_id().with("timeline");
+            .interact(
+                timeline_resize_rect,
+                ui.scope_id().with("timeline").with("__resize"),
+                egui::Sense::click_and_drag(),
+            )
+            .on_hover_text("Drag to resize · Double-click to reset");
+
+        if timeline_resize_response.hovered() || timeline_resize_response.dragged() {
+            ui.set_cursor_icon(egui::CursorIcon::ResizeVertical);
+        }
+
+        if timeline_resize_response.double_clicked() {
+            let height = 220.0_f32.min(root_rect.height());
+            let panel_rect = egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(root_rect.width(), height),
+            );
+            let panel_id = ui.scope_id().with("timeline");
+            ui.ctx().data_mut(|data| {
+                data.insert_persisted(
+                    panel_id,
+                    egui::containers::panel::PanelState { outer_rect: panel_rect },
+                );
+            });
+            ui.ctx().request_repaint();
+        } else if timeline_resize_response.dragged() || timeline_resize_response.drag_stopped() {
+            if let Some(pointer) = timeline_resize_response.interact_pointer_pos() {
+                let min_height = 140.0_f32.min(root_rect.height());
+                let height = (root_rect.bottom() - pointer.y)
+                    .clamp(min_height, root_rect.height().max(min_height));
                 let panel_rect = egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
-                    egui::vec2(root_rect.width(), 220.0),
+                    egui::vec2(root_rect.width(), height),
                 );
+                let panel_id = ui.scope_id().with("timeline");
                 ui.ctx().data_mut(|data| {
                     data.insert_persisted(
                         panel_id,
@@ -1932,55 +2004,88 @@ impl eframe::App for BlazeApp {
             }
         }
 
-        // Keep the compact visual grips centered on the real splitter edges.
+        // Draw splitter feedback only inside the region that the splitter owns.
         let handle_fill = egui::Color32::from_rgb(42, 45, 48);
         let handle_mark = egui::Color32::from_rgb(126, 130, 134);
-        {
-            // The Panel response may shrink to its content bounds on the cross
-            // axis. Anchor the grip to the actual viewport and stop it at the
-            // timeline edge so it cannot drift into the timeline as it grows.
-            let upper_panel_rect = egui::Rect::from_min_max(
-                root_rect.min,
-                egui::pos2(root_rect.right(), timeline_split_rect.top()),
+        let tools_painter = ui.painter().with_clip_rect(upper_panel_rect);
+        let tools_handle = egui::Rect::from_center_size(
+            egui::pos2(tools_split_x, upper_panel_rect.center().y),
+            egui::vec2(10.0, 62.0),
+        ).intersect(upper_panel_rect);
+        let tools_hovered = tools_resize_response.hovered() || tools_resize_response.dragged();
+        let tools_handle_fill = if tools_hovered {
+            egui::Color32::from_rgb(67, 71, 75)
+        } else {
+            handle_fill
+        };
+        tools_painter.rect_filled(
+            tools_handle,
+            egui::CornerRadius::same(5),
+            tools_handle_fill,
+        );
+        for offset in [-8.0_f32, 0.0, 8.0] {
+            tools_painter.circle_filled(
+                egui::pos2(tools_handle.center().x, tools_handle.center().y + offset),
+                1.25,
+                handle_mark,
             );
-            let handle = egui::Rect::from_center_size(
-                egui::pos2(tools_split_rect.left(), upper_panel_rect.center().y),
-                egui::vec2(10.0, 62.0),
-            ).intersect(upper_panel_rect);
-            let hovered = tools_resize_response.as_ref()
-                .is_some_and(|response| response.hovered() || response.dragged());
-            let fill = if hovered {
-                egui::Color32::from_rgb(67, 71, 75)
-            } else { handle_fill };
-            ui.painter().rect_filled(handle, egui::CornerRadius::same(5), fill);
-            for offset in [-8.0_f32, 0.0, 8.0] {
-                ui.painter().circle_filled(
-                    egui::pos2(handle.center().x, handle.center().y + offset),
-                    1.25,
-                    handle_mark,
-                );
-            }
         }
-        {
-            // Use the root viewport width, not the panel response's content
-            // bounds, which can be narrower than the actual splitter edge.
-            let handle = egui::Rect::from_center_size(
-                egui::pos2(root_rect.center().x, timeline_split_rect.top()),
-                egui::vec2(62.0, 10.0),
-            ).intersect(root_rect);
-            let hovered = timeline_resize_response.as_ref()
-                .is_some_and(|response| response.hovered() || response.dragged());
-            let fill = if hovered {
-                egui::Color32::from_rgb(67, 71, 75)
-            } else { handle_fill };
-            ui.painter().rect_filled(handle, egui::CornerRadius::same(5), fill);
-            for offset in [-8.0_f32, 0.0, 8.0] {
-                ui.painter().circle_filled(
-                    egui::pos2(handle.center().x + offset, handle.center().y),
-                    1.25,
-                    handle_mark,
-                );
-            }
+        let tools_stroke = if tools_resize_response.dragged() {
+            ui.visuals().widgets.active.fg_stroke
+        } else if tools_resize_response.hovered() {
+            ui.visuals().widgets.hovered.fg_stroke
+        } else {
+            egui::Stroke::NONE
+        };
+        if tools_stroke.width > 0.0 {
+            tools_painter.line_segment(
+                [
+                    egui::pos2(tools_split_x, upper_panel_rect.top()),
+                    egui::pos2(tools_split_x, upper_panel_rect.bottom()),
+                ],
+                tools_stroke,
+            );
+        }
+
+        let timeline_painter = ui.painter().with_clip_rect(root_rect);
+        let timeline_handle = egui::Rect::from_center_size(
+            egui::pos2(root_rect.center().x, timeline_split_y),
+            egui::vec2(62.0, 10.0),
+        ).intersect(root_rect);
+        let timeline_hovered =
+            timeline_resize_response.hovered() || timeline_resize_response.dragged();
+        let timeline_handle_fill = if timeline_hovered {
+            egui::Color32::from_rgb(67, 71, 75)
+        } else {
+            handle_fill
+        };
+        timeline_painter.rect_filled(
+            timeline_handle,
+            egui::CornerRadius::same(5),
+            timeline_handle_fill,
+        );
+        for offset in [-8.0_f32, 0.0, 8.0] {
+            timeline_painter.circle_filled(
+                egui::pos2(timeline_handle.center().x + offset, timeline_handle.center().y),
+                1.25,
+                handle_mark,
+            );
+        }
+        let timeline_stroke = if timeline_resize_response.dragged() {
+            ui.visuals().widgets.active.fg_stroke
+        } else if timeline_resize_response.hovered() {
+            ui.visuals().widgets.hovered.fg_stroke
+        } else {
+            egui::Stroke::NONE
+        };
+        if timeline_stroke.width > 0.0 {
+            timeline_painter.line_segment(
+                [
+                    egui::pos2(root_rect.left(), timeline_split_y),
+                    egui::pos2(root_rect.right(), timeline_split_y),
+                ],
+                timeline_stroke,
+            );
         }
 
         if self.show_help {
