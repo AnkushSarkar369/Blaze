@@ -19,6 +19,10 @@ mod waveform;
 
 use waveform::Waveform;
 
+const APP_TITLE: &str = "Blaze — Ankush Sarkar";
+const DETECTION_DB_VALUES: [f64; 5] = [32.0, 26.0, 22.0, 18.0, 14.0];
+const PADDING_MS_VALUES: [f64; 3] = [120.0, 60.0, 20.0];
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EditingMode {
     Blaze,
@@ -63,32 +67,53 @@ impl HelpTab {
 
 
 fn help_card(ui: &mut egui::Ui, title: &str, description: &str) {
-    egui::Frame::new()
-        .fill(egui::Color32::from_rgb(23, 25, 28))
-        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 46, 50)))
-        .corner_radius(egui::CornerRadius::same(7))
-        .inner_margin(egui::Margin::symmetric(13, 10))
-        .show(ui, |ui| {
-            ui.label(egui::RichText::new(title).strong().size(13.0));
-            ui.add_space(3.0);
-            ui.label(egui::RichText::new(description).size(12.5).color(ui.visuals().weak_text_color()));
-        });
-    ui.add_space(9.0);
+    use egui::{FontFamily, FontId};
+
+    ui.vertical(|ui| {
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(title)
+                .font(FontId::new(15.0, FontFamily::Proportional))
+                .strong()
+                .color(egui::Color32::from_rgb(232, 234, 236)),
+        );
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(description)
+                .font(FontId::new(13.5, FontFamily::Proportional))
+                .color(egui::Color32::from_rgb(173, 178, 183)),
+        );
+        ui.add_space(10.0);
+        ui.separator();
+    });
 }
 
 fn help_shortcut(ui: &mut egui::Ui, key: &str, description: &str) {
+    use egui::{FontFamily, FontId};
+
     ui.horizontal(|ui| {
         egui::Frame::new()
-            .fill(egui::Color32::from_rgb(34, 37, 41))
-            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(53, 57, 62)))
+            .fill(egui::Color32::from_rgb(19, 21, 24))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(49, 53, 58)))
             .corner_radius(egui::CornerRadius::same(5))
-            .inner_margin(egui::Margin::symmetric(8, 4))
-            .show(ui, |ui| { ui.monospace(egui::RichText::new(key).size(11.5)); });
-        ui.add_space(5.0);
-        ui.label(egui::RichText::new(description).size(12.5).color(ui.visuals().text_color()));
+            .inner_margin(egui::Margin::symmetric(9, 5))
+            .show(ui, |ui| {
+                ui.label(
+                    egui::RichText::new(key)
+                        .font(FontId::new(12.5, FontFamily::Monospace))
+                        .strong(),
+                );
+            });
+        ui.add_space(7.0);
+        ui.label(
+            egui::RichText::new(description)
+                .font(FontId::new(13.0, FontFamily::Proportional))
+                .color(ui.visuals().text_color()),
+        );
     });
-    ui.add_space(6.0);
+    ui.add_space(8.0);
 }
+
 fn slider_handle_double_clicked(
     ui: &egui::Ui,
     response: &egui::Response,
@@ -116,13 +141,134 @@ fn slider_handle_double_clicked(
     })
 }
 
-fn slider_control(
+fn value_field_frame(
+    ui: &mut egui::Ui,
+    width: f32,
+    add_field: impl FnOnce(&mut egui::Ui),
+) {
+    egui::Frame::new()
+        .fill(egui::Color32::from_rgb(18, 20, 23))
+        .stroke(egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgb(55, 59, 64),
+        ))
+        .corner_radius(egui::CornerRadius::same(5))
+        .inner_margin(egui::Margin::symmetric(5, 1))
+        .show(ui, |ui| {
+            ui.set_width(width - 12.0);
+            let visuals = ui.visuals_mut();
+            visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+            visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
+            visuals.widgets.hovered.bg_fill = egui::Color32::TRANSPARENT;
+            visuals.widgets.hovered.bg_stroke =
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 133, 105));
+            visuals.widgets.active.bg_fill = egui::Color32::TRANSPARENT;
+            visuals.widgets.active.bg_stroke =
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 104, 79));
+            ui.with_layout(
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| add_field(ui),
+            );
+        });
+}
+
+fn numeric_field_f64(
+    ui: &mut egui::Ui,
+    value: &mut f64,
+    min: f64,
+    max: f64,
+    step: f64,
+    decimals: usize,
+    suffix: &str,
+    width: f32,
+    tooltip: &str,
+) {
+    value_field_frame(ui, width, |ui| {
+        ui.add_sized(
+            [width - 12.0, 26.0],
+            egui::DragValue::new(value)
+                .range(min..=max)
+                .speed(step)
+                .fixed_decimals(decimals)
+                .suffix(suffix)
+                .update_while_editing(false)
+                .clip_text(true),
+        )
+        .on_hover_text(tooltip);
+    });
+}
+
+fn numeric_field_u32(
+    ui: &mut egui::Ui,
+    value: &mut u32,
+    min: u32,
+    max: u32,
+    step: f64,
+    prefix: &str,
+    suffix: &str,
+    width: f32,
+    tooltip: &str,
+) {
+    value_field_frame(ui, width, |ui| {
+        ui.add_sized(
+            [width - 12.0, 26.0],
+            egui::DragValue::new(value)
+                .range(min..=max)
+                .speed(step)
+                .fixed_decimals(0)
+                .prefix(prefix)
+                .suffix(suffix)
+                .update_while_editing(false)
+                .clip_text(true),
+        )
+        .on_hover_text(tooltip);
+    });
+}
+
+fn preset_value_field(
+    ui: &mut egui::Ui,
+    value: &mut usize,
+    choices: &'static [f64],
+    suffix: &str,
+    width: f32,
+    tooltip: &str,
+) {
+    value_field_frame(ui, width, |ui| {
+        ui.add_sized(
+            [width - 12.0, 26.0],
+            egui::DragValue::new(value)
+                .range(0..=choices.len().saturating_sub(1))
+                .speed(1.0)
+                .custom_formatter(move |index, _| {
+                    let index = (index.round() as usize).min(choices.len() - 1);
+                    format!("{:.0}", choices[index])
+                })
+                .custom_parser(move |text| {
+                    let entered = text.trim().parse::<f64>().ok()?;
+                    choices
+                        .iter()
+                        .enumerate()
+                        .min_by(|(_, a), (_, b)| {
+                            (*a - entered).abs().total_cmp(&(*b - entered).abs())
+                        })
+                        .map(|(index, _)| index as f64)
+                })
+                .suffix(suffix)
+                .update_while_editing(false)
+                .clip_text(true),
+        )
+        .on_hover_text(tooltip);
+    });
+}
+
+fn slider_control<T>(
     ui: &mut egui::Ui,
     label: &str,
-    value: &str,
+    value: &mut T,
     description: Option<&str>,
     preset_labels: Option<(&[&str], usize)>,
-    add_slider: impl FnOnce(&mut egui::Ui),
+    add_value: impl FnOnce(&mut egui::Ui, &mut T),
+    add_slider: impl FnOnce(&mut egui::Ui, &mut T),
 ) {
     egui::Frame::new()
         .fill(egui::Color32::from_rgb(23, 25, 28))
@@ -134,15 +280,7 @@ fn slider_control(
                 ui.label(egui::RichText::new(label).strong().size(13.0));
                 ui.with_layout(
                     egui::Layout::right_to_left(egui::Align::Center),
-                    |ui| {
-                        ui.label(
-                            egui::RichText::new(value)
-                                .monospace()
-                                .strong()
-                                .size(12.5)
-                                .color(egui::Color32::from_rgb(255, 133, 105)),
-                        );
-                    },
+                    |ui| add_value(ui, value),
                 );
             });
 
@@ -157,10 +295,7 @@ fn slider_control(
 
             ui.add_space(3.0);
 
-            // egui keeps the circular handle inside the slider's response rect.
-            // Preset captions are centred in equal-width columns, so inset the
-            // slider itself by (half a caption column - handle radius). This makes
-            // every discrete handle stop land on the centre of its matching word.
+            // Keep the existing preset captions aligned to their slider stops.
             let content_width = ui.available_width();
             let handle_radius = ui
                 .text_style_height(&egui::TextStyle::Body)
@@ -174,9 +309,6 @@ fn slider_control(
                 .unwrap_or(6.0);
             let slider_width = (content_width - horizontal_inset * 2.0).max(1.0);
 
-            // Keep slider styling local to these controls. This changes only
-            // their appearance; the underlying egui Slider still owns interaction
-            // and writes to the original application state.
             let mut slider_visuals = ui.visuals().clone();
             slider_visuals.handle_shape = egui::style::HandleShape::Circle;
             slider_visuals.slider_trailing_fill = true;
@@ -200,7 +332,7 @@ fn slider_control(
                         slider_ui.spacing_mut().slider_width = slider_width;
                         slider_ui.spacing_mut().slider_rail_height = 5.0;
                         *slider_ui.visuals_mut() = slider_visuals;
-                        add_slider(slider_ui);
+                        add_slider(slider_ui, value);
                     },
                 );
             });
@@ -502,6 +634,12 @@ impl BlazeApp {
     fn new(
         cc: &eframe::CreationContext<'_>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        // Keep native window decorations in the same dark theme as the app.
+        cc.egui_ctx.set_theme(egui::Theme::Dark);
+        cc.egui_ctx.send_viewport_cmd(
+            egui::ViewportCommand::Title(APP_TITLE.to_owned()),
+        );
+
         let mut visuals = egui::Visuals::dark();
         let app_background = egui::Color32::from_rgb(16, 17, 18);
         let panel_border = egui::Color32::from_rgb(42, 44, 47);
@@ -1527,25 +1665,28 @@ impl eframe::App for BlazeApp {
                             slider_control(
                                 ui,
                                 "Detection Threshold",
-                                &format!("{:.1} dB", self.custom_threshold_db),
+                                &mut self.custom_threshold_db,
                                 Some("Offset below the adaptive programme baseline"),
                                 None,
-                                |ui| {
+                                |ui, value| {
+                                    numeric_field_f64(
+                                        ui, value, 3.0, 60.0, 1.0, 1, " dB", 82.0,
+                                        "Click to type · ↑/↓ changes by 1 dB",
+                                    );
+                                },
+                                |ui, value| {
                                     let response = ui
                                         .add_sized(
                                             [ui.available_width(), 30.0],
-                                            egui::Slider::new(
-                                                &mut self.custom_threshold_db,
-                                                3.0..=60.0,
-                                            )
-                                            .suffix(" dB")
-                                            .fixed_decimals(1)
-                                            .show_value(false)
-                                            .trailing_fill(true),
+                                            egui::Slider::new(value, 3.0..=60.0)
+                                                .suffix(" dB")
+                                                .fixed_decimals(1)
+                                                .show_value(false)
+                                                .trailing_fill(true),
                                         )
-                                        .on_hover_text("Double-click the handle to reset");
-                                    if slider_handle_double_clicked(ui, &response, self.custom_threshold_db, 3.0, 60.0) {
-                                        self.custom_threshold_db = reset_threshold;
+                                        .on_hover_text("Drag to adjust · double-click the handle to reset");
+                                    if slider_handle_double_clicked(ui, &response, *value, 3.0, 60.0) {
+                                        *value = reset_threshold;
                                     }
                                 },
                             );
@@ -1569,15 +1710,16 @@ impl eframe::App for BlazeApp {
                                         ui.with_layout(
                                             egui::Layout::right_to_left(egui::Align::Center),
                                             |ui| {
-                                                ui.label(
-                                                    egui::RichText::new(format!(
-                                                        "{:.1} dBFS",
-                                                        self.custom_peak_ceiling_dbfs,
-                                                    ))
-                                                    .monospace()
-                                                    .strong()
-                                                    .size(12.5)
-                                                    .color(egui::Color32::from_rgb(255, 133, 105)),
+                                                numeric_field_f64(
+                                                    ui,
+                                                    &mut self.custom_peak_ceiling_dbfs,
+                                                    -90.0,
+                                                    0.0,
+                                                    1.0,
+                                                    1,
+                                                    " dBFS",
+                                                    96.0,
+                                                    "Click to type · ↑/↓ changes by 1 dB",
                                                 );
                                             },
                                         );
@@ -1643,17 +1785,6 @@ impl eframe::App for BlazeApp {
                                 });
 
                             ui.add_space(14.0);
-                            let padding_summary = if self.custom_padding_before_ms
-                                == self.custom_padding_after_ms
-                            {
-                                format!("{}ms L&R", self.custom_padding_before_ms)
-                            } else {
-                                format!(
-                                    "{} / {} ms",
-                                    self.custom_padding_before_ms,
-                                    self.custom_padding_after_ms,
-                                )
-                            };
                             egui::Frame::new()
                                 .fill(egui::Color32::from_rgb(23, 25, 28))
                                 .stroke(egui::Stroke::new(
@@ -1672,12 +1803,28 @@ impl eframe::App for BlazeApp {
                                         ui.with_layout(
                                             egui::Layout::right_to_left(egui::Align::Center),
                                             |ui| {
-                                                ui.label(
-                                                    egui::RichText::new(padding_summary)
-                                                        .monospace()
-                                                        .strong()
-                                                        .size(12.5)
-                                                        .color(egui::Color32::from_rgb(255, 133, 105)),
+                                                numeric_field_u32(
+                                                    ui,
+                                                    &mut self.custom_padding_after_ms,
+                                                    0,
+                                                    2000,
+                                                    10.0,
+                                                    "A ",
+                                                    " ms",
+                                                    86.0,
+                                                    "After padding · ↑/↓ changes by 10 ms",
+                                                );
+                                                ui.add_space(5.0);
+                                                numeric_field_u32(
+                                                    ui,
+                                                    &mut self.custom_padding_before_ms,
+                                                    0,
+                                                    2000,
+                                                    10.0,
+                                                    "B ",
+                                                    " ms",
+                                                    86.0,
+                                                    "Before padding · ↑/↓ changes by 10 ms",
                                                 );
                                             },
                                         );
@@ -1690,64 +1837,35 @@ impl eframe::App for BlazeApp {
                                         .size(11.5)
                                         .color(ui.visuals().weak_text_color()),
                                     );
-                                    ui.add_space(8.0);
-                                    ui.columns(2, |columns| {
-                                        columns[0].strong("Before");
-                                        columns[1].strong("After");
-                                        columns[0].add_space(2.0);
-                                        columns[1].add_space(2.0);
-                                        columns[0].horizontal(|ui| {
-                                            ui.add_sized(
-                                                [72.0, 28.0],
-                                                egui::DragValue::new(
-                                                    &mut self.custom_padding_before_ms,
-                                                )
-                                                .range(0..=2000)
-                                                .speed(10),
-                                            );
-                                            ui.label("ms");
-                                        });
-                                        columns[1].horizontal(|ui| {
-                                            ui.add_sized(
-                                                [72.0, 28.0],
-                                                egui::DragValue::new(
-                                                    &mut self.custom_padding_after_ms,
-                                                )
-                                                .range(0..=2000)
-                                                .speed(10),
-                                            );
-                                            ui.label("ms");
-                                        });
-                                    });
+                                    ui.add_space(2.0);
                                 });
 
                             ui.add_space(14.0);
                             slider_control(
                                 ui,
                                 "Minimum Silence Duration",
-                                &format!("{} ms", self.minimum_silence_ms),
+                                &mut self.minimum_silence_ms,
                                 None,
                                 None,
-                                |ui| {
+                                |ui, value| {
+                                    numeric_field_u32(
+                                        ui, value, 10, 10_000, 10.0, "", " ms", 86.0,
+                                        "Click to type · ↑/↓ changes by 10 ms",
+                                    );
+                                },
+                                |ui, value| {
                                     let response = ui.add_sized(
                                         [ui.available_width(), 30.0],
-                                        egui::Slider::new(
-                                            &mut self.minimum_silence_ms,
-                                            10..=10_000,
-                                        )
-                                        .suffix(" ms")
-                                        .show_value(false)
-                                        .trailing_fill(true),
+                                        egui::Slider::new(value, 10..=10_000)
+                                            .suffix(" ms")
+                                            .show_value(false)
+                                            .trailing_fill(true),
                                     )
-                                    .on_hover_text("Double-click the handle to reset");
+                                    .on_hover_text("Drag to adjust · double-click the handle to reset");
                                     if slider_handle_double_clicked(
-                                        ui,
-                                        &response,
-                                        self.minimum_silence_ms as f64,
-                                        10.0,
-                                        10_000.0,
+                                        ui, &response, *value as f64, 10.0, 10_000.0,
                                     ) {
-                                        self.minimum_silence_ms = 300;
+                                        *value = 300;
                                     }
                                 },
                             );
@@ -1759,40 +1877,37 @@ impl eframe::App for BlazeApp {
                                 "Tight",
                                 "Aggressive",
                             ];
-                            let selected_detection_level = match self.detection_level {
-                                0 => DetectionLevel::Comfortable,
-                                1 => DetectionLevel::Optimal,
-                                2 => DetectionLevel::Default,
-                                3 => DetectionLevel::Tight,
-                                _ => DetectionLevel::Aggressive,
-                            };
+                            let selected_detection_index = self.detection_level;
                             slider_control(
                                 ui,
                                 "Detection Level",
-                                &format!(
-                                    "{:.0} dB",
-                                    selected_detection_level.threshold_below_baseline_db(),
-                                ),
+                                &mut self.detection_level,
                                 None,
-                                Some((&DETECTION_LABELS, self.detection_level)),
-                                |ui| {
+                                Some((&DETECTION_LABELS, selected_detection_index)),
+                                |ui, value| {
+                                    preset_value_field(
+                                        ui,
+                                        value,
+                                        &DETECTION_DB_VALUES,
+                                        " dB",
+                                        82.0,
+                                        "Type a dB value to choose the nearest preset · ↑/↓ moves one preset",
+                                    );
+                                },
+                                |ui, value| {
                                     let response = ui
                                         .add_sized(
                                             [ui.available_width(), 32.0],
-                                            egui::Slider::new(&mut self.detection_level, 0..=4)
+                                            egui::Slider::new(value, 0..=4)
                                                 .step_by(1.0)
                                                 .show_value(false)
                                                 .trailing_fill(true),
                                         )
-                                        .on_hover_text("Double-click the handle to reset");
+                                        .on_hover_text("Drag to choose a preset · double-click to reset");
                                     if slider_handle_double_clicked(
-                                        ui,
-                                        &response,
-                                        self.detection_level as f64,
-                                        0.0,
-                                        4.0,
+                                        ui, &response, *value as f64, 0.0, 4.0,
                                     ) {
-                                        self.detection_level = 2;
+                                        *value = 2;
                                     }
                                 },
                             );
@@ -1803,35 +1918,37 @@ impl eframe::App for BlazeApp {
                                 "Normal",
                                 "Tight",
                             ];
-                            let selected_padding = match self.padding_level {
-                                0 => PaddingPreset::Comfortable,
-                                2 => PaddingPreset::Tight,
-                                _ => PaddingPreset::Normal,
-                            };
+                            let selected_padding_index = self.padding_level;
                             slider_control(
                                 ui,
                                 "Padding",
-                                &format!("{}ms L&R", selected_padding.milliseconds()),
+                                &mut self.padding_level,
                                 Some("Choose how much audio to preserve around each detected pause."),
-                                Some((&PADDING_LABELS, self.padding_level)),
-                                |ui| {
+                                Some((&PADDING_LABELS, selected_padding_index)),
+                                |ui, value| {
+                                    preset_value_field(
+                                        ui,
+                                        value,
+                                        &PADDING_MS_VALUES,
+                                        " ms",
+                                        86.0,
+                                        "Type a millisecond value to choose the nearest preset · ↑/↓ moves one preset",
+                                    );
+                                },
+                                |ui, value| {
                                     let response = ui
                                         .add_sized(
                                             [ui.available_width(), 32.0],
-                                            egui::Slider::new(&mut self.padding_level, 0..=2)
+                                            egui::Slider::new(value, 0..=2)
                                                 .step_by(1.0)
                                                 .show_value(false)
                                                 .trailing_fill(true),
                                         )
-                                        .on_hover_text("Double-click the handle to reset");
+                                        .on_hover_text("Drag to choose a preset · double-click to reset");
                                     if slider_handle_double_clicked(
-                                        ui,
-                                        &response,
-                                        self.padding_level as f64,
-                                        0.0,
-                                        2.0,
+                                        ui, &response, *value as f64, 0.0, 2.0,
                                     ) {
-                                        self.padding_level = 1;
+                                        *value = 1;
                                     }
                                 },
                             );
@@ -1840,30 +1957,29 @@ impl eframe::App for BlazeApp {
                             slider_control(
                                 ui,
                                 "Minimum Silence Duration",
-                                &format!("{} ms", self.minimum_silence_ms),
+                                &mut self.minimum_silence_ms,
                                 Some("Default is 300 ms."),
                                 None,
-                                |ui| {
+                                |ui, value| {
+                                    numeric_field_u32(
+                                        ui, value, 10, 10_000, 10.0, "", " ms", 86.0,
+                                        "Click to type · ↑/↓ changes by 10 ms",
+                                    );
+                                },
+                                |ui, value| {
                                     let response = ui
                                         .add_sized(
                                             [ui.available_width(), 30.0],
-                                            egui::Slider::new(
-                                                &mut self.minimum_silence_ms,
-                                                10..=10_000,
-                                            )
-                                            .suffix(" ms")
-                                            .show_value(false)
-                                            .trailing_fill(true),
+                                            egui::Slider::new(value, 10..=10_000)
+                                                .suffix(" ms")
+                                                .show_value(false)
+                                                .trailing_fill(true),
                                         )
-                                        .on_hover_text("Double-click the handle to reset");
+                                        .on_hover_text("Drag to adjust · double-click the handle to reset");
                                     if slider_handle_double_clicked(
-                                        ui,
-                                        &response,
-                                        self.minimum_silence_ms as f64,
-                                        10.0,
-                                        10_000.0,
+                                        ui, &response, *value as f64, 10.0, 10_000.0,
                                     ) {
-                                        self.minimum_silence_ms = 300;
+                                        *value = 300;
                                     }
                                 },
                             );
@@ -2472,37 +2588,88 @@ impl eframe::App for BlazeApp {
             egui::Window::new("Quick Help")
                 .collapsible(false)
                 .resizable(true)
-                .default_size(egui::vec2(720.0, 560.0))
-                .min_size(egui::vec2(540.0, 390.0))
+                .default_size(egui::vec2(820.0, 620.0))
+                .min_size(egui::vec2(660.0, 480.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .open(&mut self.show_help)
                 .show(ui.ctx(), |ui| {
+                    use egui::{FontFamily, FontId};
+
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
-                            ui.label(egui::RichText::new("BLAZE USER GUIDE").size(10.5).strong()
-                                .color(egui::Color32::from_rgb(255, 120, 96)));
-                            ui.heading("Quick Help");
-                            ui.label(egui::RichText::new("A practical guide to editing, navigating and exporting.")
-                                .size(12.0).color(ui.visuals().weak_text_color()));
+                            ui.label(
+                                egui::RichText::new("BLAZE REFERENCE")
+                                    .font(FontId::new(10.5, FontFamily::Proportional))
+                                    .strong()
+                                    .color(egui::Color32::from_rgb(255, 120, 96)),
+                            );
+                            ui.label(
+                                egui::RichText::new("Editing, navigation and export")
+                                    .font(FontId::new(19.0, FontFamily::Proportional))
+                                    .strong(),
+                            );
+                            ui.label(
+                                egui::RichText::new("A practical guide to the current workflow.")
+                                    .font(FontId::new(13.0, FontFamily::Proportional))
+                                    .color(ui.visuals().weak_text_color()),
+                            );
                         });
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                ui.label(
+                                    egui::RichText::new("CTRL + H")
+                                        .font(FontId::new(11.5, FontFamily::Monospace))
+                                        .color(ui.visuals().weak_text_color()),
+                                );
+                            },
+                        );
                     });
                     ui.add_space(10.0);
-
-                    ui.horizontal_wrapped(|ui| {
-                        for tab in [HelpTab::General, HelpTab::Blaze, HelpTab::Precision, HelpTab::Timeline, HelpTab::Export] {
-                            if ui.selectable_label(self.help_tab == tab,
-                                egui::RichText::new(tab.label()).size(12.5)).clicked() {
-                                self.help_tab = tab;
-                            }
-                        }
-                    });
                     ui.separator();
 
-                    egui::ScrollArea::vertical()
-                        .id_salt("quick-help-documentation")
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            ui.add_space(7.0);
+                    let body_height = ui.available_height();
+                    ui.horizontal(|ui| {
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(142.0, body_height),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                ui.add_space(8.0);
+                                ui.label(
+                                    egui::RichText::new("SECTIONS")
+                                        .font(FontId::new(10.5, FontFamily::Proportional))
+                                        .strong()
+                                        .color(ui.visuals().weak_text_color()),
+                                );
+                                ui.add_space(6.0);
+                                for tab in [
+                                    HelpTab::General,
+                                    HelpTab::Blaze,
+                                    HelpTab::Precision,
+                                    HelpTab::Timeline,
+                                    HelpTab::Export,
+                                ] {
+                                    if ui
+                                        .selectable_label(
+                                            self.help_tab == tab,
+                                            egui::RichText::new(tab.label())
+                                                .font(FontId::new(13.0, FontFamily::Proportional)),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.help_tab = tab;
+                                    }
+                                }
+                            },
+                        );
+                        ui.add_space(7.0);
+                        ui.separator();
+                        ui.vertical(|ui| {
+                            egui::ScrollArea::vertical()
+                                .id_salt("quick-help-documentation")
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    ui.add_space(2.0);
                             match self.help_tab {
                                 HelpTab::General => {
                                     help_card(ui, "Start with a video",
@@ -2511,6 +2678,8 @@ impl eframe::App for BlazeApp {
                                         "Blaze Mode aligns cut boundaries to usable video keyframes and supports stream-copy export. Precision Mode places boundaries at the current playback position without keyframe snapping.");
                                     help_card(ui, "Playback and review",
                                         "Use the preview transport to play, pause and seek. Skip Cuts can automatically jump over marked regions during playback; it does not remove or change those regions.");
+                                    help_card(ui, "Edit numeric values",
+                                        "Click a value field to type a number, then press Enter or click away to apply it. While focused, Up and Down adjust by its step (1 dB or 10 ms). Sliders remain available for direct adjustment.");
                                     ui.add_space(3.0);
                                     ui.label(egui::RichText::new("KEYBOARD SHORTCUTS").strong().size(11.0)
                                         .color(egui::Color32::from_rgb(255, 133, 105)));
@@ -2563,10 +2732,15 @@ impl eframe::App for BlazeApp {
                                         "A re-encoded video export for Precision Mode is not available yet and is shown as Coming Soon.");
                                 }
                             }
-                            ui.add_space(8.0);
-                            ui.label(egui::RichText::new("Press Ctrl + H at any time to reopen this guide.")
-                                .size(11.5).color(ui.visuals().weak_text_color()));
+                                    ui.add_space(10.0);
+                                    ui.label(
+                                        egui::RichText::new("Press Ctrl + H at any time to reopen this guide.")
+                                            .font(FontId::new(12.0, FontFamily::Proportional))
+                                            .color(ui.visuals().weak_text_color()),
+                                    );
+                                });
                         });
+                    });
                 });
         }
 
@@ -2706,7 +2880,7 @@ fn format_time_millis(seconds: f64) -> String {
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Blaze — Ankush Sarkar")
+            .with_title(APP_TITLE)
             .with_inner_size([1180.0, 760.0])
             .with_min_inner_size([820.0, 580.0]),
         renderer: eframe::Renderer::Glow,
@@ -2714,7 +2888,7 @@ fn main() -> eframe::Result {
     };
 
     eframe::run_native(
-        "Blaze — Ankush Sarkar",
+        APP_TITLE,
         options,
         Box::new(|cc| {
             let app = BlazeApp::new(cc)?;
