@@ -150,10 +150,7 @@ fn take_wheel_step(ui: &mut egui::Ui, response: &egui::Response) -> Option<f64> 
         }).sum();
         if delta.abs() <= f32::EPSILON { return None; }
 
-        // This control owns the vertical wheel gesture. Clear the smooth
-        // scroll delta before the parent Tools ScrollArea processes it.
-        input.smooth_scroll_delta.y = 0.0;
-
+        ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("tools-wheel-claimed"), true));
         Some(if delta < 0.0 { 1.0 } else { -1.0 })
     })
 }
@@ -620,6 +617,7 @@ struct BlazeApp {
     skip_cuts_enabled: bool,
     active_mode: Option<EditingMode>,
     active_tool_tab: ToolTab,
+    tools_scroll_offset: f32,
     show_help: bool,
     help_tab: HelpTab,
     pending_preview_fit: bool,
@@ -729,6 +727,7 @@ impl BlazeApp {
             skip_cuts_enabled: false,
             active_mode: None,
             active_tool_tab: ToolTab::ModeSelector,
+            tools_scroll_offset: 0.0,
             show_help: true,
             help_tab: HelpTab::General,
             pending_preview_fit: false,
@@ -1563,8 +1562,11 @@ impl eframe::App for BlazeApp {
                 });
                 ui.separator();
 
-                egui::ScrollArea::vertical()
+                ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("tools-wheel-claimed"), false));
+                let tools_scroll_output = egui::ScrollArea::vertical()
                     .id_salt("tools-content-scroll")
+                    .scroll_source(egui::scroll_area::ScrollSource::SCROLL_BAR)
+                    .vertical_scroll_offset(self.tools_scroll_offset)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.add_space(8.0);
@@ -2174,6 +2176,24 @@ impl eframe::App for BlazeApp {
                     }
                         }
                     });
+
+                let wheel_claimed = ui.ctx().data(|data| {
+                    data.get_temp::<bool>(egui::Id::new("tools-wheel-claimed")).unwrap_or(false)
+                });
+                let mut scroll_offset = tools_scroll_output.state.clamped_offset().y;
+                if !wheel_claimed {
+                    let (wheel_delta, pointer) = ui.input(|input| {
+                        (input.smooth_scroll_delta.y, input.pointer.hover_pos())
+                    });
+                    if pointer.is_some_and(|p| tools_scroll_output.inner_rect.contains(p))
+                        && wheel_delta.abs() > f32::EPSILON
+                    {
+                        let max_offset = (tools_scroll_output.content_size.y
+                            - tools_scroll_output.inner_rect.height()).max(0.0);
+                        scroll_offset = (scroll_offset - wheel_delta).clamp(0.0, max_offset);
+                    }
+                }
+                self.tools_scroll_offset = scroll_offset;
 
                 // Fill the remaining panel area after the scroll viewport.
                 ui.allocate_space(ui.available_size());
