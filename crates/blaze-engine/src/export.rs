@@ -579,6 +579,8 @@ mod tests {
             fps: Some(25.0),
             width: Some(1920),
             height: Some(1080),
+            video_codec: Some("h264".into()),
+            audio_codec: Some("aac".into()),
             has_audio: true,
             audio_channels: Some(2),
             audio_sample_rate: Some(48000),
