@@ -47,6 +47,34 @@ impl ToolTab {
 
 
 
+
+fn slider_handle_double_clicked(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    value: f64,
+    min: f64,
+    max: f64,
+) -> bool {
+    // egui Slider uses Sense::drag(), not Sense::click(), so its Response does
+    // not set the CLICKED flag required by Response::double_clicked().
+    // Inspect the pointer double-click directly and constrain it to the handle.
+    let rect = response.rect;
+    let radius = rect.height() / 2.5;
+    let travel = (rect.width() - 2.0 * radius).max(0.0);
+    let fraction = ((value - min) / (max - min)).clamp(0.0, 1.0) as f32;
+    let handle_center = egui::pos2(
+        rect.left() + radius + travel * fraction,
+        rect.center().y,
+    );
+
+    ui.input(|input| {
+        input.pointer.button_double_clicked(egui::PointerButton::Primary)
+            && input.pointer.interact_pos().is_some_and(|pointer| {
+                pointer.distance(handle_center) <= radius + 5.0
+            })
+    })
+}
+
 fn slider_control(
     ui: &mut egui::Ui,
     label: &str,
@@ -1460,7 +1488,7 @@ impl eframe::App for BlazeApp {
                                             .trailing_fill(true),
                                         )
                                         .on_hover_text("Double-click the handle to reset");
-                                    if response.double_clicked() {
+                                    if slider_handle_double_clicked(ui, &response, self.custom_threshold_db, 3.0, 60.0) {
                                         self.custom_threshold_db = reset_threshold;
                                     }
                                 },
@@ -1545,7 +1573,13 @@ impl eframe::App for BlazeApp {
                                                     .trailing_fill(true),
                                                 )
                                                 .on_hover_text("Double-click the handle to reset");
-                                            if response.double_clicked() {
+                                            if slider_handle_double_clicked(
+                                                ui,
+                                                &response,
+                                                self.custom_peak_ceiling_dbfs,
+                                                -90.0,
+                                                0.0,
+                                            ) {
                                                 self.custom_peak_ceiling_dbfs = -35.0;
                                             }
                                         });
@@ -1650,7 +1684,13 @@ impl eframe::App for BlazeApp {
                                         .trailing_fill(true),
                                     )
                                     .on_hover_text("Double-click the handle to reset");
-                                    if response.double_clicked() {
+                                    if slider_handle_double_clicked(
+                                        ui,
+                                        &response,
+                                        self.minimum_silence_ms as f64,
+                                        10.0,
+                                        10_000.0,
+                                    ) {
                                         self.minimum_silence_ms = 300;
                                     }
                                 },
@@ -1689,7 +1729,13 @@ impl eframe::App for BlazeApp {
                                                 .trailing_fill(true),
                                         )
                                         .on_hover_text("Double-click the handle to reset");
-                                    if response.double_clicked() {
+                                    if slider_handle_double_clicked(
+                                        ui,
+                                        &response,
+                                        self.detection_level as f64,
+                                        0.0,
+                                        4.0,
+                                    ) {
                                         self.detection_level = 2;
                                     }
                                 },
@@ -1722,7 +1768,13 @@ impl eframe::App for BlazeApp {
                                                 .trailing_fill(true),
                                         )
                                         .on_hover_text("Double-click the handle to reset");
-                                    if response.double_clicked() {
+                                    if slider_handle_double_clicked(
+                                        ui,
+                                        &response,
+                                        self.padding_level as f64,
+                                        0.0,
+                                        2.0,
+                                    ) {
                                         self.padding_level = 1;
                                     }
                                 },
@@ -1748,7 +1800,13 @@ impl eframe::App for BlazeApp {
                                             .trailing_fill(true),
                                         )
                                         .on_hover_text("Double-click the handle to reset");
-                                    if response.double_clicked() {
+                                    if slider_handle_double_clicked(
+                                        ui,
+                                        &response,
+                                        self.minimum_silence_ms as f64,
+                                        10.0,
+                                        10_000.0,
+                                    ) {
                                         self.minimum_silence_ms = 300;
                                     }
                                 },
