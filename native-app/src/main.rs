@@ -2864,42 +2864,25 @@ impl eframe::App for BlazeApp {
                 .show(ui.ctx(), |ui| {
                     use egui::{FontFamily, FontId};
 
-                    // Header: explain what this guide covers and keep the dismissal
-                    // shortcut visible without making it compete with the content.
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.label(
-                                egui::RichText::new("BLAZE GUIDE")
-                                    .font(FontId::new(10.5, FontFamily::Proportional))
-                                    .strong()
-                                    .color(egui::Color32::from_rgb(255, 120, 96)),
-                            );
-                            ui.label(
-                                egui::RichText::new("Edit a video from start to finish")
-                                    .font(FontId::new(20.0, FontFamily::Proportional))
-                                    .strong(),
-                            );
-                            ui.label(
-                                egui::RichText::new("Import footage, mark cut ranges with S and D, detect silent pauses, then export a video or editable timeline.")
-                                    .font(FontId::new(12.5, FontFamily::Proportional))
-                                    .color(ui.visuals().weak_text_color()),
-                            );
-                        });
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            egui::Frame::new()
-                                .fill(egui::Color32::from_rgb(16, 18, 20))
-                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 47, 52)))
-                                .corner_radius(egui::CornerRadius::same(5))
-                                .inner_margin(egui::Margin::symmetric(10, 6))
-                                .show(ui, |ui| {
-                                    ui.label(
-                                        egui::RichText::new("Ctrl + H")
-                                            .font(FontId::new(11.5, FontFamily::Monospace))
-                                            .strong()
-                                            .color(egui::Color32::from_rgb(255, 143, 119)),
-                                    );
-                                });
-                        });
+                    ui.vertical_centered(|ui| {
+                        ui.label(
+                            egui::RichText::new("BLAZE GUIDE")
+                                .font(FontId::new(10.5, FontFamily::Proportional))
+                                .strong()
+                                .color(egui::Color32::from_rgb(255, 120, 96)),
+                        );
+                        ui.add_space(3.0);
+                        ui.label(
+                            egui::RichText::new("Cut the pauses. Keep the moments that matter.")
+                                .font(FontId::new(20.0, FontFamily::Proportional))
+                                .strong(),
+                        );
+                        ui.add_space(3.0);
+                        ui.label(
+                            egui::RichText::new("Learn to mark edits, fine-tune silence detection, navigate the timeline and export your cuts.")
+                                .font(FontId::new(12.5, FontFamily::Proportional))
+                                .color(ui.visuals().weak_text_color()),
+                        );
                     });
                     ui.add_space(10.0);
                     ui.separator();
