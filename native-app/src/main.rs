@@ -811,7 +811,7 @@ impl BlazeApp {
             active_mode: None,
             active_tool_tab: ToolTab::ModeSelector,
             show_help: true,
-            help_tab: HelpTab::General,
+            help_tab: HelpTab::Guide,
             pending_preview_fit: false,
         })
     }
