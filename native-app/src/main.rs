@@ -2054,19 +2054,18 @@ impl eframe::App for BlazeApp {
                         };
                         let detect_response = ui.add_enabled(
                             can_detect,
-                            egui::Button::new("")
-                                .min_size(egui::vec2(ui.available_width(), 40.0)),
-                        );
-                        ui.painter().text(
-                            detect_response.rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            detect_label,
-                            egui::FontId::proportional(14.0),
-                            if can_detect {
-                                ui.visuals().text_color()
-                            } else {
-                                ui.visuals().weak_text_color()
-                            },
+                            egui::Button::new(
+                                egui::RichText::new(detect_label)
+                                    .size(14.0)
+                                    .strong()
+                                    .color(egui::Color32::from_rgb(255, 246, 241)),
+                            )
+                            .fill(egui::Color32::from_rgb(154, 61, 42))
+                            .stroke(egui::Stroke::new(
+                                1.0,
+                                egui::Color32::from_rgb(205, 91, 66),
+                            ))
+                            .min_size(egui::vec2(ui.available_width(), 40.0)),
                         );
                         if detect_response.clicked() {
                             self.start_silence_detection(ui.ctx());
