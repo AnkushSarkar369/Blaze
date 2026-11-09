@@ -609,6 +609,7 @@ struct BlazeApp {
     expert_mode: bool,
     custom_padding_before_ms: u32,
     custom_padding_after_ms: u32,
+    padding_linked: bool,
     custom_threshold_db: f64,
     custom_peak_gate_enabled: bool,
     custom_peak_ceiling_dbfs: f64,
@@ -718,6 +719,7 @@ impl BlazeApp {
             expert_mode: false,
             custom_padding_before_ms: 60,
             custom_padding_after_ms: 60,
+            padding_linked: false,
             custom_threshold_db: 22.0,
             custom_peak_gate_enabled: false,
             custom_peak_ceiling_dbfs: -35.0,
@@ -1797,65 +1799,104 @@ impl eframe::App for BlazeApp {
                                 });
 
                             ui.add_space(14.0);
-                            slider_control(
-                                ui,
-                                "Left Padding",
-                                &mut self.custom_padding_before_ms,
-                                Some("Preserve audio before each detected silence · double-click to reset"),
-                                None,
-                                |ui, value| {
-                                    numeric_field_u32(
-                                        ui, value, 0, 2000, 10.0, "L ", " ms", 86.0,
-                                        "Left padding · ↑/↓ changes by 10 ms",
-                                    );
-                                },
-                                |ui, value| {
-                                    let response = ui.add_sized(
-                                        [ui.available_width(), 30.0],
-                                        egui::Slider::new(value, 0..=2000)
-                                            .suffix(" ms")
-                                            .show_value(false)
-                                            .trailing_fill(true),
-                                    );
-                                    if slider_handle_double_clicked(ui, &response, *value as f64, 0.0, 2000.0) {
-                                        *value = 60;
-                                    } else if let Some(direction) = take_wheel_step(ui, &response) {
-                                        let next = *value as f64 + direction * 10.0;
-                                        *value = next.round().clamp(0.0, 2000.0) as u32;
-                                    }
-                                },
-                            );
+                            egui::Frame::new()
+                                .fill(egui::Color32::from_rgb(23, 25, 28))
+                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 46, 50)))
+                                .corner_radius(egui::CornerRadius::same(7))
+                                .inner_margin(egui::Margin::symmetric(12, 8))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new("Padding").strong().size(13.0));
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            let link = ui.add(
+                                                egui::Button::new(if self.padding_linked { "⛓ Linked" } else { "⛓" })
+                                                    .selected(self.padding_linked)
+                                                    .small(),
+                                            ).on_hover_text(if self.padding_linked {
+                                                "Unlink left and right padding"
+                                            } else {
+                                                "Link left and right padding to one master control"
+                                            });
+                                            if link.clicked() {
+                                                self.padding_linked = !self.padding_linked;
+                                                if self.padding_linked {
+                                                    self.custom_padding_after_ms = self.custom_padding_before_ms;
+                                                }
+                                            }
+                                        });
+                                    });
+                                    ui.add_space(2.0);
+                                    ui.label(egui::RichText::new("Preserve audio around detected silence")
+                                        .size(11.5).color(ui.visuals().weak_text_color()));
+                                    ui.add_space(8.0);
 
-                            ui.add_space(10.0);
-                            slider_control(
-                                ui,
-                                "Right Padding",
-                                &mut self.custom_padding_after_ms,
-                                Some("Preserve audio after each detected silence · double-click to reset"),
-                                None,
-                                |ui, value| {
-                                    numeric_field_u32(
-                                        ui, value, 0, 2000, 10.0, "R ", " ms", 86.0,
-                                        "Right padding · ↑/↓ changes by 10 ms",
-                                    );
-                                },
-                                |ui, value| {
-                                    let response = ui.add_sized(
-                                        [ui.available_width(), 30.0],
-                                        egui::Slider::new(value, 0..=2000)
-                                            .suffix(" ms")
-                                            .show_value(false)
-                                            .trailing_fill(true),
-                                    );
-                                    if slider_handle_double_clicked(ui, &response, *value as f64, 0.0, 2000.0) {
-                                        *value = 60;
-                                    } else if let Some(direction) = take_wheel_step(ui, &response) {
-                                        let next = *value as f64 + direction * 10.0;
-                                        *value = next.round().clamp(0.0, 2000.0) as u32;
-                                    }
-                                },
-                            );
+                                    if self.padding_linked {
+                                        ui.horizontal(|ui| {
+                                            ui.label(egui::RichText::new("L / R").strong().size(12.0));
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                numeric_field_u32(ui, &mut self.custom_padding_before_ms,
+                                                    0, 2000, 10.0, "", " ms", 86.0,
+                                                    "Linked left and right padding · ↑/↓ changes by 10 ms");
+                                            });
+                                        });
+                                        ui.add_space(3.0);
+                                        let response = ui.add_sized(
+                                            [ui.available_width(), 30.0],
+                                            egui::Slider::new(&mut self.custom_padding_before_ms, 0..=2000)
+                                                .suffix(" ms").show_value(false).trailing_fill(true),
+                                        );
+                                        if slider_handle_double_clicked(ui, &response, self.custom_padding_before_ms as f64, 0.0, 2000.0) {
+                                            self.custom_padding_before_ms = 60;
+                                        } else if let Some(direction) = take_wheel_step(ui, &response) {
+                                            let next = self.custom_padding_before_ms as f64 + direction * 10.0;
+                                            self.custom_padding_before_ms = next.round().clamp(0.0, 2000.0) as u32;
+                                        }
+                                        self.custom_padding_after_ms = self.custom_padding_before_ms;
+                                    } else {
+                                        ui.horizontal(|ui| {
+                                            ui.label(egui::RichText::new("L").strong().size(12.0));
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                numeric_field_u32(ui, &mut self.custom_padding_before_ms,
+                                                    0, 2000, 10.0, "", " ms", 86.0,
+                                                    "Left padding · ↑/↓ changes by 10 ms");
+                                            });
+                                        });
+                                        ui.add_space(2.0);
+                                        let left_response = ui.add_sized(
+                                            [ui.available_width(), 26.0],
+                                            egui::Slider::new(&mut self.custom_padding_before_ms, 0..=2000)
+                                                .suffix(" ms").show_value(false).trailing_fill(true),
+                                        );
+                                        if slider_handle_double_clicked(ui, &left_response, self.custom_padding_before_ms as f64, 0.0, 2000.0) {
+                                            self.custom_padding_before_ms = 60;
+                                        } else if let Some(direction) = take_wheel_step(ui, &left_response) {
+                                            let next = self.custom_padding_before_ms as f64 + direction * 10.0;
+                                            self.custom_padding_before_ms = next.round().clamp(0.0, 2000.0) as u32;
+                                        }
 
+                                        ui.add_space(6.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label(egui::RichText::new("R").strong().size(12.0));
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                numeric_field_u32(ui, &mut self.custom_padding_after_ms,
+                                                    0, 2000, 10.0, "", " ms", 86.0,
+                                                    "Right padding · ↑/↓ changes by 10 ms");
+                                            });
+                                        });
+                                        ui.add_space(2.0);
+                                        let right_response = ui.add_sized(
+                                            [ui.available_width(), 26.0],
+                                            egui::Slider::new(&mut self.custom_padding_after_ms, 0..=2000)
+                                                .suffix(" ms").show_value(false).trailing_fill(true),
+                                        );
+                                        if slider_handle_double_clicked(ui, &right_response, self.custom_padding_after_ms as f64, 0.0, 2000.0) {
+                                            self.custom_padding_after_ms = 60;
+                                        } else if let Some(direction) = take_wheel_step(ui, &right_response) {
+                                            let next = self.custom_padding_after_ms as f64 + direction * 10.0;
+                                            self.custom_padding_after_ms = next.round().clamp(0.0, 2000.0) as u32;
+                                        }
+                                    }
+                                });
                             ui.add_space(14.0);
                             slider_control(
                                 ui,
