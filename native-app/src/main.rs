@@ -163,7 +163,8 @@ fn numeric_field_scope(
     add_field: impl FnOnce(&mut egui::Ui),
 ) {
     ui.scope(|ui| {
-        ui.set_width(width);
+        // Reserve room for the Up/Down keycaps without shrinking the value field.
+        ui.set_width(width + 20.0);
         let style = ui.style_mut();
         style.spacing.item_spacing.x = 0.0;
         style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(27, 29, 32);
@@ -176,6 +177,18 @@ fn numeric_field_scope(
         style.visuals.widgets.active.bg_stroke =
             egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 104, 79));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.vertical_centered(|ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                ui.add(
+                    egui::Image::new(egui::include_image!("../assets/key-up.svg"))
+                        .fit_to_exact_size(egui::vec2(12.0, 12.0)),
+                );
+                ui.add(
+                    egui::Image::new(egui::include_image!("../assets/key-down.svg"))
+                        .fit_to_exact_size(egui::vec2(12.0, 12.0)),
+                );
+            });
+            ui.add_space(4.0);
             add_field(ui);
         });
     });
@@ -349,6 +362,65 @@ fn slider_control<T>(
         });
 }
 
+fn padding_control_row(
+    ui: &mut egui::Ui,
+    side: &str,
+    icon: egui::Image<'static>,
+    value: &mut u32,
+    tooltip: &str,
+) {
+    ui.horizontal(|row| {
+        let (badge_rect, _) =
+            row.allocate_exact_size(egui::vec2(22.0, 26.0), egui::Sense::hover());
+        row.painter().rect_filled(
+            badge_rect,
+            egui::CornerRadius::same(5),
+            egui::Color32::from_rgb(31, 34, 37),
+        );
+        row.painter().rect_stroke(
+            badge_rect,
+            egui::CornerRadius::same(5),
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(54, 58, 63)),
+            egui::StrokeKind::Inside,
+        );
+        row.painter().text(
+            badge_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            side,
+            egui::FontId::proportional(11.5),
+            egui::Color32::from_rgb(220, 223, 226),
+        );
+
+        row.add(
+            icon.fit_to_exact_size(egui::vec2(16.0, 16.0)),
+        );
+        let field_width = 84.0; // 64 px value field + 20 px arrow-key hints
+        let slider_width = (row.available_width() - field_width - 8.0).max(48.0);
+        row.scope(|slider_ui| {
+            slider_ui.spacing_mut().slider_width = slider_width;
+            let response = slider_ui
+                .add_sized(
+                    [slider_width, 26.0],
+                    egui::Slider::new(value, 0..=2000)
+                        .suffix(" ms")
+                        .show_value(false)
+                        .trailing_fill(true),
+                )
+                .on_hover_text("Drag to adjust · double-click to reset");
+            if slider_handle_double_clicked(slider_ui, &response, *value as f64, 0.0, 2000.0) {
+                *value = 60;
+            } else if let Some(direction) = take_wheel_step(slider_ui, &response) {
+                let next = *value as f64 + direction * 10.0;
+                *value = next.round().clamp(0.0, 2000.0) as u32;
+            }
+        });
+        row.add_space(4.0);
+        numeric_field_u32(
+            row, value, 0, 2000, 10.0, "", " ms", 64.0, tooltip,
+        );
+    });
+}
+
 fn mode_selection_card(
     ui: &mut egui::Ui,
     title: &str,
@@ -413,84 +485,17 @@ fn mode_selection_card(
     let group_width = 28.0 + 10.0 + title_galley.size().x;
     let group_left = rect.center().x - group_width * 0.5;
     let icon_center = egui::pos2(group_left + 14.0, rect.top() + card_height * 0.36);
-    let icon_stroke = egui::Stroke::new(1.7, icon_color);
-
-    match icon {
-        ModeCardIcon::Blaze => {
-            // A pair of forward-cut chevrons: speed, decisiveness and stream-copy flow.
-            let chevron = |offset_x: f32| {
-                vec![
-                    icon_center + egui::vec2(offset_x - 5.0, -8.0),
-                    icon_center + egui::vec2(offset_x + 1.0, 0.0),
-                    icon_center + egui::vec2(offset_x - 5.0, 8.0),
-                    icon_center + egui::vec2(offset_x - 1.0, 8.0),
-                    icon_center + egui::vec2(offset_x + 6.0, 0.0),
-                    icon_center + egui::vec2(offset_x - 1.0, -8.0),
-                ]
-            };
-            painter.add(egui::Shape::convex_polygon(
-                chevron(-5.0),
-                icon_color,
-                egui::Stroke::NONE,
-            ));
-            painter.add(egui::Shape::convex_polygon(
-                chevron(6.0),
-                icon_color,
-                egui::Stroke::NONE,
-            ));
-            painter.line_segment(
-                [
-                    icon_center + egui::vec2(-13.0, -5.0),
-                    icon_center + egui::vec2(-13.0, 5.0),
-                ],
-                egui::Stroke::new(1.5, icon_color),
-            );
-        }
-        ModeCardIcon::Precision => {
-            // Registration brackets, a measured centre ring and a precise target point.
-            let outer = 11.0;
-            let arm = 5.0;
-            for sx in [-1.0_f32, 1.0] {
-                for sy in [-1.0_f32, 1.0] {
-                    let corner = icon_center + egui::vec2(sx * outer, sy * outer);
-                    painter.line_segment(
-                        [
-                            corner,
-                            corner + egui::vec2(-sx * arm, 0.0),
-                        ],
-                        icon_stroke,
-                    );
-                    painter.line_segment(
-                        [
-                            corner,
-                            corner + egui::vec2(0.0, -sy * arm),
-                        ],
-                        icon_stroke,
-                    );
-                }
-            }
-            painter.circle_stroke(
-                icon_center,
-                5.0,
-                egui::Stroke::new(1.6, icon_color),
-            );
-            painter.circle_filled(icon_center, 1.7, icon_color);
-            painter.line_segment(
-                [
-                    icon_center + egui::vec2(-2.5, 0.0),
-                    icon_center + egui::vec2(2.5, 0.0),
-                ],
-                egui::Stroke::new(1.0, icon_color),
-            );
-            painter.line_segment(
-                [
-                    icon_center + egui::vec2(0.0, -2.5),
-                    icon_center + egui::vec2(0.0, 2.5),
-                ],
-                egui::Stroke::new(1.0, icon_color),
-            );
-        }
-    }
+    let icon_source = match icon {
+        ModeCardIcon::Blaze => egui::include_image!("../assets/blaze-mark.svg"),
+        ModeCardIcon::Precision => egui::include_image!("../assets/precision-target.svg"),
+    };
+    egui::Image::new(icon_source)
+        .fit_to_exact_size(egui::vec2(25.0, 25.0))
+        .tint(icon_color)
+        .paint_at(
+            ui,
+            egui::Rect::from_center_size(icon_center, egui::vec2(25.0, 25.0)),
+        );
 
     painter.galley(
         egui::pos2(
@@ -641,6 +646,8 @@ impl BlazeApp {
     fn new(
         cc: &eframe::CreationContext<'_>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        egui_extras::install_image_loaders(&cc.egui_ctx);
+
         // Keep native window decorations in the same dark theme as the app.
         cc.egui_ctx.set_theme(egui::Theme::Dark);
         cc.egui_ctx.send_viewport_cmd(
@@ -1680,7 +1687,7 @@ impl eframe::App for BlazeApp {
                                 |ui, value| {
                                     numeric_field_f64(
                                         ui, value, 3.0, 60.0, 1.0, 1, " dB", 82.0,
-                                        "Click to type · ↑/↓ changes by 1 dB",
+                                        "Click to type · Arrow Up/Arrow Down changes by 1 dB",
                                     );
                                 },
                                 |ui, value| {
@@ -1730,7 +1737,7 @@ impl eframe::App for BlazeApp {
                                                     1,
                                                     " dBFS",
                                                     96.0,
-                                                    "Click to type · ↑/↓ changes by 1 dB",
+                                                    "Click to type · Arrow Up/Arrow Down changes by 1 dB",
                                                 );
                                             },
                                         );
@@ -1803,15 +1810,22 @@ impl eframe::App for BlazeApp {
                                 .fill(egui::Color32::from_rgb(23, 25, 28))
                                 .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 46, 50)))
                                 .corner_radius(egui::CornerRadius::same(7))
-                                .inner_margin(egui::Margin::symmetric(12, 8))
+                                .inner_margin(egui::Margin::symmetric(12, 10))
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
                                         ui.label(egui::RichText::new("Padding").strong().size(13.0));
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            let link_icon = if self.padding_linked {
+                                                egui::Image::new(egui::include_image!("../assets/link.svg"))
+                                                    .tint(egui::Color32::from_rgb(255, 132, 108))
+                                            } else {
+                                                egui::Image::new(egui::include_image!("../assets/unlink.svg"))
+                                                    .tint(egui::Color32::from_rgb(176, 181, 186))
+                                            };
                                             let link = ui.add(
-                                                egui::Button::new(if self.padding_linked { "⛓ Linked" } else { "⛓" })
-                                                    .selected(self.padding_linked)
-                                                    .small(),
+                                                egui::Button::new(link_icon.fit_to_exact_size(egui::vec2(16.0, 16.0)))
+                                                    .min_size(egui::vec2(34.0, 28.0))
+                                                    .selected(self.padding_linked),
                                             ).on_hover_text(if self.padding_linked {
                                                 "Unlink left and right padding"
                                             } else {
@@ -1826,75 +1840,38 @@ impl eframe::App for BlazeApp {
                                         });
                                     });
                                     ui.add_space(2.0);
-                                    ui.label(egui::RichText::new("Preserve audio around detected silence")
-                                        .size(11.5).color(ui.visuals().weak_text_color()));
-                                    ui.add_space(8.0);
+                                    ui.label(
+                                        egui::RichText::new("Preserve audio around detected silence")
+                                            .size(11.5)
+                                            .color(ui.visuals().weak_text_color()),
+                                    );
+                                    ui.add_space(10.0);
 
                                     if self.padding_linked {
-                                        ui.horizontal(|ui| {
-                                            ui.label(egui::RichText::new("L / R").strong().size(12.0));
-                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                numeric_field_u32(ui, &mut self.custom_padding_before_ms,
-                                                    0, 2000, 10.0, "", " ms", 86.0,
-                                                    "Linked left and right padding · ↑/↓ changes by 10 ms");
-                                            });
-                                        });
-                                        ui.add_space(3.0);
-                                        let response = ui.add_sized(
-                                            [ui.available_width(), 30.0],
-                                            egui::Slider::new(&mut self.custom_padding_before_ms, 0..=2000)
-                                                .suffix(" ms").show_value(false).trailing_fill(true),
+                                        padding_control_row(
+                                            ui,
+                                            "L/R",
+                                            egui::Image::new(egui::include_image!("../assets/padding-both.svg")),
+                                            &mut self.custom_padding_before_ms,
+                                            "Linked left and right padding · Arrow Up/Arrow Down changes by 10 ms",
                                         );
-                                        if slider_handle_double_clicked(ui, &response, self.custom_padding_before_ms as f64, 0.0, 2000.0) {
-                                            self.custom_padding_before_ms = 60;
-                                        } else if let Some(direction) = take_wheel_step(ui, &response) {
-                                            let next = self.custom_padding_before_ms as f64 + direction * 10.0;
-                                            self.custom_padding_before_ms = next.round().clamp(0.0, 2000.0) as u32;
-                                        }
                                         self.custom_padding_after_ms = self.custom_padding_before_ms;
                                     } else {
-                                        ui.horizontal(|ui| {
-                                            ui.label(egui::RichText::new("L").strong().size(12.0));
-                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                numeric_field_u32(ui, &mut self.custom_padding_before_ms,
-                                                    0, 2000, 10.0, "", " ms", 86.0,
-                                                    "Left padding · ↑/↓ changes by 10 ms");
-                                            });
-                                        });
-                                        ui.add_space(2.0);
-                                        let left_response = ui.add_sized(
-                                            [ui.available_width(), 26.0],
-                                            egui::Slider::new(&mut self.custom_padding_before_ms, 0..=2000)
-                                                .suffix(" ms").show_value(false).trailing_fill(true),
+                                        padding_control_row(
+                                            ui,
+                                            "L",
+                                            egui::Image::new(egui::include_image!("../assets/padding-left.svg")),
+                                            &mut self.custom_padding_before_ms,
+                                            "Left padding · Arrow Up/Arrow Down changes by 10 ms",
                                         );
-                                        if slider_handle_double_clicked(ui, &left_response, self.custom_padding_before_ms as f64, 0.0, 2000.0) {
-                                            self.custom_padding_before_ms = 60;
-                                        } else if let Some(direction) = take_wheel_step(ui, &left_response) {
-                                            let next = self.custom_padding_before_ms as f64 + direction * 10.0;
-                                            self.custom_padding_before_ms = next.round().clamp(0.0, 2000.0) as u32;
-                                        }
-
-                                        ui.add_space(6.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label(egui::RichText::new("R").strong().size(12.0));
-                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                numeric_field_u32(ui, &mut self.custom_padding_after_ms,
-                                                    0, 2000, 10.0, "", " ms", 86.0,
-                                                    "Right padding · ↑/↓ changes by 10 ms");
-                                            });
-                                        });
-                                        ui.add_space(2.0);
-                                        let right_response = ui.add_sized(
-                                            [ui.available_width(), 26.0],
-                                            egui::Slider::new(&mut self.custom_padding_after_ms, 0..=2000)
-                                                .suffix(" ms").show_value(false).trailing_fill(true),
+                                        ui.add_space(10.0);
+                                        padding_control_row(
+                                            ui,
+                                            "R",
+                                            egui::Image::new(egui::include_image!("../assets/padding-right.svg")),
+                                            &mut self.custom_padding_after_ms,
+                                            "Right padding · Arrow Up/Arrow Down changes by 10 ms",
                                         );
-                                        if slider_handle_double_clicked(ui, &right_response, self.custom_padding_after_ms as f64, 0.0, 2000.0) {
-                                            self.custom_padding_after_ms = 60;
-                                        } else if let Some(direction) = take_wheel_step(ui, &right_response) {
-                                            let next = self.custom_padding_after_ms as f64 + direction * 10.0;
-                                            self.custom_padding_after_ms = next.round().clamp(0.0, 2000.0) as u32;
-                                        }
                                     }
                                 });
                             ui.add_space(14.0);
@@ -1907,7 +1884,7 @@ impl eframe::App for BlazeApp {
                                 |ui, value| {
                                     numeric_field_u32(
                                         ui, value, 10, 10_000, 10.0, "", " ms", 86.0,
-                                        "Click to type · ↑/↓ changes by 10 ms",
+                                        "Click to type · Arrow Up/Arrow Down changes by 10 ms",
                                     );
                                 },
                                 |ui, value| {
@@ -1951,7 +1928,7 @@ impl eframe::App for BlazeApp {
                                         &DETECTION_DB_VALUES,
                                         " dB",
                                         82.0,
-                                        "Type a dB value to choose the nearest preset · ↑/↓ moves one preset",
+                                        "Type a dB value to choose the nearest preset · Arrow Up/Arrow Down moves one preset",
                                     );
                                 },
                                 |ui, value| {
@@ -1995,7 +1972,7 @@ impl eframe::App for BlazeApp {
                                         &PADDING_MS_VALUES,
                                         " ms",
                                         86.0,
-                                        "Type a millisecond value to choose the nearest preset · ↑/↓ moves one preset",
+                                        "Type a millisecond value to choose the nearest preset · Arrow Up/Arrow Down moves one preset",
                                     );
                                 },
                                 |ui, value| {
@@ -2029,7 +2006,7 @@ impl eframe::App for BlazeApp {
                                 |ui, value| {
                                     numeric_field_u32(
                                         ui, value, 10, 10_000, 10.0, "", " ms", 86.0,
-                                        "Click to type · ↑/↓ changes by 10 ms",
+                                        "Click to type · Arrow Up/Arrow Down changes by 10 ms",
                                     );
                                 },
                                 |ui, value| {
