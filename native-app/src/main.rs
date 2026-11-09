@@ -1824,7 +1824,7 @@ impl eframe::App for BlazeApp {
                                                     .tint(egui::Color32::from_rgb(176, 181, 186))
                                             };
                                             let link = ui.add(
-                                                egui::Button::new(link_icon.fit_to_exact_size(egui::vec2(16.0, 16.0)))
+                                                egui::Button::image(link_icon.fit_to_exact_size(egui::vec2(16.0, 16.0)))
                                                     .min_size(egui::vec2(34.0, 28.0))
                                                     .selected(self.padding_linked),
                                             ).on_hover_text(if self.padding_linked {
