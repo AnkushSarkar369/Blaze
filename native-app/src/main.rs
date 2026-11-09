@@ -96,59 +96,121 @@ fn help_section_label(ui: &mut egui::Ui, label: &str) {
 
 fn help_card(ui: &mut egui::Ui, title: &str, description: &str) {
     use egui::{FontFamily, FontId};
-    egui::Frame::new()
-        .fill(egui::Color32::from_rgb(19, 21, 24))
-        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 47, 52)))
-        .corner_radius(egui::CornerRadius::same(7))
-        .inner_margin(egui::Margin::symmetric(12, 10))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.label(
-                egui::RichText::new(title)
-                    .font(FontId::new(13.5, FontFamily::Proportional))
-                    .strong()
-                    .underline()
-                    .color(egui::Color32::from_rgb(239, 241, 243)),
-            );
-            ui.add_space(5.0);
-            ui.label(
-                egui::RichText::new(description)
-                    .font(FontId::new(12.5, FontFamily::Proportional))
-                    .color(egui::Color32::from_rgb(177, 182, 188)),
-            );
-        });
+
+    let width = ui.available_width().max(120.0);
+    let left_pad = 12.0;
+    let right_pad = 12.0;
+    let top_pad = 10.0;
+    let bottom_pad = 10.0;
+    let title_font = FontId::new(13.5, FontFamily::Proportional);
+    let description_font = FontId::new(12.5, FontFamily::Proportional);
+    let title_color = egui::Color32::from_rgb(239, 241, 243);
+    let description_color = egui::Color32::from_rgb(177, 182, 188);
+
+    let title_galley = ui.painter().layout_no_wrap(
+        title.to_owned(),
+        title_font,
+        title_color,
+    );
+    let description_galley = ui.painter().layout(
+        description.to_owned(),
+        description_font,
+        description_color,
+        (width - left_pad - right_pad).max(80.0),
+    );
+    let gap = 5.0;
+    let height = top_pad
+        + title_galley.size().y.max(18.0)
+        + gap
+        + description_galley.size().y
+        + bottom_pad;
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(width, height),
+        egui::Sense::hover(),
+    );
+
+    let painter = ui.painter();
+    painter.rect_filled(
+        rect,
+        egui::CornerRadius::same(7),
+        egui::Color32::from_rgb(19, 21, 24),
+    );
+    painter.rect_stroke(
+        rect,
+        egui::CornerRadius::same(7),
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 47, 52)),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(
+        egui::pos2(rect.left() + left_pad, rect.top() + top_pad),
+        title_galley,
+        title_color,
+    );
+    painter.galley(
+        egui::pos2(
+            rect.left() + left_pad,
+            rect.top() + top_pad + 18.0 + gap,
+        ),
+        description_galley,
+        description_color,
+    );
     ui.add_space(7.0);
 }
 
 fn help_shortcut(ui: &mut egui::Ui, key: &str, description: &str) {
     use egui::{FontFamily, FontId};
-    egui::Frame::new()
-        .fill(egui::Color32::from_rgb(16, 18, 20))
-        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 47, 52)))
-        .corner_radius(egui::CornerRadius::same(6))
-        .inner_margin(egui::Margin::symmetric(10, 7))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.add_sized(
-                    [126.0, 22.0],
-                    egui::Label::new(
-                        egui::RichText::new(key)
-                            .font(FontId::new(12.0, FontFamily::Monospace))
-                            .strong()
-                            .underline()
-                            .color(egui::Color32::from_rgb(255, 143, 119)),
-                    ),
-                );
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new(description)
-                        .font(FontId::new(12.5, FontFamily::Proportional))
-                        .color(ui.visuals().text_color()),
-                );
-            });
-        })
-        .response;
+
+    let width = ui.available_width().max(120.0);
+    let left_pad = 12.0;
+    let right_pad = 12.0;
+    let key_column_width = 112.0;
+    let column_gap = 12.0;
+    let description_width =
+        (width - left_pad - right_pad - key_column_width - column_gap).max(80.0);
+    let description_font = FontId::new(12.5, FontFamily::Proportional);
+    let description_color = ui.visuals().text_color();
+    let description_galley = ui.painter().layout(
+        description.to_owned(),
+        description_font,
+        description_color,
+        description_width,
+    );
+    let row_height = description_galley.size().y.max(20.0) + 16.0;
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(width, row_height),
+        egui::Sense::hover(),
+    );
+
+    let painter = ui.painter();
+    painter.rect_filled(
+        rect,
+        egui::CornerRadius::same(6),
+        egui::Color32::from_rgb(16, 18, 20),
+    );
+    painter.rect_stroke(
+        rect,
+        egui::CornerRadius::same(6),
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 47, 52)),
+        egui::StrokeKind::Inside,
+    );
+    painter.text(
+        egui::pos2(
+            rect.left() + left_pad + key_column_width * 0.5,
+            rect.center().y,
+        ),
+        egui::Align2::CENTER_CENTER,
+        key,
+        FontId::new(12.0, FontFamily::Monospace),
+        egui::Color32::from_rgb(255, 143, 119),
+    );
+    painter.galley(
+        egui::pos2(
+            rect.left() + left_pad + key_column_width + column_gap,
+            rect.center().y - description_galley.size().y * 0.5,
+        ),
+        description_galley,
+        description_color,
+    );
     ui.add_space(5.0);
 }
 
@@ -2795,8 +2857,8 @@ impl eframe::App for BlazeApp {
             egui::Window::new("Quick Help")
                 .collapsible(false)
                 .resizable(true)
-                .default_size(egui::vec2(940.0, 700.0))
-                .min_size(egui::vec2(760.0, 540.0))
+                .default_size(egui::vec2(940.0, 680.0))
+                .min_size(egui::vec2(860.0, 580.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .open(&mut self.show_help)
                 .show(ui.ctx(), |ui| {
@@ -2813,18 +2875,30 @@ impl eframe::App for BlazeApp {
                                     .color(egui::Color32::from_rgb(255, 120, 96)),
                             );
                             ui.label(
-                                egui::RichText::new("Learn the workflow. Find every control.")
+                                egui::RichText::new("Edit a video from start to finish")
                                     .font(FontId::new(20.0, FontFamily::Proportional))
                                     .strong(),
                             );
                             ui.label(
-                                egui::RichText::new("A practical reference for editing, silence detection, timeline navigation and export.")
+                                egui::RichText::new("Import footage, mark cut ranges with S and D, detect silent pauses, then export a video or editable timeline.")
                                     .font(FontId::new(12.5, FontFamily::Proportional))
                                     .color(ui.visuals().weak_text_color()),
                             );
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            help_shortcut(ui, "Ctrl + H", "Toggle this guide");
+                            egui::Frame::new()
+                                .fill(egui::Color32::from_rgb(16, 18, 20))
+                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 47, 52)))
+                                .corner_radius(egui::CornerRadius::same(5))
+                                .inner_margin(egui::Margin::symmetric(10, 6))
+                                .show(ui, |ui| {
+                                    ui.label(
+                                        egui::RichText::new("Ctrl + H")
+                                            .font(FontId::new(11.5, FontFamily::Monospace))
+                                            .strong()
+                                            .color(egui::Color32::from_rgb(255, 143, 119)),
+                                    );
+                                });
                         });
                     });
                     ui.add_space(10.0);
@@ -2852,17 +2926,45 @@ impl eframe::App for BlazeApp {
                                     HelpTab::Export,
                                 ] {
                                     let selected = self.help_tab == tab;
-                                    let label = egui::RichText::new(tab.label())
-                                        .font(FontId::new(13.0, FontFamily::Proportional))
-                                        .strong()
-                                        .color(if selected {
-                                            egui::Color32::from_rgb(255, 132, 108)
+                                    let width = ui.available_width();
+                                    let (rect, response) = ui.allocate_exact_size(
+                                        egui::vec2(width, 34.0),
+                                        egui::Sense::click(),
+                                    );
+                                    let painter = ui.painter();
+                                    let fill = if selected {
+                                        egui::Color32::from_rgb(35, 27, 25)
+                                    } else if response.hovered() {
+                                        egui::Color32::from_rgb(24, 26, 29)
+                                    } else {
+                                        egui::Color32::TRANSPARENT
+                                    };
+                                    painter.rect_filled(rect, egui::CornerRadius::same(6), fill);
+                                    if selected {
+                                        painter.rect_filled(
+                                            egui::Rect::from_min_max(
+                                                egui::pos2(rect.left(), rect.top() + 7.0),
+                                                egui::pos2(rect.left() + 3.0, rect.bottom() - 7.0),
+                                            ),
+                                            egui::CornerRadius::same(2),
+                                            egui::Color32::from_rgb(255, 104, 79),
+                                        );
+                                    }
+                                    painter.text(
+                                        egui::pos2(rect.left() + 12.0, rect.center().y),
+                                        egui::Align2::LEFT_CENTER,
+                                        tab.label(),
+                                        FontId::new(13.0, FontFamily::Proportional),
+                                        if selected {
+                                            egui::Color32::from_rgb(255, 143, 119)
                                         } else {
                                             ui.visuals().text_color()
-                                        });
-                                    if ui.selectable_label(selected, label).clicked() {
+                                        },
+                                    );
+                                    if response.clicked() {
                                         self.help_tab = tab;
                                     }
+                                    ui.add_space(4.0);
                                 }
                                 ui.add_space(12.0);
                                 ui.separator();
