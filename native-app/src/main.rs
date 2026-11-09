@@ -1993,7 +1993,6 @@ impl eframe::App for BlazeApp {
                                     }
                                 },
                             );
-                        }
                             ui.add_space(18.0);
                             const PADDING_LABELS: [&str; 3] = [
                                 "Comfortable",
@@ -2037,8 +2036,7 @@ impl eframe::App for BlazeApp {
                                     }
                                 },
                             );
-
-                            ui.add_space(18.0);
+                        }
 
                         ui.add_space(20.0);
                         let blaze_ready = self.active_mode != Some(EditingMode::Blaze)
