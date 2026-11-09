@@ -1657,7 +1657,15 @@ impl eframe::App for BlazeApp {
         let tools_split_rect = tools_panel.response.rect;
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(egui::Color32::from_rgb(16, 17, 18)))
+            // The central panel's default frame stroke can bleed into the
+            // bottom timeline when the resizable panels meet at a short height.
+            // The preview frame already draws its own border, so the outer
+            // central frame should not draw another separator.
+            .frame(
+                egui::Frame::new()
+                    .fill(egui::Color32::from_rgb(16, 17, 18))
+                    .stroke(egui::Stroke::NONE),
+            )
             .show(ui, |ui| {
                 // One framed Preview Panel contains both the video viewport
                 // and its transport bar. Tools remains a separate right panel.
