@@ -1545,7 +1545,7 @@ impl eframe::App for BlazeApp {
             });
         let timeline_split_rect = timeline_panel.response.rect;
 
-        let tools_panel = egui::Panel::right("tools")
+        egui::Panel::right("tools")
             .frame(
                 egui::Frame::new()
                     .fill(egui::Color32::from_rgb(10, 11, 12))
