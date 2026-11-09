@@ -1550,15 +1550,8 @@ impl eframe::App for BlazeApp {
                 egui::Frame::new()
                     .fill(egui::Color32::from_rgb(10, 11, 12))
                     .stroke(egui::Stroke::NONE)
-                    // Expert Mode's controls were sitting closer to the splitter.
-                    // Give that layout the missing 12 px on the left while keeping
-                    // the right inset unchanged.
-                    .inner_margin(egui::Margin {
-                        left: if self.expert_mode { 28 } else { 16 },
-                        right: 16,
-                        top: 14,
-                        bottom: 14,
-                    }),
+                    // Keep the Tools content inset fixed across Normal and Expert modes.
+                    .inner_margin(egui::Margin::symmetric(28, 14)),
             )
             .show_separator_line(false)
             .resizable(false)
@@ -1831,6 +1824,37 @@ impl eframe::App for BlazeApp {
                                 .corner_radius(egui::CornerRadius::same(7))
                                 .inner_margin(egui::Margin::symmetric(12, 10))
                                 .show(ui, |ui| {
+                            slider_control(
+                                ui,
+                                "Minimum Silence Duration",
+                                &mut self.minimum_silence_ms,
+                                None,
+                                None,
+                                |ui, value| {
+                                    numeric_field_u32(
+                                        ui, value, 10, 10_000, 10.0, "", " ms", 86.0,
+                                        "Click to type · Arrow Up/Arrow Down changes by 10 ms",
+                                    );
+                                },
+                                |ui, value| {
+                                    let response = ui.add_sized(
+                                        [ui.available_width(), 30.0],
+                                        egui::Slider::new(value, 10..=10_000)
+                                            .suffix(" ms")
+                                            .show_value(false)
+                                            .trailing_fill(true),
+                                    )
+                                    .on_hover_text("Drag to adjust · double-click the handle to reset");
+                                    if slider_handle_double_clicked(
+                                        ui, &response, *value as f64, 10.0, 10_000.0,
+                                    ) {
+                                        *value = 300;
+                                    } else if let Some(direction) = take_wheel_step(ui, &response) {
+                                        let next = *value as f64 + direction * 10.0;
+                                        *value = next.round().clamp(10.0, 10_000.0) as u32;
+                                    }
+                                },
+                            );
                                     ui.horizontal(|ui| {
                                         ui.label(egui::RichText::new("Padding").strong().size(13.0));
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1891,37 +1915,6 @@ impl eframe::App for BlazeApp {
                                     }
                                 });
                             ui.add_space(14.0);
-                            slider_control(
-                                ui,
-                                "Minimum Silence Duration",
-                                &mut self.minimum_silence_ms,
-                                None,
-                                None,
-                                |ui, value| {
-                                    numeric_field_u32(
-                                        ui, value, 10, 10_000, 10.0, "", " ms", 86.0,
-                                        "Click to type · Arrow Up/Arrow Down changes by 10 ms",
-                                    );
-                                },
-                                |ui, value| {
-                                    let response = ui.add_sized(
-                                        [ui.available_width(), 30.0],
-                                        egui::Slider::new(value, 10..=10_000)
-                                            .suffix(" ms")
-                                            .show_value(false)
-                                            .trailing_fill(true),
-                                    )
-                                    .on_hover_text("Drag to adjust · double-click the handle to reset");
-                                    if slider_handle_double_clicked(
-                                        ui, &response, *value as f64, 10.0, 10_000.0,
-                                    ) {
-                                        *value = 300;
-                                    } else if let Some(direction) = take_wheel_step(ui, &response) {
-                                        let next = *value as f64 + direction * 10.0;
-                                        *value = next.round().clamp(10.0, 10_000.0) as u32;
-                                    }
-                                },
-                            );
                         } else {
                             const DETECTION_LABELS: [&str; 5] = [
                                 "Comfortable",
@@ -1968,6 +1961,39 @@ impl eframe::App for BlazeApp {
                                 },
                             );
 
+                            slider_control(
+                                ui,
+                                "Minimum Silence Duration",
+                                &mut self.minimum_silence_ms,
+                                Some("Shortest pause that qualifies as silence. Default is 300 ms."),
+                                None,
+                                |ui, value| {
+                                    numeric_field_u32(
+                                        ui, value, 10, 10_000, 10.0, "", " ms", 86.0,
+                                        "Click to type · Arrow Up/Arrow Down changes by 10 ms",
+                                    );
+                                },
+                                |ui, value| {
+                                    let response = ui
+                                        .add_sized(
+                                            [ui.available_width(), 30.0],
+                                            egui::Slider::new(value, 10..=10_000)
+                                                .suffix(" ms")
+                                                .show_value(false)
+                                                .trailing_fill(true),
+                                        )
+                                        .on_hover_text("Drag to adjust · double-click the handle to reset");
+                                    if slider_handle_double_clicked(
+                                        ui, &response, *value as f64, 10.0, 10_000.0,
+                                    ) {
+                                        *value = 300;
+                                    } else if let Some(direction) = take_wheel_step(ui, &response) {
+                                        let next = *value as f64 + direction * 10.0;
+                                        *value = next.round().clamp(10.0, 10_000.0) as u32;
+                                    }
+                                },
+                            );
+                        }
                             ui.add_space(18.0);
                             const PADDING_LABELS: [&str; 3] = [
                                 "Comfortable",
@@ -2013,39 +2039,6 @@ impl eframe::App for BlazeApp {
                             );
 
                             ui.add_space(18.0);
-                            slider_control(
-                                ui,
-                                "Minimum Silence Duration",
-                                &mut self.minimum_silence_ms,
-                                Some("Shortest pause that qualifies as silence. Default is 300 ms."),
-                                None,
-                                |ui, value| {
-                                    numeric_field_u32(
-                                        ui, value, 10, 10_000, 10.0, "", " ms", 86.0,
-                                        "Click to type · Arrow Up/Arrow Down changes by 10 ms",
-                                    );
-                                },
-                                |ui, value| {
-                                    let response = ui
-                                        .add_sized(
-                                            [ui.available_width(), 30.0],
-                                            egui::Slider::new(value, 10..=10_000)
-                                                .suffix(" ms")
-                                                .show_value(false)
-                                                .trailing_fill(true),
-                                        )
-                                        .on_hover_text("Drag to adjust · double-click the handle to reset");
-                                    if slider_handle_double_clicked(
-                                        ui, &response, *value as f64, 10.0, 10_000.0,
-                                    ) {
-                                        *value = 300;
-                                    } else if let Some(direction) = take_wheel_step(ui, &response) {
-                                        let next = *value as f64 + direction * 10.0;
-                                        *value = next.round().clamp(10.0, 10_000.0) as u32;
-                                    }
-                                },
-                            );
-                        }
 
                         ui.add_space(20.0);
                         let blaze_ready = self.active_mode != Some(EditingMode::Blaze)
