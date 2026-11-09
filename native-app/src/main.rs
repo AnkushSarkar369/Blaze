@@ -1587,7 +1587,11 @@ impl eframe::App for BlazeApp {
                     painter.rect_filled(
                         thumb,
                         egui::CornerRadius::same(2),
-                        egui::Color32::from_rgb(190, 195, 201),
+                        if scrollbar_response.dragged() {
+                            egui::Color32::from_rgb(255, 104, 79)
+                        } else {
+                            egui::Color32::from_rgb(190, 195, 201)
+                        },
                     );
                 }
 
