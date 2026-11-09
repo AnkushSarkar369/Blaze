@@ -879,6 +879,7 @@ impl eframe::App for BlazeApp {
 
         let timeline_panel = egui::Panel::bottom("timeline")
             .frame(egui::Frame::new().stroke(egui::Stroke::NONE))
+            .show_separator_line(false)
             .resizable(true)
             .default_size(220.0)
             .min_size(140.0)
@@ -1206,6 +1207,7 @@ impl eframe::App for BlazeApp {
 
         let tools_panel = egui::Panel::right("tools")
             .frame(egui::Frame::new().stroke(egui::Stroke::NONE))
+            .show_separator_line(false)
             .resizable(true)
             .default_size(310.0)
             .min_size(240.0)
@@ -1933,11 +1935,18 @@ impl eframe::App for BlazeApp {
         // Keep the compact visual grips centered on the real splitter edges.
         let handle_fill = egui::Color32::from_rgb(42, 45, 48);
         let handle_mark = egui::Color32::from_rgb(126, 130, 134);
-        { let rect = tools_split_rect;
-            let handle = egui::Rect::from_center_size(
-                egui::pos2(rect.left(), rect.center().y),
-                egui::vec2(10.0, 62.0),
+        {
+            // The Panel response may shrink to its content bounds on the cross
+            // axis. Anchor the grip to the actual viewport and stop it at the
+            // timeline edge so it cannot drift into the timeline as it grows.
+            let upper_panel_rect = egui::Rect::from_min_max(
+                root_rect.min,
+                egui::pos2(root_rect.right(), timeline_split_rect.top()),
             );
+            let handle = egui::Rect::from_center_size(
+                egui::pos2(tools_split_rect.left(), upper_panel_rect.center().y),
+                egui::vec2(10.0, 62.0),
+            ).intersect(upper_panel_rect);
             let hovered = tools_resize_response.as_ref()
                 .is_some_and(|response| response.hovered() || response.dragged());
             let fill = if hovered {
@@ -1952,11 +1961,13 @@ impl eframe::App for BlazeApp {
                 );
             }
         }
-        { let rect = timeline_split_rect;
+        {
+            // Use the root viewport width, not the panel response's content
+            // bounds, which can be narrower than the actual splitter edge.
             let handle = egui::Rect::from_center_size(
-                egui::pos2(rect.center().x, rect.top()),
+                egui::pos2(root_rect.center().x, timeline_split_rect.top()),
                 egui::vec2(62.0, 10.0),
-            );
+            ).intersect(root_rect);
             let hovered = timeline_resize_response.as_ref()
                 .is_some_and(|response| response.hovered() || response.dragged());
             let fill = if hovered {
