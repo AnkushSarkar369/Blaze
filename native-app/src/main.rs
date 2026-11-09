@@ -301,18 +301,11 @@ fn slider_control<T>(
 
             ui.add_space(3.0);
 
-            // Keep the existing preset captions aligned to their slider stops.
+            // Keep the slider's edge spacing identical in Normal and Expert
+            // modes. Preset labels are laid out separately below; they must not
+            // change the slider track's horizontal inset.
             let content_width = ui.available_width();
-            let handle_radius = ui
-                .text_style_height(&egui::TextStyle::Body)
-                .max(ui.spacing().interact_size.y)
-                / 2.5;
-            let horizontal_inset = preset_labels
-                .map(|(labels, _)| {
-                    (content_width / (2.0 * labels.len().max(1) as f32) - handle_radius)
-                        .max(0.0)
-                })
-                .unwrap_or(6.0);
+            let horizontal_inset = 6.0;
             let slider_width = (content_width - horizontal_inset * 2.0).max(1.0);
 
             let mut slider_visuals = ui.visuals().clone();
