@@ -2911,13 +2911,6 @@ impl eframe::App for BlazeApp {
                             egui::Layout::top_down(egui::Align::Min),
                             |ui| {
                                 ui.add_space(10.0);
-                                ui.label(
-                                    egui::RichText::new("BROWSE TOPICS")
-                                        .font(FontId::new(10.5, FontFamily::Proportional))
-                                        .strong()
-                                        .color(ui.visuals().weak_text_color()),
-                                );
-                                ui.add_space(8.0);
                                 for tab in [
                                     HelpTab::General,
                                     HelpTab::Blaze,
@@ -2926,7 +2919,7 @@ impl eframe::App for BlazeApp {
                                     HelpTab::Export,
                                 ] {
                                     let selected = self.help_tab == tab;
-                                    let width = ui.available_width();
+                                    let width = (ui.available_width() - 18.0).max(100.0);
                                     let (rect, response) = ui.allocate_exact_size(
                                         egui::vec2(width, 34.0),
                                         egui::Sense::click(),
