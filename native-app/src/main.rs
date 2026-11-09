@@ -1817,7 +1817,7 @@ impl eframe::App for BlazeApp {
                                     }
                                 });
 
-                            ui.add_space(14.0);
+                            ui.add_space(18.0);
                             slider_control(
                                 ui,
                                 "Minimum Silence Duration",
@@ -1961,7 +1961,7 @@ impl eframe::App for BlazeApp {
                                     }
                                 },
                             );
-
+                            ui.add_space(18.0);
                             slider_control(
                                 ui,
                                 "Minimum Silence Duration",
@@ -2207,7 +2207,25 @@ impl eframe::App for BlazeApp {
                 // Fill the remaining panel area after the scroll viewport.
                 ui.allocate_space(ui.available_size());
             });
-        let tools_split_rect = tools_panel.response.rect;
+        // Keep the persisted panel geometry authoritative after content layout.
+        // Expert Mode has wider intrinsic controls; without this write-back,
+        // egui can persist their expanded minimum width and shift the splitter.
+        let tools_panel_rect = egui::Rect::from_min_max(
+            egui::pos2(root_rect.right() - saved_tools_width, root_rect.top()),
+            egui::pos2(root_rect.right(), root_rect.bottom()),
+        );
+        ui.ctx().data_mut(|data| {
+            data.insert_persisted(
+                tools_panel_id,
+                egui::containers::panel::PanelState {
+                    outer_rect: egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(saved_tools_width, root_rect.height()),
+                    ),
+                },
+            );
+        });
+        let tools_split_rect = tools_panel_rect;
 
         egui::CentralPanel::default()
             // Preview and timeline share one continuous workspace surface.
