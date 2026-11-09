@@ -1446,63 +1446,164 @@ impl eframe::App for BlazeApp {
                             );
 
                             ui.add_space(14.0);
-                            ui.horizontal(|ui| {
-                                ui.strong("Peak Ceiling");
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.label(format!("{:.1} dBFS", self.custom_peak_ceiling_dbfs));
-                                    },
-                                );
-                            });
-                            ui.checkbox(&mut self.custom_peak_gate_enabled, "Enable peak ceiling");
-                            if self.custom_peak_gate_enabled {
-                                slider_control(
-                                    ui,
-                                    "Peak Ceiling",
-                                    &format!("{:.1} dBFS", self.custom_peak_ceiling_dbfs),
-                                    None,
-                                    None,
-                                    |ui| {
-                                        ui.add_sized(
-                                            [ui.available_width(), 30.0],
-                                            egui::Slider::new(
-                                                &mut self.custom_peak_ceiling_dbfs,
-                                                -90.0..=0.0,
-                                            )
-                                            .suffix(" dBFS")
-                                            .fixed_decimals(1)
-                                            .show_value(false)
-                                            .trailing_fill(true),
+                            egui::Frame::new()
+                                .fill(egui::Color32::from_rgb(23, 25, 28))
+                                .stroke(egui::Stroke::new(
+                                    1.0,
+                                    egui::Color32::from_rgb(43, 46, 50),
+                                ))
+                                .corner_radius(egui::CornerRadius::same(7))
+                                .inner_margin(egui::Margin::symmetric(12, 8))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new("Peak Ceiling")
+                                                .strong()
+                                                .size(13.0),
                                         );
-                                    },
-                                );
-                            }
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "{:.1} dBFS",
+                                                        self.custom_peak_ceiling_dbfs,
+                                                    ))
+                                                    .monospace()
+                                                    .strong()
+                                                    .size(12.5)
+                                                    .color(egui::Color32::from_rgb(255, 133, 105)),
+                                                );
+                                            },
+                                        );
+                                    });
+                                    ui.add_space(2.0);
+                                    ui.checkbox(
+                                        &mut self.custom_peak_gate_enabled,
+                                        "Enable peak ceiling",
+                                    );
+                                    if self.custom_peak_gate_enabled {
+                                        ui.add_space(3.0);
+                                        ui.scope(|ui| {
+                                            ui.spacing_mut().slider_width =
+                                                (ui.available_width() - 12.0).max(1.0);
+                                            ui.spacing_mut().slider_rail_height = 5.0;
+                                            let visuals = ui.visuals_mut();
+                                            visuals.handle_shape = egui::style::HandleShape::Circle;
+                                            visuals.slider_trailing_fill = true;
+                                            visuals.selection.bg_fill =
+                                                egui::Color32::from_rgb(255, 104, 79);
+                                            visuals.widgets.inactive.bg_fill =
+                                                egui::Color32::from_rgb(55, 59, 64);
+                                            visuals.widgets.inactive.fg_stroke =
+                                                egui::Stroke::new(
+                                                    1.5,
+                                                    egui::Color32::from_rgb(210, 213, 216),
+                                                );
+                                            visuals.widgets.hovered.bg_fill =
+                                                egui::Color32::from_rgb(67, 71, 77);
+                                            visuals.widgets.hovered.fg_stroke =
+                                                egui::Stroke::new(
+                                                    1.7,
+                                                    egui::Color32::from_rgb(255, 153, 132),
+                                                );
+                                            visuals.widgets.active.bg_fill =
+                                                egui::Color32::from_rgb(255, 104, 79);
+                                            visuals.widgets.active.fg_stroke =
+                                                egui::Stroke::new(1.7, egui::Color32::WHITE);
+                                            ui.add_sized(
+                                                [ui.available_width(), 30.0],
+                                                egui::Slider::new(
+                                                    &mut self.custom_peak_ceiling_dbfs,
+                                                    -90.0..=0.0,
+                                                )
+                                                .suffix(" dBFS")
+                                                .fixed_decimals(1)
+                                                .show_value(false)
+                                                .trailing_fill(true),
+                                            );
+                                        });
+                                    }
+                                });
 
                             ui.add_space(14.0);
-                            ui.strong("Padding");
-                            ui.label("Preserve audio around detected silence");
-                            ui.add_space(4.0);
-                            ui.columns(2, |columns| {
-                                columns[0].strong("Before");
-                                columns[0].horizontal(|ui| {
-                                    ui.add(
-                                        egui::DragValue::new(&mut self.custom_padding_before_ms)
-                                            .range(0..=2000)
-                                            .speed(10),
+                            let padding_summary = if self.custom_padding_before_ms
+                                == self.custom_padding_after_ms
+                            {
+                                format!("{} ms L&R", self.custom_padding_before_ms)
+                            } else {
+                                format!(
+                                    "{} / {} ms",
+                                    self.custom_padding_before_ms,
+                                    self.custom_padding_after_ms,
+                                )
+                            };
+                            egui::Frame::new()
+                                .fill(egui::Color32::from_rgb(23, 25, 28))
+                                .stroke(egui::Stroke::new(
+                                    1.0,
+                                    egui::Color32::from_rgb(43, 46, 50),
+                                ))
+                                .corner_radius(egui::CornerRadius::same(7))
+                                .inner_margin(egui::Margin::symmetric(12, 8))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new("Padding")
+                                                .strong()
+                                                .size(13.0),
+                                        );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(
+                                                    egui::RichText::new(padding_summary)
+                                                        .monospace()
+                                                        .strong()
+                                                        .size(12.5)
+                                                        .color(egui::Color32::from_rgb(255, 133, 105)),
+                                                );
+                                            },
+                                        );
+                                    });
+                                    ui.add_space(1.0);
+                                    ui.label(
+                                        egui::RichText::new(
+                                            "Preserve audio around detected silence",
+                                        )
+                                        .size(11.5)
+                                        .color(ui.visuals().weak_text_color()),
                                     );
-                                    ui.label("ms");
+                                    ui.add_space(8.0);
+                                    ui.columns(2, |columns| {
+                                        columns[0].strong("Before");
+                                        columns[1].strong("After");
+                                        columns[0].add_space(2.0);
+                                        columns[1].add_space(2.0);
+                                        columns[0].horizontal(|ui| {
+                                            ui.add_sized(
+                                                [72.0, 28.0],
+                                                egui::DragValue::new(
+                                                    &mut self.custom_padding_before_ms,
+                                                )
+                                                .range(0..=2000)
+                                                .speed(10),
+                                            );
+                                            ui.label("ms");
+                                        });
+                                        columns[1].horizontal(|ui| {
+                                            ui.add_sized(
+                                                [72.0, 28.0],
+                                                egui::DragValue::new(
+                                                    &mut self.custom_padding_after_ms,
+                                                )
+                                                .range(0..=2000)
+                                                .speed(10),
+                                            );
+                                            ui.label("ms");
+                                        });
+                                    });
                                 });
-                                columns[1].strong("After");
-                                columns[1].horizontal(|ui| {
-                                    ui.add(
-                                        egui::DragValue::new(&mut self.custom_padding_after_ms)
-                                            .range(0..=2000)
-                                            .speed(10),
-                                    );
-                                    ui.label("ms");
-                                });
-                            });
 
                             ui.add_space(14.0);
                             slider_control(
