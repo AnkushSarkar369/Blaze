@@ -2351,8 +2351,8 @@ impl eframe::App for BlazeApp {
                             ("Adobe Premiere Pro (FCP7 XML)", "xml", "Premiere_FCP7_XML", InterchangeFormat::PremiereXml),
                             ("DaVinci Resolve (FCP7 XML)", "xml", "DaVinci_Resolve_FCP7_XML", InterchangeFormat::DavinciResolve),
                             ("Final Cut Pro XML (1.14)", "fcpxml", "Final_Cut_Pro", InterchangeFormat::Fcpxml),
-                            ("OpenTimelineIO", "otio", "OpenTimelineIO", InterchangeFormat::OpenTimelineIo),
                             ("Edit Decision List (CMX 3600)", "edl", "EDL", InterchangeFormat::Edl),
+                            ("OpenTimelineIO (.otio)", "otio", "OpenTimelineIO", InterchangeFormat::OpenTimelineIo),
                         ];
 
                         for (label, extension, suffix, format) in timestamp_formats {
