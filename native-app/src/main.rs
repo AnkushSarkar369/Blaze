@@ -44,9 +44,51 @@ impl ToolTab {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HelpTab { General, Blaze, Precision, Timeline, Export }
+
+impl HelpTab {
+    fn label(self) -> &'static str {
+        match self {
+            Self::General => "General",
+            Self::Blaze => "Blaze Mode",
+            Self::Precision => "Precision Mode",
+            Self::Timeline => "Timeline",
+            Self::Export => "Export",
+        }
+    }
+}
 
 
 
+
+fn help_card(ui: &mut egui::Ui, title: &str, description: &str) {
+    egui::Frame::new()
+        .fill(egui::Color32::from_rgb(23, 25, 28))
+        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 46, 50)))
+        .corner_radius(egui::CornerRadius::same(7))
+        .inner_margin(egui::Margin::symmetric(13, 10))
+        .show(ui, |ui| {
+            ui.label(egui::RichText::new(title).strong().size(13.0));
+            ui.add_space(3.0);
+            ui.label(egui::RichText::new(description).size(12.5).color(ui.visuals().weak_text_color()));
+        });
+    ui.add_space(9.0);
+}
+
+fn help_shortcut(ui: &mut egui::Ui, key: &str, description: &str) {
+    ui.horizontal(|ui| {
+        egui::Frame::new()
+            .fill(egui::Color32::from_rgb(34, 37, 41))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(53, 57, 62)))
+            .corner_radius(egui::CornerRadius::same(5))
+            .inner_margin(egui::Margin::symmetric(8, 4))
+            .show(ui, |ui| { ui.monospace(egui::RichText::new(key).size(11.5)); });
+        ui.add_space(5.0);
+        ui.label(egui::RichText::new(description).size(12.5).color(ui.visuals().text_color()));
+    });
+    ui.add_space(6.0);
+}
 fn slider_handle_double_clicked(
     ui: &egui::Ui,
     response: &egui::Response,
