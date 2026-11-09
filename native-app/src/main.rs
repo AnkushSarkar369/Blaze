@@ -2072,16 +2072,18 @@ impl eframe::App for BlazeApp {
                             visuals.active.fg_stroke =
                                 egui::Stroke::new(1.0, button_text);
 
-                            ui.add_enabled(
-                                can_detect,
-                                egui::Button::new(
-                                    egui::RichText::new(detect_label)
-                                        .size(14.0)
-                                        .strong(),
+                            ui.horizontal_centered(|ui| {
+                                ui.add_enabled(
+                                    can_detect,
+                                    egui::Button::new(
+                                        egui::RichText::new(detect_label)
+                                            .size(14.0)
+                                            .strong(),
+                                    )
+                                    .corner_radius(egui::CornerRadius::same(7)),
                                 )
-                                .corner_radius(egui::CornerRadius::same(7)),
-                            )
-                            .on_hover_text("Scan the video's audio and mark detected silent sections")
+                                .on_hover_text("Scan the video's audio and mark detected silent sections")
+                            }).inner
                         }).inner;
                         if detect_response.clicked() {
                             self.start_silence_detection(ui.ctx());
