@@ -26,13 +26,14 @@ The application does not use a browser engine, WebView, React, or Tauri at runti
 The Export panel groups rendered video output and NLE timeline interchange.
 
 - **Blaze Export:** stream-copy export for Blaze Mode edits. It extracts kept ranges from the original source and concatenates them without re-encoding. The source container is preserved.
-- **DaVinci Resolve XML:** Final Cut Pro 7 XML interchange, importable by DaVinci Resolve.
-- **EDL:** CMX 3600 edit decision list.
-- **FCPXML:** currently generates Final Cut Pro XML 1.10. Updating and validating newer-version support is tracked below.
-- **Premiere XML:** Final Cut Pro 7 XML interchange, importable by Adobe Premiere Pro.
+- **Adobe Premiere Pro (FCP7 XML):** exports Final Cut Pro 7 XML interchange for import into Premiere Pro.
+- **DaVinci Resolve (FCP7 XML):** exports the same Final Cut Pro 7 XML interchange for import into DaVinci Resolve.
+- **Final Cut Pro XML:** exports FCPXML 1.14, introduced with Final Cut Pro 12.0.
+- **OpenTimelineIO:** exports a .otio JSON timeline with source-media references and linked video/audio tracks when audio is present. Premiere Pro and DaVinci Resolve support OTIO interchange.
+- **Edit Decision List:** exports a CMX 3600-style EDL.
 - **Precision Export:** deferred; currently marked Coming Soon.
 
-Timestamp interchange currently models one source media file with one linked video track and, when present, one linked audio track. Effects, transitions, multiple source clips, and multi-track timelines are outside the current edit model.
+Timestamp interchange currently models one source media file with one linked video track and, when present, one linked audio track. Effects, transitions, multiple source clips, and multi-track timelines are outside the current edit model. The OTIO export follows the same scope and references the original media file; it does not bundle media.
 
 ## Roadmap / TODO
 
@@ -68,11 +69,11 @@ This is the working product roadmap. Check items off here as they are completed 
 
 ### 4. Export and NLE compatibility
 
-- [ ] Review the FCPXML exporter against the current FCPXML specification.
-- [ ] Add and validate FCPXML 1.14 support; determine whether older-version output should remain available.
-- [ ] Validate FCPXML imports in the intended Final Cut Pro version(s).
-- [ ] Validate DaVinci Resolve XML imports in DaVinci Resolve.
-- [ ] Validate Premiere XML imports in Adobe Premiere Pro.
+- [x] Review the existing interchange implementations and identify their actual underlying formats.
+- [x] Add FCPXML 1.14 output and native OpenTimelineIO JSON export.
+- [ ] Validate generated FCPXML 1.14 against the current Apple DTD and import it into Final Cut Pro 12.x.
+- [ ] Validate FCP7 XML import in DaVinci Resolve and Adobe Premiere Pro.
+- [ ] Validate OpenTimelineIO import in DaVinci Resolve and Adobe Premiere Pro.
 - [ ] Validate CMX 3600 EDL imports in supported NLEs.
 - [ ] Test Blaze stream-copy export with varied codecs, containers, frame rates, keyframe spacing, audio layouts, and cut positions.
 - [ ] Document known export limitations and compatibility.
