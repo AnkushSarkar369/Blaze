@@ -49,16 +49,17 @@ impl ToolTab {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum HelpTab { General, Blaze, Precision, Timeline, Export }
+enum HelpTab { Guide, Blaze, Precision, Timeline, Export, Shortcuts }
 
 impl HelpTab {
     fn label(self) -> &'static str {
         match self {
-            Self::General => "General",
+            Self::Guide => "Blaze Guide",
             Self::Blaze => "Blaze Mode",
             Self::Precision => "Precision Mode",
             Self::Timeline => "Timeline",
             Self::Export => "Export",
+            Self::Shortcuts => "Shortcuts",
         }
     }
 }
@@ -2892,7 +2893,7 @@ impl eframe::App for BlazeApp {
                             |ui| {
                                 ui.add_space(10.0);
                                 for tab in [
-                                    HelpTab::General,
+                                    HelpTab::Guide,
                                     HelpTab::Blaze,
                                     HelpTab::Precision,
                                     HelpTab::Timeline,
@@ -2969,18 +2970,13 @@ impl eframe::App for BlazeApp {
                                     ui.set_width(ui.available_width());
                                     ui.add_space(4.0);
                                     match self.help_tab {
-                                        HelpTab::General => {
+                                        HelpTab::Guide => {
                                             help_page_heading(ui, "Getting started", "The shortest path from an imported video to a reviewed edit.");
                                             help_card(ui, "1. Import a video", "Choose Import video in the preview area. Blaze probes the media, opens the preview and builds waveform data for timeline navigation. Wait for waveform generation to finish before editing.");
                                             help_card(ui, "2. Choose an editing mode", "Blaze Mode snaps cut boundaries to usable video keyframes and is designed for fast stream-copy exports. Precision Mode places boundaries at the current playback position without keyframe snapping.");
                                             help_card(ui, "3. Mark and review cuts", "Move the playhead to a start point and press S. Move to the end point and press D. Review the marked regions on the waveform; drag either boundary to adjust it.");
                                             help_card(ui, "4. Detect pauses automatically", "Open the silence detection controls, choose a detection level, minimum pause duration and padding, then select Detect Silence. Review the generated regions before exporting.");
                                             help_card(ui, "5. Export your result", "Use Blaze Export for a fast stream-copy output when available, or export an editable timeline for a supported NLE. Precision video export is not available yet.");
-                                            help_section_label(ui, "GLOBAL SHORTCUTS");
-                                            help_shortcut(ui, "Space", "Play or pause the loaded video.");
-                                            help_shortcut(ui, "S", "Set a cut start at the playhead. Press again to cancel a pending start.");
-                                            help_shortcut(ui, "D", "Complete the pending cut at the playhead.");
-                                            help_shortcut(ui, "Ctrl + H", "Open or close Quick Help.");
                                         }
                                         HelpTab::Blaze => {
                                             help_page_heading(ui, "Blaze Mode", "Fast, keyframe-aligned editing for stream-copy workflows.");
@@ -2989,10 +2985,6 @@ impl eframe::App for BlazeApp {
                                             help_card(ui, "Refine boundaries", "Drag a region's start or end handle. In Blaze Mode, the boundary continues to snap to a valid keyframe. The available keyframes limit how exact a cut can be.");
                                             help_card(ui, "Silence detection", "Detection Level controls how sensitive the scan is. Minimum Silence Duration filters out short pauses. Padding preserves audio around detected pauses. Expert Mode exposes the threshold, peak ceiling and separate before/after padding controls.");
                                             help_card(ui, "Best for", "Fast editing when preserving the original encoded video and avoiding re-encoding matter more than frame-exact cut placement.");
-                                            help_section_label(ui, "SHORTCUTS");
-                                            help_shortcut(ui, "S", "Place or cancel the pending start boundary.");
-                                            help_shortcut(ui, "D", "Complete the cut at the current playhead position.");
-                                            help_shortcut(ui, "Space", "Play or pause while reviewing the cut.");
                                         }
                                         HelpTab::Precision => {
                                             help_page_heading(ui, "Precision Mode", "Place edit boundaries at the current playback position.");
@@ -3012,11 +3004,18 @@ impl eframe::App for BlazeApp {
                                             help_card(ui, "Edit regions and playhead", "Each completed region has draggable start and end handles. Blaze Mode snaps moved handles to keyframes; Precision Mode does not. A pending S start marker can also be dragged before pressing D.");
                                             help_card(ui, "Skip Cuts", "Toggle Skip Cuts in the transport controls to automatically jump over marked regions during playback. This changes playback navigation only; it does not delete or modify the regions.");
                                             help_card(ui, "Resize the workspace", "Drag the vertical divider between the preview and Tools panel to resize them. Drag the horizontal divider above the timeline to change its height. Double-click either divider to restore its default size.");
-                                            help_section_label(ui, "TIMELINE SHORTCUTS & GESTURES");
-                                            help_shortcut(ui, "Ctrl + Scroll", "Zoom in or out around the pointer.");
-                                            help_shortcut(ui, "Scroll", "Pan horizontally through the timeline.");
-                                            help_shortcut(ui, "Click / Drag", "Seek or scrub using the waveform or time ruler.");
-                                            help_shortcut(ui, "Double-click divider", "Reset the preview/Tools split or timeline height.");
+                                            help_section_label(ui, "MOUSE & TRACKPAD GESTURES");
+                                            help_card(ui, "Ctrl + scroll", "Zoom the timeline around the pointer position.");
+                                            help_card(ui, "Scroll", "Pan horizontally through the timeline.");
+                                            help_card(ui, "Click or drag", "Seek or scrub using the waveform or time ruler.");
+                                            help_card(ui, "Double-click a divider", "Reset the preview/Tools split or timeline height.");
+                                        }
+                                        HelpTab::Shortcuts => {
+                                            help_page_heading(ui, "Keyboard shortcuts", "Keep these keys handy while reviewing and editing a video.");
+                                            help_shortcut(ui, "Space", "Play or pause the loaded video.");
+                                            help_shortcut(ui, "S", "Set a cut start at the playhead. Press S again to cancel a pending start.");
+                                            help_shortcut(ui, "D", "Complete the pending cut at the playhead.");
+                                            help_shortcut(ui, "Ctrl + H", "Open or close Quick Help.");
                                         }
                                         HelpTab::Export => {
                                             help_page_heading(ui, "Export & interchange", "Choose between a rendered video and an editable timeline handoff.");
@@ -3025,9 +3024,8 @@ impl eframe::App for BlazeApp {
                                             help_card(ui, "Current interchange model", "The current edit model supports one source media file, one linked video track and an optional linked audio track. Effects, transitions, multiple source clips and multi-track timelines are not currently represented. FCPXML output targets version 1.10.");
                                             help_card(ui, "Precision Export", "A re-encoded video export for Precision Mode is not available yet and is shown as Coming Soon.");
                                             help_section_label(ui, "BEFORE EXPORTING");
-                                            help_shortcut(ui, "Review", "Check every region on the timeline and confirm the start/end boundaries.");
-                                            help_shortcut(ui, "Blaze Mode", "Use when keyframe-aligned cuts and stream-copy output are suitable.");
-                                            help_shortcut(ui, "NLE XML / EDL", "Use when you want to continue editing in a supported video editor.");
+                                            help_card(ui, "Review the cut list", "Check every region on the timeline and confirm the start and end boundaries.");
+                                            help_card(ui, "Choose the right output", "Use Blaze Mode for keyframe-aligned stream-copy output, or an NLE interchange file to continue editing in a supported video editor.");
                                         }
                                     }
                                     ui.add_space(12.0);
