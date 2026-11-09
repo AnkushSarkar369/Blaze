@@ -369,56 +369,76 @@ fn padding_control_row(
     value: &mut u32,
     tooltip: &str,
 ) {
-    ui.horizontal(|row| {
-        row.spacing_mut().item_spacing.x = 5.0;
-        let (badge_rect, _) =
-            row.allocate_exact_size(egui::vec2(22.0, 26.0), egui::Sense::hover());
-        row.painter().rect_filled(
-            badge_rect,
-            egui::CornerRadius::same(5),
-            egui::Color32::from_rgb(31, 34, 37),
-        );
-        row.painter().rect_stroke(
-            badge_rect,
-            egui::CornerRadius::same(5),
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(54, 58, 63)),
-            egui::StrokeKind::Inside,
-        );
-        row.painter().text(
-            badge_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            side,
-            egui::FontId::proportional(11.5),
-            egui::Color32::from_rgb(220, 223, 226),
-        );
+    ui.vertical(|column| {
+        column.spacing_mut().item_spacing.y = 3.0;
+        column.horizontal(|row| {
+            row.spacing_mut().item_spacing.x = 7.0;
+            let (badge_rect, _) =
+                row.allocate_exact_size(egui::vec2(25.0, 25.0), egui::Sense::hover());
+            row.painter().rect_filled(
+                badge_rect,
+                egui::CornerRadius::same(5),
+                egui::Color32::from_rgb(31, 34, 37),
+            );
+            row.painter().rect_stroke(
+                badge_rect,
+                egui::CornerRadius::same(5),
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(54, 58, 63)),
+                egui::StrokeKind::Inside,
+            );
+            row.painter().text(
+                badge_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                side,
+                egui::FontId::proportional(11.5),
+                egui::Color32::from_rgb(220, 223, 226),
+            );
+            row.add(icon.fit_to_exact_size(egui::vec2(16.0, 16.0)));
+            row.add_space(2.0);
+            row.with_layout(
+                egui::Layout::right_to_left(egui::Align::Center),
+                |row| {
+                    numeric_field_u32(
+                        row, value, 0, 2000, 10.0, "", " ms", 64.0, tooltip,
+                    );
+                },
+            );
+        });
 
-        row.add(
-            icon.fit_to_exact_size(egui::vec2(16.0, 16.0)),
-        );
-        let field_width = 84.0; // 64 px value field + 20 px arrow-key hints
-        let slider_width = (row.available_width() - field_width - 9.0).max(36.0);
-        row.scope(|slider_ui| {
+        let slider_width = column.available_width().max(80.0);
+        let mut slider_response = None;
+        column.scope(|slider_ui| {
             slider_ui.spacing_mut().slider_width = slider_width;
-            let response = slider_ui
-                .add_sized(
-                    [slider_width, 26.0],
+            let visuals = slider_ui.visuals().clone();
+            let mut slider_visuals = visuals;
+            slider_visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(34, 36, 39);
+            slider_visuals.widgets.inactive.bg_stroke =
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(54, 58, 63));
+            slider_visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(43, 45, 49);
+            slider_visuals.widgets.active.bg_fill = egui::Color32::from_rgb(49, 39, 36);
+            slider_visuals.selection.bg_fill = egui::Color32::from_rgb(255, 120, 92);
+            slider_visuals.selection.stroke =
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 120, 92));
+            *slider_ui.visuals_mut() = slider_visuals;
+            slider_response = Some(
+                slider_ui.add_sized(
+                    [slider_width, 24.0],
                     egui::Slider::new(value, 0..=2000)
-                        .suffix(" ms")
                         .show_value(false)
                         .trailing_fill(true),
                 )
-                .on_hover_text("Drag to adjust · double-click to reset");
-            if slider_handle_double_clicked(slider_ui, &response, *value as f64, 0.0, 2000.0) {
+                .on_hover_text("Drag to adjust · double-click to reset"),
+            );
+        });
+
+        if let Some(response) = slider_response {
+            if slider_handle_double_clicked(column, &response, *value as f64, 0.0, 2000.0) {
                 *value = 60;
-            } else if let Some(direction) = take_wheel_step(slider_ui, &response) {
+            } else if let Some(direction) = take_wheel_step(column, &response) {
                 let next = *value as f64 + direction * 10.0;
                 *value = next.round().clamp(0.0, 2000.0) as u32;
             }
-        });
-        row.add_space(4.0);
-        numeric_field_u32(
-            row, value, 0, 2000, 10.0, "", " ms", 64.0, tooltip,
-        );
+        }
     });
 }
 
