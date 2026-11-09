@@ -247,7 +247,8 @@ fn preset_value_field(
                     format!("{:.0}", choices[index])
                 })
                 .custom_parser(move |text| {
-                    let entered = text.trim().parse::<f64>().ok()?;                    choices.iter().enumerate()
+                    let entered = text.trim().parse::<f64>().ok()?;
+                    choices.iter().enumerate()
                         .min_by(|(_, a), (_, b)| {
                             (*a - entered).abs().total_cmp(&(*b - entered).abs())
                         })
@@ -496,7 +497,8 @@ fn mode_selection_card(
         painter.circle_filled(
             egui::pos2(rect.right() - 14.0, rect.top() + 14.0),
             3.5,
-            accent,        );
+            accent,
+        );
     }
 
     response.on_hover_text(if enabled {
@@ -745,7 +747,8 @@ impl BlazeApp {
                 }
                 Err(error) => self.keyframe_error = Some(error),
             }
-            ctx.request_repaint();        }
+            ctx.request_repaint();
+        }
     }
 
     fn start_silence_detection(&mut self, ctx: &egui::Context) {
@@ -994,7 +997,8 @@ impl BlazeApp {
                     message
                 });
             let _ = sender.send((generation, result));
-            repaint.request_repaint();        });
+            repaint.request_repaint();
+        });
     }
 
     fn start_interchange_export(
@@ -1243,7 +1247,8 @@ impl eframe::App for BlazeApp {
                 let sense = if can_seek {
                     egui::Sense::click_and_drag()
                 } else {
-                    egui::Sense::hover()                };
+                    egui::Sense::hover()
+                };
                 let response = ui.allocate_rect(lane, sense);
                 let ruler_response = ui.allocate_rect(ruler, sense);
 
@@ -1741,7 +1746,8 @@ impl eframe::App for BlazeApp {
                                                     0.0,
                                                     1.0,
                                                     1,
-                                                    " dBFS",                                                    96.0,
+                                                    " dBFS",
+                                                    96.0,
                                                     "Click to type · Arrow Up/Arrow Down changes by 1 dB",
                                                 );
                                             },
@@ -1990,7 +1996,8 @@ impl eframe::App for BlazeApp {
                             ui.add_space(18.0);
                             const PADDING_LABELS: [&str; 3] = [
                                 "Comfortable",
-                                "Normal",                                "Tight",
+                                "Normal",
+                                "Tight",
                             ];
                             let selected_padding_index = self.padding_level;
                             slider_control(
@@ -2249,7 +2256,8 @@ impl eframe::App for BlazeApp {
                             available.min,
                             egui::pos2(available.max.x, available.max.y - transport_height),
                         );
-                        let transport_rect = egui::Rect::from_min_max(                            egui::pos2(available.min.x, preview_rect.max.y),
+                        let transport_rect = egui::Rect::from_min_max(
+                            egui::pos2(available.min.x, preview_rect.max.y),
                             available.max,
                         );
 
@@ -2498,7 +2506,8 @@ impl eframe::App for BlazeApp {
             ui.ctx().data_mut(|data| {
                 data.insert_persisted(
                     panel_id,
-                    egui::containers::panel::PanelState { outer_rect: panel_rect },                );
+                    egui::containers::panel::PanelState { outer_rect: panel_rect },
+                );
             });
             ui.ctx().request_repaint();
         } else if tools_resize_response.dragged() || tools_resize_response.drag_stopped() {
@@ -2747,7 +2756,8 @@ impl eframe::App for BlazeApp {
                                     help_card(ui, "Choose an editing mode",
                                         "Blaze Mode aligns cut boundaries to usable video keyframes and supports stream-copy export. Precision Mode places boundaries at the current playback position without keyframe snapping.");
                                     help_card(ui, "Playback and review",
-                                        "Use the preview transport to play, pause and seek. Skip Cuts can automatically jump over marked regions during playback; it does not remove or change those regions.");                                    help_card(ui, "Edit numeric values",
+                                        "Use the preview transport to play, pause and seek. Skip Cuts can automatically jump over marked regions during playback; it does not remove or change those regions.");
+                                    help_card(ui, "Edit numeric values",
                                         "Click a value field to type a number, then press Enter or click away to apply it. While focused, Up and Down adjust by its step (1 dB or 10 ms). Sliders remain available for direct adjustment.");
                                     ui.add_space(3.0);
                                     ui.label(egui::RichText::new("KEYBOARD SHORTCUTS").strong().size(11.0)
