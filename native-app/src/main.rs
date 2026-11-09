@@ -1063,11 +1063,7 @@ impl eframe::App for BlazeApp {
             .frame(
                 egui::Frame::new()
                     .fill(egui::Color32::from_rgb(23, 25, 28))
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        egui::Color32::from_rgb(43, 46, 50),
-                    ))
-                    .corner_radius(egui::CornerRadius::same(7))
+                    .stroke(egui::Stroke::NONE)
                     .inner_margin(egui::Margin::symmetric(12, 8)),
             )
             .show_separator_line(false)
@@ -1168,21 +1164,6 @@ impl eframe::App for BlazeApp {
                 ui.painter().line_segment(
                     [ruler.left_bottom(), ruler.right_bottom()],
                     egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 46, 49)),
-                );
-
-                ui.painter().rect_filled(
-                    lane,
-                    egui::CornerRadius::same(5),
-                    egui::Color32::from_rgb(18, 20, 23),
-                );
-                ui.painter().rect_stroke(
-                    lane,
-                    egui::CornerRadius::same(5),
-                    egui::Stroke::new(
-                        1.0,
-                        egui::Color32::from_rgb(38, 41, 45),
-                    ),
-                    egui::StrokeKind::Inside,
                 );
 
                 if let Some(progress) = self.waveform_progress {
@@ -2059,25 +2040,17 @@ impl eframe::App for BlazeApp {
         let tools_split_rect = tools_panel.response.rect;
 
         egui::CentralPanel::default()
-            // The central panel's default frame stroke can bleed into the
-            // bottom timeline when the resizable panels meet at a short height.
-            // The preview frame already draws its own border, so the outer
-            // central frame should not draw another separator.
+            // Preview and timeline share one continuous workspace surface.
+            // The timeline splitter is the only visual division between them.
             .frame(
                 egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(16, 17, 18))
+                    .fill(egui::Color32::from_rgb(23, 25, 28))
                     .stroke(egui::Stroke::NONE),
             )
             .show(ui, |ui| {
-                // One framed Preview Panel contains both the video viewport
-                // and its transport bar. Tools remains a separate right panel.
+                // Keep only layout padding around the video canvas; do not
+                // wrap the preview and transport in another visible card.
                 egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(23, 25, 28))
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        egui::Color32::from_rgb(43, 46, 50),
-                    ))
-                    .corner_radius(egui::CornerRadius::same(7))
                     .inner_margin(egui::Margin::same(10))
                     .show(ui, |ui| {
                         let available = ui.available_rect_before_wrap();
@@ -2117,11 +2090,6 @@ impl eframe::App for BlazeApp {
 
                         ui.scope_builder(egui::UiBuilder::new().max_rect(transport_rect), |ui| {
                             let transport_surface = ui.max_rect();
-                            ui.painter().rect_filled(
-                                transport_surface,
-                                egui::CornerRadius::same(4),
-                                egui::Color32::from_rgb(23, 25, 28),
-                            );
                             ui.painter().line_segment(
                                 [
                                     transport_surface.left_top(),
