@@ -128,6 +128,7 @@ fn help_shortcut(ui: &mut egui::Ui, key: &str, description: &str) {
         .corner_radius(egui::CornerRadius::same(6))
         .inner_margin(egui::Margin::symmetric(10, 7))
         .show(ui, |ui| {
+            ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.add_sized(
                     [126.0, 22.0],
@@ -146,7 +147,8 @@ fn help_shortcut(ui: &mut egui::Ui, key: &str, description: &str) {
                         .color(ui.visuals().text_color()),
                 );
             });
-        });
+        })
+        .response;
     ui.add_space(5.0);
 }
 
