@@ -49,17 +49,17 @@ impl ToolTab {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum HelpTab { Guide, Blaze, Precision, Timeline, Export, Shortcuts }
+enum HelpTab { Guide, KeyboardMouse, Timeline, Blaze, Precision, Export }
 
 impl HelpTab {
     fn label(self) -> &'static str {
         match self {
             Self::Guide => "Blaze Guide",
+            Self::KeyboardMouse => "Keyboard & Mouse",
+            Self::Timeline => "Timeline",
             Self::Blaze => "Blaze Mode",
             Self::Precision => "Precision Mode",
-            Self::Timeline => "Timeline",
             Self::Export => "Export",
-            Self::Shortcuts => "Shortcuts",
         }
     }
 }
@@ -2894,9 +2894,10 @@ impl eframe::App for BlazeApp {
                                 ui.add_space(10.0);
                                 for tab in [
                                     HelpTab::Guide,
+                                    HelpTab::KeyboardMouse,
+                                    HelpTab::Timeline,
                                     HelpTab::Blaze,
                                     HelpTab::Precision,
-                                    HelpTab::Timeline,
                                     HelpTab::Export,
                                 ] {
                                     let selected = self.help_tab == tab;
@@ -2992,10 +2993,6 @@ impl eframe::App for BlazeApp {
                                             help_card(ui, "Create and refine a region", "Move to the desired start and press S. Move to the desired end and press D. Drag either boundary handle to refine it; boundaries are not keyframe-snapped in this mode.");
                                             help_card(ui, "Silence detection", "Use the same detection controls to find candidate pauses. Detection Level, Minimum Silence Duration and Padding determine which pauses are marked and how much surrounding audio is retained. Review the results before exporting.");
                                             help_card(ui, "Export status", "Precision video export is currently marked Coming Soon. You can still work with precise edit regions and use the available timestamp/NLE interchange exports.");
-                                            help_section_label(ui, "SHORTCUTS");
-                                            help_shortcut(ui, "S", "Place or cancel the pending start boundary.");
-                                            help_shortcut(ui, "D", "Complete the cut at the current playhead position.");
-                                            help_shortcut(ui, "Space", "Play or pause while reviewing the cut.");
                                         }
                                         HelpTab::Timeline => {
                                             help_page_heading(ui, "Timeline & navigation", "Navigate the waveform, inspect edits and control the workspace.");
@@ -3004,18 +3001,19 @@ impl eframe::App for BlazeApp {
                                             help_card(ui, "Edit regions and playhead", "Each completed region has draggable start and end handles. Blaze Mode snaps moved handles to keyframes; Precision Mode does not. A pending S start marker can also be dragged before pressing D.");
                                             help_card(ui, "Skip Cuts", "Toggle Skip Cuts in the transport controls to automatically jump over marked regions during playback. This changes playback navigation only; it does not delete or modify the regions.");
                                             help_card(ui, "Resize the workspace", "Drag the vertical divider between the preview and Tools panel to resize them. Drag the horizontal divider above the timeline to change its height. Double-click either divider to restore its default size.");
+                                        }
+                                        HelpTab::KeyboardMouse => {
+                                            help_page_heading(ui, "Keyboard & Mouse", "Shortcuts and pointer gestures for playback, cutting and timeline navigation.");
+                                            help_section_label(ui, "KEYBOARD SHORTCUTS");
+                                            help_shortcut(ui, "Space", "Play or pause the loaded video.");
+                                            help_shortcut(ui, "S", "Set a cut start at the playhead. Press S again to cancel a pending start.");
+                                            help_shortcut(ui, "D", "Complete the pending cut at the playhead.");
+                                            help_shortcut(ui, "Ctrl + H", "Open or close Quick Help.");
                                             help_section_label(ui, "MOUSE & TRACKPAD GESTURES");
                                             help_card(ui, "Ctrl + scroll", "Zoom the timeline around the pointer position.");
                                             help_card(ui, "Scroll", "Pan horizontally through the timeline.");
                                             help_card(ui, "Click or drag", "Seek or scrub using the waveform or time ruler.");
                                             help_card(ui, "Double-click a divider", "Reset the preview/Tools split or timeline height.");
-                                        }
-                                        HelpTab::Shortcuts => {
-                                            help_page_heading(ui, "Keyboard shortcuts", "Keep these keys handy while reviewing and editing a video.");
-                                            help_shortcut(ui, "Space", "Play or pause the loaded video.");
-                                            help_shortcut(ui, "S", "Set a cut start at the playhead. Press S again to cancel a pending start.");
-                                            help_shortcut(ui, "D", "Complete the pending cut at the playhead.");
-                                            help_shortcut(ui, "Ctrl + H", "Open or close Quick Help.");
                                         }
                                         HelpTab::Export => {
                                             help_page_heading(ui, "Export & interchange", "Choose between a rendered video and an editable timeline handoff.");
