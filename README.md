@@ -50,10 +50,7 @@ This is the working product roadmap. Check items off here as they are completed 
 
 ### 2. Product design and UX
 
-- [ ] Redesign and refine the Tools Tab.
 - [ ] Review and improve the overall application design.
-- [ ] Improve editing workflows and discoverability without adding unnecessary controls.
-- [ ] Review timeline, preview, transport, panel resizing, keyboard shortcuts, and Quick Help interactions.
 - [ ] Review responsive behaviour at the supported window sizes.
 - [ ] Revisit the application colour system and decide whether to adopt a true-black interface. (Deferred decision.)
 
