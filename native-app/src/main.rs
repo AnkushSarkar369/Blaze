@@ -1587,7 +1587,7 @@ impl eframe::App for BlazeApp {
                     painter.rect_filled(
                         thumb,
                         egui::CornerRadius::same(2),
-                        egui::Color32::from_rgb(145, 151, 157),
+                        egui::Color32::from_rgb(190, 195, 201),
                     );
                 }
 
@@ -1640,9 +1640,9 @@ impl eframe::App for BlazeApp {
                     scroll.dormant_background_opacity = 0.0;
                     scroll.active_background_opacity = 0.0;
                     scroll.interact_background_opacity = 0.0;
-                    scroll.dormant_handle_opacity = 0.0;
-                    scroll.active_handle_opacity = 0.55;
-                    scroll.interact_handle_opacity = 0.55;
+                    scroll.dormant_handle_opacity = 0.72;
+                    scroll.active_handle_opacity = 0.72;
+                    scroll.interact_handle_opacity = 0.72;
                 }
                 egui::ScrollArea::vertical()
                     .id_salt("tools-content-scroll")
