@@ -1552,7 +1552,9 @@ impl eframe::App for BlazeApp {
 
                 egui::ScrollArea::vertical()
                     .id_salt("tools-content-scroll")
-                    .auto_shrink([false, false])
+                    // The panel is vertical-only: keep its width constrained to the
+                    // available panel width while allowing content to fill its height.
+                    .auto_shrink([true, false])
                     .show(ui, |ui| {
                         ui.add_space(8.0);
                         ui.set_width(ui.available_width());
