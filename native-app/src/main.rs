@@ -1238,7 +1238,7 @@ impl eframe::App for BlazeApp {
                 );
                 let lane = egui::Rect::from_min_max(
                     egui::pos2(available.left() + 10.0, ruler.bottom() + 3.0),
-                    egui::pos2(available.right() - 10.0, available.bottom() - 8.0),
+                    egui::pos2(available.right() - 10.0, available.bottom() - 12.0),
                 );
 
                 let duration = self.media_duration();
@@ -1540,6 +1540,61 @@ impl eframe::App for BlazeApp {
                     }
                 }
 
+                // A minimal horizontal scrollbar appears while the pointer is over
+                // the timeline. Its thumb represents the visible time range.
+                let scrollbar_track = egui::Rect::from_min_max(
+                    egui::pos2(lane.left(), available.bottom() - 6.0),
+                    egui::pos2(lane.right(), available.bottom() - 2.0),
+                );
+                let pointer_over_timeline = ui.input(|input| {
+                    input.pointer.hover_pos().is_some_and(|position| available.contains(position))
+                });
+                let scrollbar_response = ui.interact(
+                    scrollbar_track.expand2(egui::vec2(0.0, 4.0)),
+                    ui.scope_id().with("timeline-horizontal-scrollbar"),
+                    egui::Sense::click_and_drag(),
+                );
+                if pointer_over_timeline || scrollbar_response.hovered() || scrollbar_response.dragged() {
+                    let thumb_width = (scrollbar_track.width()
+                        * (visible_duration / duration).clamp(0.0, 1.0) as f32)
+                        .clamp(18.0, scrollbar_track.width());
+                    let thumb_left = scrollbar_track.left()
+                        + (self.timeline_offset / duration).clamp(0.0, 1.0) as f32
+                            * (scrollbar_track.width() - thumb_width);
+                    let thumb = egui::Rect::from_min_max(
+                        egui::pos2(thumb_left, scrollbar_track.top()),
+                        egui::pos2(thumb_left + thumb_width, scrollbar_track.bottom()),
+                    );
+                    if scrollbar_response.dragged() || scrollbar_response.clicked() {
+                        if let Some(pointer) = scrollbar_response.interact_pointer_pos() {
+                            let thumb_left = (pointer.x - thumb_width * 0.5 - scrollbar_track.left())
+                                .clamp(0.0, scrollbar_track.width() - thumb_width);
+                            self.timeline_offset = (thumb_left
+                                / (scrollbar_track.width() - thumb_width).max(1.0)
+                                * (duration - visible_duration).max(0.0) as f32) as f64;
+                            self.timeline_offset = self.timeline_offset.clamp(
+                                0.0,
+                                (duration - visible_duration).max(0.0),
+                            );
+                        }
+                    }
+                    let painter = ui.painter();
+                    painter.rect_filled(
+                        scrollbar_track,
+                        egui::CornerRadius::same(2),
+                        egui::Color32::from_rgba_unmultiplied(105, 110, 116, 55),
+                    );
+                    painter.rect_filled(
+                        thumb,
+                        egui::CornerRadius::same(2),
+                        if scrollbar_response.hovered() || scrollbar_response.dragged() {
+                            egui::Color32::from_rgb(185, 190, 196)
+                        } else {
+                            egui::Color32::from_rgb(112, 118, 124)
+                        },
+                    );
+                }
+
                 // Keep the panel's requested height after a resize.
                 ui.allocate_space(ui.available_size());
             });
@@ -1579,7 +1634,15 @@ impl eframe::App for BlazeApp {
                 ui.separator();
 
                 let tools_content_width = ui.available_width();
-                ui.style_mut().spacing.scroll.floating = false;
+                {
+                    let scroll = &mut ui.style_mut().spacing.scroll;
+                    scroll.floating = true;
+                    scroll.bar_width = 5.0;
+                    scroll.floating_width = 2.0;
+                    scroll.foreground_color = true;
+                    scroll.dormant_background_opacity = 0.0;
+                    scroll.dormant_handle_opacity = 0.0;
+                }
                 egui::ScrollArea::vertical()
                     .id_salt("tools-content-scroll")
                     // Expert Mode adds wider controls. Cap the scroll area's outer
