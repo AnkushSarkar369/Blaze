@@ -370,6 +370,7 @@ fn padding_control_row(
     tooltip: &str,
 ) {
     ui.horizontal(|row| {
+        row.spacing_mut().item_spacing.x = 5.0;
         let (badge_rect, _) =
             row.allocate_exact_size(egui::vec2(22.0, 26.0), egui::Sense::hover());
         row.painter().rect_filled(
@@ -395,7 +396,7 @@ fn padding_control_row(
             icon.fit_to_exact_size(egui::vec2(16.0, 16.0)),
         );
         let field_width = 84.0; // 64 px value field + 20 px arrow-key hints
-        let slider_width = (row.available_width() - field_width - 8.0).max(48.0);
+        let slider_width = (row.available_width() - field_width - 9.0).max(36.0);
         row.scope(|slider_ui| {
             slider_ui.spacing_mut().slider_width = slider_width;
             let response = slider_ui
