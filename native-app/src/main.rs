@@ -149,7 +149,6 @@ fn take_wheel_step(ui: &mut egui::Ui, response: &egui::Response) -> Option<f64> 
             _ => None,
         }).sum();
         if delta.abs() <= f32::EPSILON { return None; }
-        input.smooth_scroll_delta.y = 0.0;
         Some(if delta < 0.0 { 1.0 } else { -1.0 })
     })
 }
@@ -1561,6 +1560,9 @@ impl eframe::App for BlazeApp {
 
                 egui::ScrollArea::vertical()
                     .id_salt("tools-content-scroll")
+                    // Keep wheel input available to the individual sliders and
+                    // numeric fields; use the scrollbar for panel navigation.
+                    .scroll_source(egui::ScrollSource::SCROLL_BAR)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.add_space(8.0);
