@@ -1562,7 +1562,7 @@ impl eframe::App for BlazeApp {
                     .id_salt("tools-content-scroll")
                     // Keep wheel input available to the individual sliders and
                     // numeric fields; use the scrollbar for panel navigation.
-                    .scroll_source(egui::ScrollSource::SCROLL_BAR)
+                    .scroll_source(egui::scroll_area::ScrollSource::SCROLL_BAR)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.add_space(8.0);
