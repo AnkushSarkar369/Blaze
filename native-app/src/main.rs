@@ -1609,6 +1609,10 @@ impl eframe::App for BlazeApp {
             .default_size(420.0)
             .exact_size(saved_tools_width)
             .show(ui, |ui| {
+                let tools_panel_rect = ui.max_rect();
+                let pointer_over_tools_panel = ui.input(|input| {
+                    input.pointer.hover_pos().is_some_and(|position| tools_panel_rect.contains(position))
+                });
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
@@ -1632,17 +1636,17 @@ impl eframe::App for BlazeApp {
                 let tools_content_width = ui.available_width();
                 {
                     let scroll = &mut ui.style_mut().spacing.scroll;
-                    scroll.floating = true;
-                    scroll.bar_width = 4.0;
-                    scroll.bar_inner_margin = 8.0;
-                    scroll.floating_width = 2.0;
+                    let opacity = if pointer_over_tools_panel { 0.72 } else { 0.0 };
+                    scroll.floating = false;
+                    scroll.bar_width = 5.0;
+                    scroll.bar_inner_margin = 4.0;
                     scroll.foreground_color = false;
                     scroll.dormant_background_opacity = 0.0;
                     scroll.active_background_opacity = 0.0;
                     scroll.interact_background_opacity = 0.0;
-                    scroll.dormant_handle_opacity = 0.0;
-                    scroll.active_handle_opacity = 0.72;
-                    scroll.interact_handle_opacity = 0.72;
+                    scroll.dormant_handle_opacity = opacity;
+                    scroll.active_handle_opacity = opacity;
+                    scroll.interact_handle_opacity = opacity;
                 }
                 egui::ScrollArea::vertical()
                     .id_salt("tools-content-scroll")
