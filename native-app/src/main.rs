@@ -1172,11 +1172,11 @@ impl eframe::App for BlazeApp {
         ui.style_mut().interaction.resize_grab_radius_side = 10.0;
         let root_rect = ui.available_rect_before_wrap();
         let tools_panel_id = ui.scope_id().with("tools");
-        let tools_min_width = 240.0_f32.min(root_rect.width().max(0.0));
-        // Keep a useful preview workspace while still allowing a generous Tools
-        // panel. The panel's effective max is then locked to its saved width below.
-        let tools_max_width = (root_rect.width() * 0.65)
-            .min((root_rect.width() - 320.0).max(tools_min_width))
+        // The Tools controls need enough horizontal room for their labels,
+        // values, and sliders. Keep that as the minimum, while allowing the
+        // splitter to leave as little as 240 px for the preview at its maximum.
+        let tools_min_width = 360.0_f32.min(root_rect.width().max(0.0));
+        let tools_max_width = (root_rect.width() - 240.0)
             .max(tools_min_width);
 
         // Fit the initial preview width to the imported video's aspect ratio.
@@ -1210,7 +1210,7 @@ impl eframe::App for BlazeApp {
             tools_panel_id,
         )
         .map(|state| state.outer_rect.width())
-        .unwrap_or(310.0)
+        .unwrap_or(380.0)
         .clamp(tools_min_width, tools_max_width);
         let normalized_tools_rect = egui::Rect::from_min_size(
             egui::Pos2::ZERO,
@@ -1561,8 +1561,8 @@ impl eframe::App for BlazeApp {
             )
             .show_separator_line(false)
             .resizable(false)
-            .default_size(310.0)
-            .min_size(240.0)
+            .default_size(380.0)
+            .min_size(tools_min_width)
             .max_size(saved_tools_width)
             .show(ui, |ui| {
                 ui.add_space(2.0);
@@ -2476,7 +2476,7 @@ impl eframe::App for BlazeApp {
         if tools_resize_response.double_clicked() {
             let width = self.media_info.as_ref()
                 .map(|info| default_tools_width(root_rect, info))
-                .unwrap_or(310.0)
+                .unwrap_or(380.0)
                 .clamp(tools_min_width, tools_max_width);
             let panel_rect = egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
