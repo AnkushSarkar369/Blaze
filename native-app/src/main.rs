@@ -2864,26 +2864,23 @@ impl eframe::App for BlazeApp {
                 .show(ui.ctx(), |ui| {
                     use egui::{FontFamily, FontId};
 
-                    ui.vertical_centered(|ui| {
-                        ui.label(
-                            egui::RichText::new("BLAZE GUIDE")
-                                .font(FontId::new(10.5, FontFamily::Proportional))
-                                .strong()
-                                .color(egui::Color32::from_rgb(255, 120, 96)),
-                        );
-                        ui.add_space(3.0);
-                        ui.label(
-                            egui::RichText::new("Cut the pauses. Keep the moments that matter.")
-                                .font(FontId::new(20.0, FontFamily::Proportional))
-                                .strong(),
-                        );
-                        ui.add_space(3.0);
-                        ui.label(
-                            egui::RichText::new("Learn to mark edits, fine-tune silence detection, navigate the timeline and export your cuts.")
-                                .font(FontId::new(12.5, FontFamily::Proportional))
-                                .color(ui.visuals().weak_text_color()),
-                        );
-                    });
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), 58.0),
+                        egui::Layout::top_down(egui::Align::Center),
+                        |ui| {
+                            ui.label(
+                                egui::RichText::new("Keep The Moments That Matter")
+                                    .font(FontId::new(20.0, FontFamily::Proportional))
+                                    .strong(),
+                            );
+                            ui.add_space(3.0);
+                            ui.label(
+                                egui::RichText::new("Learn to mark edits, fine-tune silence detection, navigate the timeline and export your cuts.")
+                                    .font(FontId::new(12.5, FontFamily::Proportional))
+                                    .color(ui.visuals().weak_text_color()),
+                            );
+                        },
+                    );
                     ui.add_space(10.0);
                     ui.separator();
 
