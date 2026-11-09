@@ -1935,7 +1935,7 @@ impl eframe::App for BlazeApp {
                                 ui,
                                 "Detection Level",
                                 &mut self.detection_level,
-                                None,
+                                Some("Set how sensitively Blaze identifies quiet sections."),
                                 Some((&DETECTION_LABELS, selected_detection_index)),
                                 |ui, value| {
                                     preset_value_field(
@@ -2017,7 +2017,7 @@ impl eframe::App for BlazeApp {
                                 ui,
                                 "Minimum Silence Duration",
                                 &mut self.minimum_silence_ms,
-                                Some("Default is 300 ms."),
+                                Some("Shortest pause that qualifies as silence. Default is 300 ms."),
                                 None,
                                 |ui, value| {
                                     numeric_field_u32(
