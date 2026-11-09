@@ -1556,7 +1556,7 @@ impl eframe::App for BlazeApp {
                             let padding_summary = if self.custom_padding_before_ms
                                 == self.custom_padding_after_ms
                             {
-                                format!("{} ms L&R", self.custom_padding_before_ms)
+                                format!("{}ms L&R", self.custom_padding_before_ms)
                             } else {
                                 format!(
                                     "{} / {} ms",
@@ -1709,7 +1709,7 @@ impl eframe::App for BlazeApp {
                             slider_control(
                                 ui,
                                 "Padding",
-                                &format!("{} ms L&R", selected_padding.milliseconds()),
+                                &format!("{}ms L&R", selected_padding.milliseconds()),
                                 Some("Choose how much audio to preserve around each detected pause."),
                                 Some((&PADDING_LABELS, self.padding_level)),
                                 |ui| {
@@ -1736,16 +1736,21 @@ impl eframe::App for BlazeApp {
                                 Some("Default is 300 ms."),
                                 None,
                                 |ui| {
-                                    let response = ui.add_sized(
-                                        [ui.available_width(), 30.0],
-                                        egui::Slider::new(
-                                            &mut self.minimum_silence_ms,
-                                            10..=10_000,
+                                    let response = ui
+                                        .add_sized(
+                                            [ui.available_width(), 30.0],
+                                            egui::Slider::new(
+                                                &mut self.minimum_silence_ms,
+                                                10..=10_000,
+                                            )
+                                            .suffix(" ms")
+                                            .show_value(false)
+                                            .trailing_fill(true),
                                         )
-                                        .suffix(" ms")
-                                        .show_value(false)
-                                        .trailing_fill(true),
-                                    );
+                                        .on_hover_text("Double-click the handle to reset");
+                                    if response.double_clicked() {
+                                        self.minimum_silence_ms = 300;
+                                    }
                                 },
                             );
                         }
