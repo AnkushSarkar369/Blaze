@@ -52,6 +52,7 @@ fn slider_control(
     label: &str,
     value: &str,
     description: Option<&str>,
+    preset_labels: Option<(&[&str], usize)>,
     add_slider: impl FnOnce(&mut egui::Ui),
 ) {
     egui::Frame::new()
@@ -86,29 +87,58 @@ fn slider_control(
             }
 
             ui.add_space(3.0);
-            ui.scope(|ui| {
-                // Keep slider styling local to these controls. This changes only
-                // their appearance; the underlying egui Slider still owns input
-                // and updates the same application values as before.
-                ui.spacing_mut().slider_width = (ui.available_width() - 12.0).max(1.0);
-                ui.spacing_mut().slider_rail_height = 5.0;
 
-                let visuals = ui.visuals_mut();
-                visuals.handle_shape = egui::style::HandleShape::Circle;
-                visuals.slider_trailing_fill = true;
-                visuals.selection.bg_fill = egui::Color32::from_rgb(255, 104, 79);
-                visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(55, 59, 64);
-                visuals.widgets.inactive.fg_stroke =
-                    egui::Stroke::new(1.5, egui::Color32::from_rgb(210, 213, 216));
-                visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(67, 71, 77);
-                visuals.widgets.hovered.fg_stroke =
-                    egui::Stroke::new(1.7, egui::Color32::from_rgb(255, 153, 132));
-                visuals.widgets.active.bg_fill = egui::Color32::from_rgb(255, 104, 79);
-                visuals.widgets.active.fg_stroke =
-                    egui::Stroke::new(1.7, egui::Color32::WHITE);
+            // egui keeps the circular handle inside the slider's response rect.
+            // Preset captions are centred in equal-width columns, so inset the
+            // slider itself by (half a caption column - handle radius). This makes
+            // every discrete handle stop land on the centre of its matching word.
+            let content_width = ui.available_width();
+            let handle_radius = ui
+                .text_style_height(&egui::TextStyle::Body)
+                .at_least(ui.spacing().interact_size.y)
+                / 2.5;
+            let horizontal_inset = preset_labels
+                .map(|(labels, _)| {
+                    (content_width / (2.0 * labels.len().max(1) as f32) - handle_radius)
+                        .max(0.0)
+                })
+                .unwrap_or(6.0);
+            let slider_width = (content_width - horizontal_inset * 2.0).max(1.0);
 
-                add_slider(ui);
+            // Keep slider styling local to these controls. This changes only
+            // their appearance; the underlying egui Slider still owns interaction
+            // and writes to the original application state.
+            let mut slider_visuals = ui.visuals().clone();
+            slider_visuals.handle_shape = egui::style::HandleShape::Circle;
+            slider_visuals.slider_trailing_fill = true;
+            slider_visuals.selection.bg_fill = egui::Color32::from_rgb(255, 104, 79);
+            slider_visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(55, 59, 64);
+            slider_visuals.widgets.inactive.fg_stroke =
+                egui::Stroke::new(1.5, egui::Color32::from_rgb(210, 213, 216));
+            slider_visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(67, 71, 77);
+            slider_visuals.widgets.hovered.fg_stroke =
+                egui::Stroke::new(1.7, egui::Color32::from_rgb(255, 153, 132));
+            slider_visuals.widgets.active.bg_fill = egui::Color32::from_rgb(255, 104, 79);
+            slider_visuals.widgets.active.fg_stroke =
+                egui::Stroke::new(1.7, egui::Color32::WHITE);
+
+            ui.horizontal(|row| {
+                row.add_space(horizontal_inset);
+                row.allocate_ui_with_layout(
+                    egui::vec2(slider_width, 32.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |slider_ui| {
+                        slider_ui.spacing_mut().slider_width = slider_width;
+                        slider_ui.spacing_mut().slider_rail_height = 5.0;
+                        *slider_ui.visuals_mut() = slider_visuals;
+                        add_slider(slider_ui);
+                    },
+                );
             });
+
+            if let Some((labels, selected)) = preset_labels {
+                preset_scale_labels(ui, labels, selected);
+            }
         });
 }
 
@@ -1478,6 +1508,7 @@ impl eframe::App for BlazeApp {
                                 "Minimum Silence Duration",
                                 &format!("{} ms", self.minimum_silence_ms),
                                 None,
+                                None,
                                 |ui| {
                                     ui.add_sized(
                                         [ui.available_width(), 30.0],
@@ -1508,6 +1539,7 @@ impl eframe::App for BlazeApp {
                                     DETECTION_LABELS[self.detection_level],
                                 ),
                                 None,
+                                Some((&DETECTION_LABELS, self.detection_level)),
                                 |ui| {
                                     ui.add_sized(
                                         [ui.available_width(), 32.0],
@@ -1516,7 +1548,6 @@ impl eframe::App for BlazeApp {
                                             .show_value(false)
                                             .trailing_fill(true),
                                     );
-                                    preset_scale_labels(ui, &DETECTION_LABELS, self.detection_level);
                                 },
                             );
 
@@ -1535,6 +1566,7 @@ impl eframe::App for BlazeApp {
                                     PADDING_LABELS[self.padding_level],
                                 ),
                                 Some("Choose how much audio to preserve around each detected pause."),
+                                Some((&PADDING_LABELS, self.padding_level)),
                                 |ui| {
                                     ui.add_sized(
                                         [ui.available_width(), 32.0],
@@ -1543,7 +1575,6 @@ impl eframe::App for BlazeApp {
                                             .show_value(false)
                                             .trailing_fill(true),
                                     );
-                                    preset_scale_labels(ui, &PADDING_LABELS, self.padding_level);
                                 },
                             );
 
