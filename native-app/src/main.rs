@@ -2341,7 +2341,6 @@ impl eframe::App for BlazeApp {
                                 .small()
                                 .color(ui.visuals().weak_text_color()),
                         );
-                        ui.small("DaVinci Resolve and Premiere use FCP 7 XML interchange.");
                         ui.add_space(8.0);
 
                         let timestamp_available = self.selected_path.is_some()
@@ -2349,10 +2348,10 @@ impl eframe::App for BlazeApp {
                             && !self.loading
                             && !self.export_running;
                         let timestamp_formats = [
+                            ("Adobe Premiere Pro XML", "xml", "Premiere", InterchangeFormat::PremiereXml),
                             ("DaVinci Resolve XML", "xml", "DaVinci_Resolve", InterchangeFormat::DavinciResolve),
-                            ("EDL", "edl", "EDL", InterchangeFormat::Edl),
-                            ("FCPXML", "fcpxml", "FCPXML", InterchangeFormat::Fcpxml),
-                            ("Premiere XML", "xml", "Premiere", InterchangeFormat::PremiereXml),
+                            ("Final Cut Pro XML", "fcpxml", "Final_Cut_Pro", InterchangeFormat::Fcpxml),
+                            ("Edit Decision List", "edl", "EDL", InterchangeFormat::Edl),
                         ];
 
                         for (label, extension, suffix, format) in timestamp_formats {
