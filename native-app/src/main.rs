@@ -95,7 +95,7 @@ fn slider_control(
             let content_width = ui.available_width();
             let handle_radius = ui
                 .text_style_height(&egui::TextStyle::Body)
-                .at_least(ui.spacing().interact_size.y)
+                .max(ui.spacing().interact_size.y)
                 / 2.5;
             let horizontal_inset = preset_labels
                 .map(|(labels, _)| {
@@ -1432,6 +1432,7 @@ impl eframe::App for BlazeApp {
                                 "Detection Threshold",
                                 &format!("{:.1} dB", self.custom_threshold_db),
                                 Some("Offset below the adaptive programme baseline"),
+                                None,
                                 |ui| {
                                     ui.add_sized(
                                         [ui.available_width(), 30.0],
@@ -1460,6 +1461,7 @@ impl eframe::App for BlazeApp {
                                     ui,
                                     "Peak Ceiling",
                                     &format!("{:.1} dBFS", self.custom_peak_ceiling_dbfs),
+                                    None,
                                     None,
                                     |ui| {
                                         ui.add_sized(
@@ -1584,6 +1586,7 @@ impl eframe::App for BlazeApp {
                                 "Minimum Silence Duration",
                                 &format!("{} ms", self.minimum_silence_ms),
                                 Some("Default is 300 ms."),
+                                None,
                                 |ui| {
                                     ui.add_sized(
                                         [ui.available_width(), 30.0],
