@@ -1432,6 +1432,14 @@ impl eframe::App for BlazeApp {
                         ui.add_space(12.0);
 
                         if self.expert_mode {
+                            let reset_threshold = match self.detection_level {
+                                0 => DetectionLevel::Comfortable,
+                                1 => DetectionLevel::Optimal,
+                                2 => DetectionLevel::Default,
+                                3 => DetectionLevel::Tight,
+                                _ => DetectionLevel::Aggressive,
+                            }
+                            .threshold_below_baseline_db();
                             slider_control(
                                 ui,
                                 "Detection Threshold",
@@ -1439,14 +1447,22 @@ impl eframe::App for BlazeApp {
                                 Some("Offset below the adaptive programme baseline"),
                                 None,
                                 |ui| {
-                                    ui.add_sized(
-                                        [ui.available_width(), 30.0],
-                                        egui::Slider::new(&mut self.custom_threshold_db, 3.0..=60.0)
+                                    let response = ui
+                                        .add_sized(
+                                            [ui.available_width(), 30.0],
+                                            egui::Slider::new(
+                                                &mut self.custom_threshold_db,
+                                                3.0..=60.0,
+                                            )
                                             .suffix(" dB")
                                             .fixed_decimals(1)
                                             .show_value(false)
                                             .trailing_fill(true),
-                                    );
+                                        )
+                                        .on_hover_text("Double-click the handle to reset");
+                                    if response.double_clicked() {
+                                        self.custom_threshold_db = reset_threshold;
+                                    }
                                 },
                             );
 
@@ -1516,17 +1532,22 @@ impl eframe::App for BlazeApp {
                                                 egui::Color32::from_rgb(255, 104, 79);
                                             visuals.widgets.active.fg_stroke =
                                                 egui::Stroke::new(1.7, egui::Color32::WHITE);
-                                            ui.add_sized(
-                                                [ui.available_width(), 30.0],
-                                                egui::Slider::new(
-                                                    &mut self.custom_peak_ceiling_dbfs,
-                                                    -90.0..=0.0,
+                                            let response = ui
+                                                .add_sized(
+                                                    [ui.available_width(), 30.0],
+                                                    egui::Slider::new(
+                                                        &mut self.custom_peak_ceiling_dbfs,
+                                                        -90.0..=0.0,
+                                                    )
+                                                    .suffix(" dBFS")
+                                                    .fixed_decimals(1)
+                                                    .show_value(false)
+                                                    .trailing_fill(true),
                                                 )
-                                                .suffix(" dBFS")
-                                                .fixed_decimals(1)
-                                                .show_value(false)
-                                                .trailing_fill(true),
-                                            );
+                                                .on_hover_text("Double-click the handle to reset");
+                                            if response.double_clicked() {
+                                                self.custom_peak_ceiling_dbfs = -35.0;
+                                            }
                                         });
                                     }
                                 });
@@ -1618,7 +1639,7 @@ impl eframe::App for BlazeApp {
                                 None,
                                 None,
                                 |ui| {
-                                    ui.add_sized(
+                                    let response = ui.add_sized(
                                         [ui.available_width(), 30.0],
                                         egui::Slider::new(
                                             &mut self.minimum_silence_ms,
@@ -1627,7 +1648,11 @@ impl eframe::App for BlazeApp {
                                         .suffix(" ms")
                                         .show_value(false)
                                         .trailing_fill(true),
-                                    );
+                                    )
+                                    .on_hover_text("Double-click the handle to reset");
+                                    if response.double_clicked() {
+                                        self.minimum_silence_ms = 300;
+                                    }
                                 },
                             );
                         } else {
@@ -1655,13 +1680,18 @@ impl eframe::App for BlazeApp {
                                 None,
                                 Some((&DETECTION_LABELS, self.detection_level)),
                                 |ui| {
-                                    ui.add_sized(
-                                        [ui.available_width(), 32.0],
-                                        egui::Slider::new(&mut self.detection_level, 0..=4)
-                                            .step_by(1.0)
-                                            .show_value(false)
-                                            .trailing_fill(true),
-                                    );
+                                    let response = ui
+                                        .add_sized(
+                                            [ui.available_width(), 32.0],
+                                            egui::Slider::new(&mut self.detection_level, 0..=4)
+                                                .step_by(1.0)
+                                                .show_value(false)
+                                                .trailing_fill(true),
+                                        )
+                                        .on_hover_text("Double-click the handle to reset");
+                                    if response.double_clicked() {
+                                        self.detection_level = 2;
+                                    }
                                 },
                             );
 
@@ -1683,13 +1713,18 @@ impl eframe::App for BlazeApp {
                                 Some("Choose how much audio to preserve around each detected pause."),
                                 Some((&PADDING_LABELS, self.padding_level)),
                                 |ui| {
-                                    ui.add_sized(
-                                        [ui.available_width(), 32.0],
-                                        egui::Slider::new(&mut self.padding_level, 0..=2)
-                                            .step_by(1.0)
-                                            .show_value(false)
-                                            .trailing_fill(true),
-                                    );
+                                    let response = ui
+                                        .add_sized(
+                                            [ui.available_width(), 32.0],
+                                            egui::Slider::new(&mut self.padding_level, 0..=2)
+                                                .step_by(1.0)
+                                                .show_value(false)
+                                                .trailing_fill(true),
+                                        )
+                                        .on_hover_text("Double-click the handle to reset");
+                                    if response.double_clicked() {
+                                        self.padding_level = 1;
+                                    }
                                 },
                             );
 
@@ -1701,7 +1736,7 @@ impl eframe::App for BlazeApp {
                                 Some("Default is 300 ms."),
                                 None,
                                 |ui| {
-                                    ui.add_sized(
+                                    let response = ui.add_sized(
                                         [ui.available_width(), 30.0],
                                         egui::Slider::new(
                                             &mut self.minimum_silence_ms,
