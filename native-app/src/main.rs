@@ -66,52 +66,88 @@ impl HelpTab {
 
 
 
+fn help_page_heading(ui: &mut egui::Ui, title: &str, subtitle: &str) {
+    use egui::{FontFamily, FontId};
+    ui.label(
+        egui::RichText::new(title)
+            .font(FontId::new(19.0, FontFamily::Proportional))
+            .strong(),
+    );
+    ui.add_space(3.0);
+    ui.label(
+        egui::RichText::new(subtitle)
+            .font(FontId::new(12.5, FontFamily::Proportional))
+            .color(ui.visuals().weak_text_color()),
+    );
+    ui.add_space(10.0);
+}
+
+fn help_section_label(ui: &mut egui::Ui, label: &str) {
+    use egui::{FontFamily, FontId};
+    ui.add_space(10.0);
+    ui.label(
+        egui::RichText::new(label)
+            .font(FontId::new(10.5, FontFamily::Proportional))
+            .strong()
+            .color(egui::Color32::from_rgb(255, 132, 108)),
+    );
+    ui.add_space(6.0);
+}
+
 fn help_card(ui: &mut egui::Ui, title: &str, description: &str) {
     use egui::{FontFamily, FontId};
-
-    ui.vertical(|ui| {
-        ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new(title)
-                .font(FontId::new(15.0, FontFamily::Proportional))
-                .strong()
-                .color(egui::Color32::from_rgb(232, 234, 236)),
-        );
-        ui.add_space(4.0);
-        ui.label(
-            egui::RichText::new(description)
-                .font(FontId::new(13.5, FontFamily::Proportional))
-                .color(egui::Color32::from_rgb(173, 178, 183)),
-        );
-        ui.add_space(10.0);
-        ui.separator();
-    });
+    egui::Frame::new()
+        .fill(egui::Color32::from_rgb(19, 21, 24))
+        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 47, 52)))
+        .corner_radius(egui::CornerRadius::same(7))
+        .inner_margin(egui::Margin::symmetric(12, 10))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(
+                egui::RichText::new(title)
+                    .font(FontId::new(13.5, FontFamily::Proportional))
+                    .strong()
+                    .underline()
+                    .color(egui::Color32::from_rgb(239, 241, 243)),
+            );
+            ui.add_space(5.0);
+            ui.label(
+                egui::RichText::new(description)
+                    .font(FontId::new(12.5, FontFamily::Proportional))
+                    .color(egui::Color32::from_rgb(177, 182, 188)),
+            );
+        });
+    ui.add_space(7.0);
 }
 
 fn help_shortcut(ui: &mut egui::Ui, key: &str, description: &str) {
     use egui::{FontFamily, FontId};
-
-    ui.horizontal(|ui| {
-        egui::Frame::new()
-            .fill(egui::Color32::from_rgb(19, 21, 24))
-            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(49, 53, 58)))
-            .corner_radius(egui::CornerRadius::same(5))
-            .inner_margin(egui::Margin::symmetric(9, 5))
-            .show(ui, |ui| {
+    egui::Frame::new()
+        .fill(egui::Color32::from_rgb(16, 18, 20))
+        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 47, 52)))
+        .corner_radius(egui::CornerRadius::same(6))
+        .inner_margin(egui::Margin::symmetric(10, 7))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    [126.0, 22.0],
+                    egui::Label::new(
+                        egui::RichText::new(key)
+                            .font(FontId::new(12.0, FontFamily::Monospace))
+                            .strong()
+                            .underline()
+                            .color(egui::Color32::from_rgb(255, 143, 119)),
+                    ),
+                );
+                ui.add_space(8.0);
                 ui.label(
-                    egui::RichText::new(key)
-                        .font(FontId::new(12.5, FontFamily::Monospace))
-                        .strong(),
+                    egui::RichText::new(description)
+                        .font(FontId::new(12.5, FontFamily::Proportional))
+                        .color(ui.visuals().text_color()),
                 );
             });
-        ui.add_space(7.0);
-        ui.label(
-            egui::RichText::new(description)
-                .font(FontId::new(13.0, FontFamily::Proportional))
-                .color(ui.visuals().text_color()),
-        );
-    });
-    ui.add_space(8.0);
+        });
+    ui.add_space(5.0);
 }
 
 fn slider_handle_double_clicked(
@@ -2757,42 +2793,37 @@ impl eframe::App for BlazeApp {
             egui::Window::new("Quick Help")
                 .collapsible(false)
                 .resizable(true)
-                .default_size(egui::vec2(820.0, 620.0))
-                .min_size(egui::vec2(660.0, 480.0))
+                .default_size(egui::vec2(940.0, 700.0))
+                .min_size(egui::vec2(760.0, 540.0))
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .open(&mut self.show_help)
                 .show(ui.ctx(), |ui| {
                     use egui::{FontFamily, FontId};
 
+                    // Header: explain what this guide covers and keep the dismissal
+                    // shortcut visible without making it compete with the content.
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             ui.label(
-                                egui::RichText::new("BLAZE REFERENCE")
+                                egui::RichText::new("BLAZE GUIDE")
                                     .font(FontId::new(10.5, FontFamily::Proportional))
                                     .strong()
                                     .color(egui::Color32::from_rgb(255, 120, 96)),
                             );
                             ui.label(
-                                egui::RichText::new("Editing, navigation and export")
-                                    .font(FontId::new(19.0, FontFamily::Proportional))
+                                egui::RichText::new("Learn the workflow. Find every control.")
+                                    .font(FontId::new(20.0, FontFamily::Proportional))
                                     .strong(),
                             );
                             ui.label(
-                                egui::RichText::new("A practical guide to the current workflow.")
-                                    .font(FontId::new(13.0, FontFamily::Proportional))
+                                egui::RichText::new("A practical reference for editing, silence detection, timeline navigation and export.")
+                                    .font(FontId::new(12.5, FontFamily::Proportional))
                                     .color(ui.visuals().weak_text_color()),
                             );
                         });
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                ui.label(
-                                    egui::RichText::new("CTRL + H")
-                                        .font(FontId::new(11.5, FontFamily::Monospace))
-                                        .color(ui.visuals().weak_text_color()),
-                                );
-                            },
-                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            help_shortcut(ui, "Ctrl + H", "Toggle this guide");
+                        });
                     });
                     ui.add_space(10.0);
                     ui.separator();
@@ -2800,17 +2831,17 @@ impl eframe::App for BlazeApp {
                     let body_height = ui.available_height();
                     ui.horizontal(|ui| {
                         ui.allocate_ui_with_layout(
-                            egui::vec2(142.0, body_height),
+                            egui::vec2(166.0, body_height),
                             egui::Layout::top_down(egui::Align::Min),
                             |ui| {
-                                ui.add_space(8.0);
+                                ui.add_space(10.0);
                                 ui.label(
-                                    egui::RichText::new("SECTIONS")
+                                    egui::RichText::new("BROWSE TOPICS")
                                         .font(FontId::new(10.5, FontFamily::Proportional))
                                         .strong()
                                         .color(ui.visuals().weak_text_color()),
                                 );
-                                ui.add_space(6.0);
+                                ui.add_space(8.0);
                                 for tab in [
                                     HelpTab::General,
                                     HelpTab::Blaze,
@@ -2818,95 +2849,116 @@ impl eframe::App for BlazeApp {
                                     HelpTab::Timeline,
                                     HelpTab::Export,
                                 ] {
-                                    if ui
-                                        .selectable_label(
-                                            self.help_tab == tab,
-                                            egui::RichText::new(tab.label())
-                                                .font(FontId::new(13.0, FontFamily::Proportional)),
-                                        )
-                                        .clicked()
-                                    {
+                                    let selected = self.help_tab == tab;
+                                    let label = egui::RichText::new(tab.label())
+                                        .font(FontId::new(13.0, FontFamily::Proportional))
+                                        .strong()
+                                        .color(if selected {
+                                            egui::Color32::from_rgb(255, 132, 108)
+                                        } else {
+                                            ui.visuals().text_color()
+                                        });
+                                    if ui.selectable_label(selected, label).clicked() {
                                         self.help_tab = tab;
                                     }
                                 }
+                                ui.add_space(12.0);
+                                ui.separator();
+                                ui.add_space(8.0);
+                                ui.label(
+                                    egui::RichText::new("QUICK TIP")
+                                        .font(FontId::new(10.5, FontFamily::Proportional))
+                                        .strong()
+                                        .color(egui::Color32::from_rgb(255, 132, 108)),
+                                );
+                                ui.label(
+                                    egui::RichText::new("Hover over controls in Blaze for tooltips.")
+                                        .font(FontId::new(12.0, FontFamily::Proportional))
+                                        .color(ui.visuals().weak_text_color()),
+                                );
                             },
                         );
-                        ui.add_space(7.0);
+                        ui.add_space(10.0);
                         ui.separator();
+                        ui.add_space(10.0);
+
                         ui.vertical(|ui| {
                             egui::ScrollArea::vertical()
                                 .id_salt("quick-help-documentation")
                                 .auto_shrink([false, false])
                                 .show(ui, |ui| {
-                                    ui.add_space(2.0);
-                            match self.help_tab {
-                                HelpTab::General => {
-                                    help_card(ui, "Start with a video",
-                                        "Choose Import video in the preview area. Blaze probes the media, opens the preview and builds waveform data for timeline navigation. Wait for analysis to finish before using mode-specific operations.");
-                                    help_card(ui, "Choose an editing mode",
-                                        "Blaze Mode aligns cut boundaries to usable video keyframes and supports stream-copy export. Precision Mode places boundaries at the current playback position without keyframe snapping.");
-                                    help_card(ui, "Playback and review",
-                                        "Use the preview transport to play, pause and seek. Skip Cuts can automatically jump over marked regions during playback; it does not remove or change those regions.");
-                                    help_card(ui, "Edit numeric values",
-                                        "Click a value field to type a number, then press Enter or click away to apply it. While focused, Up and Down adjust by its step (1 dB or 10 ms). Sliders remain available for direct adjustment.");
-                                    ui.add_space(3.0);
-                                    ui.label(egui::RichText::new("KEYBOARD SHORTCUTS").strong().size(11.0)
-                                        .color(egui::Color32::from_rgb(255, 133, 105)));
-                                    ui.add_space(7.0);
-                                    help_shortcut(ui, "Space", "Play or pause the loaded video.");
-                                    help_shortcut(ui, "S", "Place a starting boundary at the current position, or cancel a pending start.");
-                                    help_shortcut(ui, "D", "Complete the pending cut at the current position.");
-                                    help_shortcut(ui, "Ctrl + H", "Show or hide Quick Help.");
-                                }
-                                HelpTab::Blaze => {
-                                    help_card(ui, "Keyframe-aligned cutting",
-                                        "Blaze Mode aligns cut boundaries to the nearest valid video keyframes. This makes edits suitable for stream-copy export, which keeps the original encoded video rather than re-encoding it.");
-                                    help_card(ui, "Create a cut region",
-                                        "Move the playhead to the start and press S. Move to the end and press D. The resulting region is marked on the timeline. Press S again before completing a region to cancel the pending start.");
-                                    help_card(ui, "Adjust boundaries",
-                                        "Drag either boundary handle on the timeline. In Blaze Mode, the boundary continues to snap to valid keyframes. Silence detection can create candidate regions for review and adjustment.");
-                                    help_card(ui, "Detection settings",
-                                        "Detection Level selects a threshold preset. Padding preserves audio around detected pauses. Minimum Silence Duration filters out pauses shorter than the selected duration. Expert Mode exposes threshold, peak ceiling and separate before/after padding controls.");
-                                    help_card(ui, "Best suited to",
-                                        "Fast cuts where retaining the source streams and avoiding video re-encoding are priorities. Exact cut points are constrained by available keyframes.");
-                                }
-                                HelpTab::Precision => {
-                                    help_card(ui, "Unrestricted cut placement",
-                                        "Precision Mode uses the current playback position for cut boundaries instead of snapping them to keyframes. This gives finer placement control; export may require re-encoding when stream-copy boundaries are unsuitable.");
-                                    help_card(ui, "Create and refine regions",
-                                        "Move the playhead to the desired start and press S. Move to the desired end and press D. Drag the region's start or end handle to refine it; boundaries are not keyframe-snapped in this mode.");
-                                    help_card(ui, "Silence detection",
-                                        "Use the same preset or Expert Mode controls to find candidate pauses. Detection settings determine how silence is identified and how much surrounding audio is retained; review generated regions before exporting.");
-                                    help_card(ui, "Export availability",
-                                        "Precision Export is currently marked Coming Soon. You can still work with precise edit regions and use the available timestamp/NLE interchange exports.");
-                                }
-                                HelpTab::Timeline => {
-                                    help_card(ui, "Navigate the timeline",
-                                        "Click the waveform lane or time ruler to seek. Drag in the lane or ruler to scrub the playhead. The time ruler adapts its tick spacing as the visible time range changes.");
-                                    help_card(ui, "Zoom and pan",
-                                        "Ctrl + Scroll zooms around the pointer position. Ordinary vertical scrolling pans left or right; horizontal trackpad scrolling is supported too. Playback keeps the playhead visible as it advances.");
-                                    help_card(ui, "Edit regions",
-                                        "Each region has a start and end handle. Drag either handle to adjust its boundary. Blaze Mode snaps the boundary to a keyframe; Precision Mode allows unrestricted placement. A pending S start marker can also be dragged before completing the region with D.");
-                                    help_card(ui, "Resize the workspace",
-                                        "Drag the vertical divider between preview and Tools to change their proportions. Drag the horizontal divider above the timeline to change timeline height. Double-click either divider to restore its default size.");
-                                }
-                                HelpTab::Export => {
-                                    help_card(ui, "Blaze Export",
-                                        "Exports the selected edit using stream-copy operations in Blaze Mode. It preserves the original encoded video quality and source container. Usable keyframes and at least one edit region are required.");
-                                    help_card(ui, "NLE timeline interchange",
-                                        "Export the current edit as an editable timeline using DaVinci Resolve XML, EDL, FCPXML or Premiere XML. These are timestamp interchange files, not rendered video. The current edit model supports one source media file, one linked video track and an optional linked audio track.");
-                                    help_card(ui, "Known interchange limits",
-                                        "Effects, transitions, multiple source clips and multi-track timelines are outside the current edit model. FCPXML output currently targets version 1.10.");
-                                    help_card(ui, "Precision Export",
-                                        "A re-encoded video export for Precision Mode is not available yet and is shown as Coming Soon.");
-                                }
-                            }
-                                    ui.add_space(10.0);
+                                    ui.set_width(ui.available_width());
+                                    ui.add_space(4.0);
+                                    match self.help_tab {
+                                        HelpTab::General => {
+                                            help_page_heading(ui, "Getting started", "The shortest path from an imported video to a reviewed edit.");
+                                            help_card(ui, "1. Import a video", "Choose Import video in the preview area. Blaze probes the media, opens the preview and builds waveform data for timeline navigation. Wait for waveform generation to finish before editing.");
+                                            help_card(ui, "2. Choose an editing mode", "Blaze Mode snaps cut boundaries to usable video keyframes and is designed for fast stream-copy exports. Precision Mode places boundaries at the current playback position without keyframe snapping.");
+                                            help_card(ui, "3. Mark and review cuts", "Move the playhead to a start point and press S. Move to the end point and press D. Review the marked regions on the waveform; drag either boundary to adjust it.");
+                                            help_card(ui, "4. Detect pauses automatically", "Open the silence detection controls, choose a detection level, minimum pause duration and padding, then select Detect Silence. Review the generated regions before exporting.");
+                                            help_card(ui, "5. Export your result", "Use Blaze Export for a fast stream-copy output when available, or export an editable timeline for a supported NLE. Precision video export is not available yet.");
+                                            help_section_label(ui, "GLOBAL SHORTCUTS");
+                                            help_shortcut(ui, "Space", "Play or pause the loaded video.");
+                                            help_shortcut(ui, "S", "Set a cut start at the playhead. Press again to cancel a pending start.");
+                                            help_shortcut(ui, "D", "Complete the pending cut at the playhead.");
+                                            help_shortcut(ui, "Ctrl + H", "Open or close Quick Help.");
+                                        }
+                                        HelpTab::Blaze => {
+                                            help_page_heading(ui, "Blaze Mode", "Fast, keyframe-aligned editing for stream-copy workflows.");
+                                            help_card(ui, "How cuts work", "Blaze Mode moves each cut boundary to a nearby usable video keyframe. This keeps edits compatible with stream-copy export, which copies the encoded streams instead of re-encoding the video.");
+                                            help_card(ui, "Create a region", "Move to the start and press S. Move to the end and press D. Pressing S again before D cancels the pending start. The completed region appears on the timeline.");
+                                            help_card(ui, "Refine boundaries", "Drag a region's start or end handle. In Blaze Mode, the boundary continues to snap to a valid keyframe. The available keyframes limit how exact a cut can be.");
+                                            help_card(ui, "Silence detection", "Detection Level controls how sensitive the scan is. Minimum Silence Duration filters out short pauses. Padding preserves audio around detected pauses. Expert Mode exposes the threshold, peak ceiling and separate before/after padding controls.");
+                                            help_card(ui, "Best for", "Fast editing when preserving the original encoded video and avoiding re-encoding matter more than frame-exact cut placement.");
+                                            help_section_label(ui, "SHORTCUTS");
+                                            help_shortcut(ui, "S", "Place or cancel the pending start boundary.");
+                                            help_shortcut(ui, "D", "Complete the cut at the current playhead position.");
+                                            help_shortcut(ui, "Space", "Play or pause while reviewing the cut.");
+                                        }
+                                        HelpTab::Precision => {
+                                            help_page_heading(ui, "Precision Mode", "Place edit boundaries at the current playback position.");
+                                            help_card(ui, "How cuts work", "Precision Mode uses the playhead's current position instead of snapping to keyframes. This allows finer placement, but a rendered export may need to re-encode portions of the video.");
+                                            help_card(ui, "Create and refine a region", "Move to the desired start and press S. Move to the desired end and press D. Drag either boundary handle to refine it; boundaries are not keyframe-snapped in this mode.");
+                                            help_card(ui, "Silence detection", "Use the same detection controls to find candidate pauses. Detection Level, Minimum Silence Duration and Padding determine which pauses are marked and how much surrounding audio is retained. Review the results before exporting.");
+                                            help_card(ui, "Export status", "Precision video export is currently marked Coming Soon. You can still work with precise edit regions and use the available timestamp/NLE interchange exports.");
+                                            help_section_label(ui, "SHORTCUTS");
+                                            help_shortcut(ui, "S", "Place or cancel the pending start boundary.");
+                                            help_shortcut(ui, "D", "Complete the cut at the current playhead position.");
+                                            help_shortcut(ui, "Space", "Play or pause while reviewing the cut.");
+                                        }
+                                        HelpTab::Timeline => {
+                                            help_page_heading(ui, "Timeline & navigation", "Navigate the waveform, inspect edits and control the workspace.");
+                                            help_card(ui, "Seek and scrub", "Click the waveform lane or time ruler to seek. Drag either one to scrub through the video. The ruler adjusts its tick spacing to keep time labels readable as you zoom.");
+                                            help_card(ui, "Zoom and pan", "Ctrl + scroll zooms around the pointer position. Ordinary mouse-wheel scrolling pans horizontally; horizontal trackpad scrolling is supported too. During playback, the timeline follows the playhead when it moves outside the visible range.");
+                                            help_card(ui, "Edit regions and playhead", "Each completed region has draggable start and end handles. Blaze Mode snaps moved handles to keyframes; Precision Mode does not. A pending S start marker can also be dragged before pressing D.");
+                                            help_card(ui, "Skip Cuts", "Toggle Skip Cuts in the transport controls to automatically jump over marked regions during playback. This changes playback navigation only; it does not delete or modify the regions.");
+                                            help_card(ui, "Resize the workspace", "Drag the vertical divider between the preview and Tools panel to resize them. Drag the horizontal divider above the timeline to change its height. Double-click either divider to restore its default size.");
+                                            help_section_label(ui, "TIMELINE SHORTCUTS & GESTURES");
+                                            help_shortcut(ui, "Ctrl + Scroll", "Zoom in or out around the pointer.");
+                                            help_shortcut(ui, "Scroll", "Pan horizontally through the timeline.");
+                                            help_shortcut(ui, "Click / Drag", "Seek or scrub using the waveform or time ruler.");
+                                            help_shortcut(ui, "Double-click divider", "Reset the preview/Tools split or timeline height.");
+                                        }
+                                        HelpTab::Export => {
+                                            help_page_heading(ui, "Export & interchange", "Choose between a rendered video and an editable timeline handoff.");
+                                            help_card(ui, "Blaze Export", "In Blaze Mode, export uses stream-copy operations. It preserves the original encoded video quality without re-encoding. A loaded source, usable keyframes and at least one completed edit region are required.");
+                                            help_card(ui, "NLE timeline interchange", "Export the edit as an editable timeline for DaVinci Resolve XML, EDL, FCPXML or Premiere XML. These are interchange files containing edit decisions and source references, not rendered video.");
+                                            help_card(ui, "Current interchange model", "The current edit model supports one source media file, one linked video track and an optional linked audio track. Effects, transitions, multiple source clips and multi-track timelines are not currently represented. FCPXML output targets version 1.10.");
+                                            help_card(ui, "Precision Export", "A re-encoded video export for Precision Mode is not available yet and is shown as Coming Soon.");
+                                            help_section_label(ui, "BEFORE EXPORTING");
+                                            help_shortcut(ui, "Review", "Check every region on the timeline and confirm the start/end boundaries.");
+                                            help_shortcut(ui, "Blaze Mode", "Use when keyframe-aligned cuts and stream-copy output are suitable.");
+                                            help_shortcut(ui, "NLE XML / EDL", "Use when you want to continue editing in a supported video editor.");
+                                        }
+                                    }
+                                    ui.add_space(12.0);
+                                    ui.separator();
                                     ui.label(
-                                        egui::RichText::new("Press Ctrl + H at any time to reopen this guide.")
-                                            .font(FontId::new(12.0, FontFamily::Proportional))
+                                        egui::RichText::new("Blaze changes as features ship. This guide describes the controls currently available in this build.")
+                                            .font(FontId::new(11.5, FontFamily::Proportional))
                                             .color(ui.visuals().weak_text_color()),
                                     );
+                                    ui.add_space(8.0);
                                 });
                         });
                     });
