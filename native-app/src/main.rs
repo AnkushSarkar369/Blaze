@@ -160,6 +160,7 @@ fn numeric_field_scope(
     add_field: impl FnOnce(&mut egui::Ui),
 ) {
     ui.scope(|ui| {
+        ui.set_width(width);
         let style = ui.style_mut();
         style.spacing.item_spacing.x = 0.0;
         style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(27, 29, 32);
