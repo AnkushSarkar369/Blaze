@@ -1,5 +1,4 @@
 use std::{
-    fs,
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
     time::Duration,
@@ -380,28 +379,6 @@ fn preset_scale_labels(ui: &mut egui::Ui, labels: &[&str], selected: usize) {
     });
 }
 
-fn help_seen_path() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|home| {
-        PathBuf::from(home)
-            .join(".config")
-            .join("blaze")
-            .join("first_run_help_seen_v2")
-    })
-}
-
-fn has_seen_first_run_help() -> bool {
-    help_seen_path().is_some_and(|path| path.exists())
-}
-
-fn mark_first_run_help_seen() {
-    if let Some(path) = help_seen_path() {
-        if let Some(parent) = path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        let _ = fs::write(path, b"");
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct EditRegion {
     start: f64,
@@ -463,7 +440,7 @@ struct BlazeApp {
     active_mode: Option<EditingMode>,
     active_tool_tab: ToolTab,
     show_help: bool,
-    first_run_help_seen: bool,
+    help_tab: HelpTab,
     pending_preview_fit: bool,
 }
 
@@ -565,8 +542,8 @@ impl BlazeApp {
             skip_cuts_enabled: false,
             active_mode: None,
             active_tool_tab: ToolTab::ModeSelector,
-            show_help: !has_seen_first_run_help(),
-            first_run_help_seen: has_seen_first_run_help(),
+            show_help: true,
+            help_tab: HelpTab::General,
             pending_preview_fit: false,
         })
     }
@@ -2543,10 +2520,7 @@ impl eframe::App for BlazeApp {
                 });
         }
 
-        if !self.show_help && !self.first_run_help_seen {
-            mark_first_run_help_seen();
-            self.first_run_help_seen = true;
-        }
+
     }
 
     fn on_exit(&mut self, gl: Option<&glow::Context>) {
