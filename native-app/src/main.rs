@@ -1532,13 +1532,19 @@ impl eframe::App for BlazeApp {
                                 "Tight",
                                 "Aggressive",
                             ];
+                            let selected_detection_level = match self.detection_level {
+                                0 => DetectionLevel::Comfortable,
+                                1 => DetectionLevel::Optimal,
+                                2 => DetectionLevel::Default,
+                                3 => DetectionLevel::Tight,
+                                _ => DetectionLevel::Aggressive,
+                            };
                             slider_control(
                                 ui,
                                 "Detection Level",
                                 &format!(
-                                    "{} / 5 · {}",
-                                    self.detection_level + 1,
-                                    DETECTION_LABELS[self.detection_level],
+                                    "{:.0} dB",
+                                    selected_detection_level.threshold_below_baseline_db(),
                                 ),
                                 None,
                                 Some((&DETECTION_LABELS, self.detection_level)),
@@ -1559,14 +1565,15 @@ impl eframe::App for BlazeApp {
                                 "Normal",
                                 "Tight",
                             ];
+                            let selected_padding = match self.padding_level {
+                                0 => PaddingPreset::Comfortable,
+                                2 => PaddingPreset::Tight,
+                                _ => PaddingPreset::Normal,
+                            };
                             slider_control(
                                 ui,
                                 "Padding",
-                                &format!(
-                                    "{} / 3 · {}",
-                                    self.padding_level + 1,
-                                    PADDING_LABELS[self.padding_level],
-                                ),
+                                &format!("{} ms L&R", selected_padding.milliseconds()),
                                 Some("Choose how much audio to preserve around each detected pause."),
                                 Some((&PADDING_LABELS, self.padding_level)),
                                 |ui| {
