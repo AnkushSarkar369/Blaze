@@ -1550,10 +1550,12 @@ impl eframe::App for BlazeApp {
                 });
                 ui.separator();
 
+                let tools_content_width = ui.available_width();
                 egui::ScrollArea::vertical()
                     .id_salt("tools-content-scroll")
-                    // The panel is vertical-only: keep its width constrained to the
-                    // available panel width while allowing content to fill its height.
+                    // Expert Mode adds wider controls. Cap the scroll area's outer
+                    // frame at the panel width so content cannot resize the panel.
+                    .max_width(tools_content_width)
                     .auto_shrink([true, false])
                     .show(ui, |ui| {
                         ui.add_space(8.0);
