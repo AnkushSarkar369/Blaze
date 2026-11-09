@@ -46,6 +46,72 @@ impl ToolTab {
 }
 
 
+
+fn slider_control(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &str,
+    description: Option<&str>,
+    add_slider: impl FnOnce(&mut egui::Ui),
+) {
+    egui::Frame::new()
+        .fill(egui::Color32::from_rgb(23, 25, 28))
+        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 46, 50)))
+        .corner_radius(egui::CornerRadius::same(7))
+        .inner_margin(egui::Margin::symmetric(12, 8))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(label).strong().size(13.0));
+                ui.with_layout(
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        ui.label(
+                            egui::RichText::new(value)
+                                .monospace()
+                                .strong()
+                                .size(12.5)
+                                .color(egui::Color32::from_rgb(255, 133, 105)),
+                        );
+                    },
+                );
+            });
+
+            if let Some(description) = description {
+                ui.add_space(1.0);
+                ui.label(
+                    egui::RichText::new(description)
+                        .size(11.5)
+                        .color(ui.visuals().weak_text_color()),
+                );
+            }
+
+            ui.add_space(3.0);
+            ui.scope(|ui| {
+                // Keep slider styling local to these controls. This changes only
+                // their appearance; the underlying egui Slider still owns input
+                // and updates the same application values as before.
+                ui.spacing_mut().slider_width = (ui.available_width() - 12.0).max(1.0);
+                ui.spacing_mut().slider_rail_height = 5.0;
+
+                let visuals = ui.visuals_mut();
+                visuals.handle_shape = egui::style::HandleShape::Circle;
+                visuals.slider_trailing_fill = true;
+                visuals.selection.bg_fill = egui::Color32::from_rgb(255, 104, 79);
+                visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(55, 59, 64);
+                visuals.widgets.inactive.fg_stroke =
+                    egui::Stroke::new(1.5, egui::Color32::from_rgb(210, 213, 216));
+                visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(67, 71, 77);
+                visuals.widgets.hovered.fg_stroke =
+                    egui::Stroke::new(1.7, egui::Color32::from_rgb(255, 153, 132));
+                visuals.widgets.active.bg_fill = egui::Color32::from_rgb(255, 104, 79);
+                visuals.widgets.active.fg_stroke =
+                    egui::Stroke::new(1.7, egui::Color32::WHITE);
+
+                add_slider(ui);
+            });
+        });
+}
+
 fn mode_selection_card(
     ui: &mut egui::Ui,
     title: &str,
@@ -1306,10 +1372,6 @@ impl eframe::App for BlazeApp {
                         }
                     }
                     ToolTab::BlazeMode | ToolTab::PreciseMode => {
-                        // egui sliders use Spacing::slider_width internally; add_sized alone
-                        // only sizes the surrounding widget allocation. Match the panel width.
-                        let slider_rail_width = (ui.available_width() - 12.0).max(1.0);
-                        ui.spacing_mut().slider_width = slider_rail_width;
                         let expert_mode_changed =
                             ui.checkbox(&mut self.expert_mode, "Expert Mode").changed();
                         if expert_mode_changed && self.expert_mode {
@@ -1335,23 +1397,21 @@ impl eframe::App for BlazeApp {
                         ui.add_space(12.0);
 
                         if self.expert_mode {
-                            ui.horizontal(|ui| {
-                                ui.strong("Detection Threshold");
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.label(format!("{:.1} dB", self.custom_threshold_db));
-                                    },
-                                );
-                            });
-                            ui.label("Offset below the adaptive programme baseline");
-                            ui.add_sized(
-                                [ui.available_width(), 30.0],
-                                egui::Slider::new(&mut self.custom_threshold_db, 3.0..=60.0)
-                                    .suffix(" dB")
-                                    .fixed_decimals(1)
-                                    .show_value(false)
-                                    .trailing_fill(false),
+                            slider_control(
+                                ui,
+                                "Detection Threshold",
+                                &format!("{:.1} dB", self.custom_threshold_db),
+                                Some("Offset below the adaptive programme baseline"),
+                                |ui| {
+                                    ui.add_sized(
+                                        [ui.available_width(), 30.0],
+                                        egui::Slider::new(&mut self.custom_threshold_db, 3.0..=60.0)
+                                            .suffix(" dB")
+                                            .fixed_decimals(1)
+                                            .show_value(false)
+                                            .trailing_fill(true),
+                                    );
+                                },
                             );
 
                             ui.add_space(14.0);
@@ -1366,16 +1426,24 @@ impl eframe::App for BlazeApp {
                             });
                             ui.checkbox(&mut self.custom_peak_gate_enabled, "Enable peak ceiling");
                             if self.custom_peak_gate_enabled {
-                                ui.add_sized(
-                                    [ui.available_width(), 30.0],
-                                    egui::Slider::new(
-                                        &mut self.custom_peak_ceiling_dbfs,
-                                        -90.0..=0.0,
-                                    )
-                                    .suffix(" dBFS")
-                                    .fixed_decimals(1)
-                                    .show_value(false)
-                                    .trailing_fill(false),
+                                slider_control(
+                                    ui,
+                                    "Peak Ceiling",
+                                    &format!("{:.1} dBFS", self.custom_peak_ceiling_dbfs),
+                                    None,
+                                    |ui| {
+                                        ui.add_sized(
+                                            [ui.available_width(), 30.0],
+                                            egui::Slider::new(
+                                                &mut self.custom_peak_ceiling_dbfs,
+                                                -90.0..=0.0,
+                                            )
+                                            .suffix(" dBFS")
+                                            .fixed_decimals(1)
+                                            .show_value(false)
+                                            .trailing_fill(true),
+                                        );
+                                    },
                                 );
                             }
 
@@ -1405,24 +1473,23 @@ impl eframe::App for BlazeApp {
                             });
 
                             ui.add_space(14.0);
-                            ui.horizontal(|ui| {
-                                ui.strong("Minimum Silence Duration");
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.label(format!("{} ms", self.minimum_silence_ms));
-                                    },
-                                );
-                            });
-                            ui.add_sized(
-                                [ui.available_width(), 30.0],
-                                egui::Slider::new(
-                                    &mut self.minimum_silence_ms,
-                                    10..=10_000,
-                                )
-                                .suffix(" ms")
-                                .show_value(false)
-                                .trailing_fill(false),
+                            slider_control(
+                                ui,
+                                "Minimum Silence Duration",
+                                &format!("{} ms", self.minimum_silence_ms),
+                                None,
+                                |ui| {
+                                    ui.add_sized(
+                                        [ui.available_width(), 30.0],
+                                        egui::Slider::new(
+                                            &mut self.minimum_silence_ms,
+                                            10..=10_000,
+                                        )
+                                        .suffix(" ms")
+                                        .show_value(false)
+                                        .trailing_fill(true),
+                                    );
+                                },
                             );
                         } else {
                             const DETECTION_LABELS: [&str; 5] = [
@@ -1432,31 +1499,26 @@ impl eframe::App for BlazeApp {
                                 "Tight",
                                 "Aggressive",
                             ];
-                            ui.horizontal(|ui| {
-                                ui.strong("Detection Level");
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.label(
-                                            egui::RichText::new(format!(
-                                                "{} / 5 · {}",
-                                                self.detection_level + 1,
-                                                DETECTION_LABELS[self.detection_level],
-                                            ))
-                                            .strong()
-                                            .color(egui::Color32::from_rgb(255, 133, 105)),
-                                        );
-                                    },
-                                );
-                            });
-                            ui.add_sized(
-                                [ui.available_width(), 32.0],
-                                egui::Slider::new(&mut self.detection_level, 0..=4)
-                                    .step_by(1.0)
-                                    .show_value(false)
-                                    .trailing_fill(false),
+                            slider_control(
+                                ui,
+                                "Detection Level",
+                                &format!(
+                                    "{} / 5 · {}",
+                                    self.detection_level + 1,
+                                    DETECTION_LABELS[self.detection_level],
+                                ),
+                                None,
+                                |ui| {
+                                    ui.add_sized(
+                                        [ui.available_width(), 32.0],
+                                        egui::Slider::new(&mut self.detection_level, 0..=4)
+                                            .step_by(1.0)
+                                            .show_value(false)
+                                            .trailing_fill(true),
+                                    );
+                                    preset_scale_labels(ui, &DETECTION_LABELS, self.detection_level);
+                                },
                             );
-                            preset_scale_labels(ui, &DETECTION_LABELS, self.detection_level);
 
                             ui.add_space(18.0);
                             const PADDING_LABELS: [&str; 3] = [
@@ -1464,54 +1526,46 @@ impl eframe::App for BlazeApp {
                                 "Normal",
                                 "Tight",
                             ];
-                            ui.horizontal(|ui| {
-                                ui.strong("Padding");
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.label(
-                                            egui::RichText::new(format!(
-                                                "{} / 3 · {}",
-                                                self.padding_level + 1,
-                                                PADDING_LABELS[self.padding_level],
-                                            ))
-                                            .strong()
-                                            .color(egui::Color32::from_rgb(255, 133, 105)),
-                                        );
-                                    },
-                                );
-                            });
-                            ui.add_sized(
-                                [ui.available_width(), 32.0],
-                                egui::Slider::new(&mut self.padding_level, 0..=2)
-                                    .step_by(1.0)
-                                    .show_value(false)
-                                    .trailing_fill(false),
+                            slider_control(
+                                ui,
+                                "Padding",
+                                &format!(
+                                    "{} / 3 · {}",
+                                    self.padding_level + 1,
+                                    PADDING_LABELS[self.padding_level],
+                                ),
+                                Some("Choose how much audio to preserve around each detected pause."),
+                                |ui| {
+                                    ui.add_sized(
+                                        [ui.available_width(), 32.0],
+                                        egui::Slider::new(&mut self.padding_level, 0..=2)
+                                            .step_by(1.0)
+                                            .show_value(false)
+                                            .trailing_fill(true),
+                                    );
+                                    preset_scale_labels(ui, &PADDING_LABELS, self.padding_level);
+                                },
                             );
-                            preset_scale_labels(ui, &PADDING_LABELS, self.padding_level);
-                            ui.small("Choose how much audio to preserve around each detected pause.");
 
                             ui.add_space(18.0);
-                            ui.horizontal(|ui| {
-                                ui.strong("Minimum Silence Duration");
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.label(format!("{} ms", self.minimum_silence_ms));
-                                    },
-                                );
-                            });
-                            ui.add_sized(
-                                [ui.available_width(), 30.0],
-                                egui::Slider::new(
-                                    &mut self.minimum_silence_ms,
-                                    10..=10_000,
-                                )
-                                .suffix(" ms")
-                                .show_value(false)
-                                .trailing_fill(false),
+                            slider_control(
+                                ui,
+                                "Minimum Silence Duration",
+                                &format!("{} ms", self.minimum_silence_ms),
+                                Some("Default is 300 ms."),
+                                |ui| {
+                                    ui.add_sized(
+                                        [ui.available_width(), 30.0],
+                                        egui::Slider::new(
+                                            &mut self.minimum_silence_ms,
+                                            10..=10_000,
+                                        )
+                                        .suffix(" ms")
+                                        .show_value(false)
+                                        .trailing_fill(true),
+                                    );
+                                },
                             );
-                            ui.small("Default is 300 ms.");
                         }
 
                         ui.add_space(20.0);
@@ -1523,15 +1577,28 @@ impl eframe::App for BlazeApp {
                             && self.media_info.as_ref().is_some_and(|info| info.has_audio)
                             && !self.silence_running
                             && blaze_ready;
-                        if ui.add_enabled(
+                        let detect_label = if self.silence_running {
+                            "Analysing Audio…"
+                        } else {
+                            "Detect Silence"
+                        };
+                        let detect_response = ui.add_enabled(
                             can_detect,
-                            egui::Button::new(if self.silence_running {
-                                "Analysing Audio…"
+                            egui::Button::new("")
+                                .min_size(egui::vec2(ui.available_width(), 40.0)),
+                        );
+                        ui.painter().text(
+                            detect_response.rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            detect_label,
+                            egui::FontId::proportional(14.0),
+                            if can_detect {
+                                ui.visuals().text_color()
                             } else {
-                                "Detect Silence"
-                            })
-                            .min_size(egui::vec2(ui.available_width(), 40.0)),
-                        ).clicked() {
+                                ui.visuals().weak_text_color()
+                            },
+                        );
+                        if detect_response.clicked() {
                             self.start_silence_detection(ui.ctx());
                         }
                         if self.silence_running {
