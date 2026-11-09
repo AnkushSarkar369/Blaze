@@ -51,12 +51,13 @@ fn mode_selection_card(
     title: &str,
     description: &str,
     icon: ModeCardIcon,
+    card_height: f32,
     selected: bool,
     enabled: bool,
 ) -> egui::Response {
     let width = ui.available_width().max(1.0);
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(width, 116.0), egui::Sense::click());
+        ui.allocate_exact_size(egui::vec2(width, card_height), egui::Sense::click());
 
     let visuals = ui.visuals();
     let accent = match icon {
@@ -108,7 +109,7 @@ fn mode_selection_card(
     );
     let group_width = 22.0 + 9.0 + title_galley.size().x;
     let group_left = rect.center().x - group_width * 0.5;
-    let icon_center = egui::pos2(group_left + 10.0, rect.top() + 42.0);
+    let icon_center = egui::pos2(group_left + 10.0, rect.top() + card_height * 0.36);
 
     match icon {
         ModeCardIcon::Blaze => {
@@ -168,7 +169,7 @@ fn mode_selection_card(
     painter.galley(
         egui::pos2(
             rect.center().x - description_galley.size().x * 0.5,
-            rect.top() + 64.0,
+            rect.top() + card_height * 0.56,
         ),
         description_galley,
         description_color,
@@ -1206,13 +1207,19 @@ impl eframe::App for BlazeApp {
         let timeline_split_rect = timeline_panel.response.rect;
 
         let tools_panel = egui::Panel::right("tools")
-            .frame(egui::Frame::new().stroke(egui::Stroke::NONE))
+            .frame(
+                egui::Frame::new()
+                    .stroke(egui::Stroke::NONE)
+                    .inner_margin(egui::Margin::symmetric(16, 14)),
+            )
             .show_separator_line(false)
             .resizable(false)
             .default_size(310.0)
             .min_size(240.0)
             .show(ui, |ui| {
+                ui.add_space(2.0);
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 12.0;
                     let mut tabs = vec![ToolTab::ModeSelector];
                     if let Some(mode) = self.active_mode {
                         tabs.push(match mode {
@@ -1235,7 +1242,9 @@ impl eframe::App for BlazeApp {
                 match self.active_tool_tab {
                     ToolTab::ModeSelector => {
                         ui.heading("Choose an editing mode");
-                        ui.add_space(14.0);
+                        ui.add_space(18.0);
+                        let mode_card_height =
+                            ((ui.available_height() - 92.0) * 0.5).clamp(116.0, 176.0);
 
                         let blaze_ready = self.selected_path.is_none()
                             || (!self.keyframes_running
@@ -1247,6 +1256,7 @@ impl eframe::App for BlazeApp {
                             "Blaze Mode",
                             "Make quick cuts while keeping the original video quality.",
                             ModeCardIcon::Blaze,
+                            mode_card_height,
                             self.active_mode == Some(EditingMode::Blaze),
                             blaze_ready,
                         );
@@ -1280,12 +1290,13 @@ impl eframe::App for BlazeApp {
                             ui.small(format!("{} video keyframes available.", self.keyframes.len()));
                         }
 
-                        ui.add_space(12.0);
+                        ui.add_space(18.0);
                         let precise_response = mode_selection_card(
                             ui,
                             "Precision Mode",
                             "Choose exactly where every cut begins and ends.",
                             ModeCardIcon::Precision,
+                            mode_card_height,
                             self.active_mode == Some(EditingMode::Precise),
                             true,
                         );
