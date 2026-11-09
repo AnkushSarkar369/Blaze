@@ -384,18 +384,17 @@ fn padding_control_row(
         }
 
         let (keys_rect, _) = row.allocate_exact_size(egui::vec2(key_width, 28.0), egui::Sense::hover());
-        let key_fill = egui::Color32::from_rgb(27, 29, 32);
-        let key_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(61, 65, 70));
-        let up = egui::Rect::from_min_size(keys_rect.min, egui::vec2(13.0, 12.0));
-        let down = egui::Rect::from_min_size(egui::pos2(keys_rect.left(), keys_rect.top() + 14.0), egui::vec2(13.0, 12.0));
-        for rect in [up, down] {
-            row.painter().rect_filled(rect, egui::CornerRadius::same(3), key_fill);
-            row.painter().rect_stroke(rect, egui::CornerRadius::same(3), key_stroke, egui::StrokeKind::Inside);
-        }
+        let up = egui::Rect::from_min_size(keys_rect.min, egui::vec2(15.0, 13.0));
+        let down = egui::Rect::from_min_size(
+            egui::pos2(keys_rect.left(), keys_rect.top() + 15.0),
+            egui::vec2(15.0, 13.0),
+        );
         egui::Image::new(egui::include_image!("../assets/key-up.svg"))
-            .fit_to_exact_size(egui::vec2(9.0, 9.0)).paint_at(row, up.shrink(1.5));
+            .fit_to_exact_size(up.size())
+            .paint_at(row, up);
         egui::Image::new(egui::include_image!("../assets/key-down.svg"))
-            .fit_to_exact_size(egui::vec2(9.0, 9.0)).paint_at(row, down.shrink(1.5));
+            .fit_to_exact_size(down.size())
+            .paint_at(row, down);
 
         numeric_field_u32(row, value, 0, 2000, 10.0, "", " ms", field_width, tooltip);
     });
