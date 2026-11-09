@@ -2052,21 +2052,37 @@ impl eframe::App for BlazeApp {
                         } else {
                             "Detect Silence"
                         };
-                        let detect_response = ui.add_enabled(
-                            can_detect,
-                            egui::Button::new(
-                                egui::RichText::new(detect_label)
-                                    .size(14.0)
-                                    .strong()
-                                    .color(egui::Color32::from_rgb(255, 246, 241)),
+                        let detect_response = ui.scope(|ui| {
+                            let visuals = &mut ui.style_mut().visuals.widgets;
+                            let button_text = egui::Color32::from_rgb(255, 247, 243);
+                            let border = egui::Color32::from_rgb(190, 91, 67);
+                            visuals.inactive.bg_fill = egui::Color32::from_rgb(112, 48, 36);
+                            visuals.inactive.bg_stroke =
+                                egui::Stroke::new(1.0, border);
+                            visuals.inactive.fg_stroke =
+                                egui::Stroke::new(1.0, button_text);
+                            visuals.hovered.bg_fill = egui::Color32::from_rgb(143, 61, 44);
+                            visuals.hovered.bg_stroke =
+                                egui::Stroke::new(1.2, egui::Color32::from_rgb(230, 119, 88));
+                            visuals.hovered.fg_stroke =
+                                egui::Stroke::new(1.0, button_text);
+                            visuals.active.bg_fill = egui::Color32::from_rgb(88, 38, 30);
+                            visuals.active.bg_stroke =
+                                egui::Stroke::new(1.0, border);
+                            visuals.active.fg_stroke =
+                                egui::Stroke::new(1.0, button_text);
+
+                            ui.add_enabled(
+                                can_detect,
+                                egui::Button::new(
+                                    egui::RichText::new(detect_label)
+                                        .size(14.0)
+                                        .strong(),
+                                )
+                                .corner_radius(egui::CornerRadius::same(7)),
                             )
-                            .fill(egui::Color32::from_rgb(154, 61, 42))
-                            .stroke(egui::Stroke::new(
-                                1.0,
-                                egui::Color32::from_rgb(205, 91, 66),
-                            ))
-                            .min_size(egui::vec2(ui.available_width(), 40.0)),
-                        );
+                            .on_hover_text("Scan the video's audio and mark detected silent sections")
+                        }).inner;
                         if detect_response.clicked() {
                             self.start_silence_detection(ui.ctx());
                         }
