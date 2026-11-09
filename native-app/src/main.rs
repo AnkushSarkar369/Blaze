@@ -1550,7 +1550,15 @@ impl eframe::App for BlazeApp {
                 egui::Frame::new()
                     .fill(egui::Color32::from_rgb(10, 11, 12))
                     .stroke(egui::Stroke::NONE)
-                    .inner_margin(egui::Margin::symmetric(16, 14)),
+                    // Expert Mode's controls were sitting closer to the splitter.
+                    // Give that layout the missing 12 px on the left while keeping
+                    // the right inset unchanged.
+                    .inner_margin(egui::Margin {
+                        left: if self.expert_mode { 28 } else { 16 },
+                        right: 16,
+                        top: 14,
+                        bottom: 14,
+                    }),
             )
             .show_separator_line(false)
             .resizable(false)
