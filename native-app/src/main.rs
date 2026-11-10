@@ -26,12 +26,12 @@ const DEBUG_LICENSE_KEY: &str = "BLAZE-DEMO-KEY-2026";
 const DETECTION_DB_VALUES: [f64; 5] = [32.0, 26.0, 22.0, 18.0, 14.0];
 
 const COLOR_BG: egui::Color32 = egui::Color32::from_rgb(10, 11, 12);
-const COLOR_SURFACE: egui::Color32 = COLOR_SURFACE;
+const COLOR_SURFACE: egui::Color32 = egui::Color32::from_rgb(19, 21, 24);
 const COLOR_SURFACE_RAISED: egui::Color32 = egui::Color32::from_rgb(23, 25, 28);
 const COLOR_SURFACE_HOVER: egui::Color32 = egui::Color32::from_rgb(30, 32, 35);
 const COLOR_BORDER: egui::Color32 = egui::Color32::from_rgb(43, 46, 50);
-const COLOR_TEXT: egui::Color32 = COLOR_TEXT;
-const COLOR_MUTED: egui::Color32 = COLOR_MUTED;
+const COLOR_TEXT: egui::Color32 = egui::Color32::from_rgb(239, 241, 243);
+const COLOR_MUTED: egui::Color32 = egui::Color32::from_rgb(177, 182, 188);
 const COLOR_FAINT: egui::Color32 = egui::Color32::from_rgb(134, 139, 146);
 const COLOR_ACCENT: egui::Color32 = egui::Color32::from_rgb(255, 104, 79);
 const COLOR_ACCENT_HOVER: egui::Color32 = egui::Color32::from_rgb(255, 143, 119);
