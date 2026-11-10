@@ -732,7 +732,7 @@ fn mode_selection_card(
     let group_left = rect.center().x - group_width * 0.5;
     let icon_center = egui::pos2(group_left + 14.0, rect.top() + card_height * 0.36);
     let icon_source = match icon {
-        ModeCardIcon::Blaze => egui::include_image!("../assets/blaze-mark.svg"),
+        ModeCardIcon::Blaze => egui::include_image!("../assets/mode-blaze-bolt.svg"),
         ModeCardIcon::Precision => egui::include_image!("../assets/precision-target.svg"),
     };
     egui::Image::new(icon_source)
