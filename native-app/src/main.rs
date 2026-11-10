@@ -25,6 +25,58 @@ const FREE_EXPORT_LIMIT: u32 = 2;
 const DEBUG_LICENSE_KEY: &str = "BLAZE-DEMO-KEY-2026";
 const DETECTION_DB_VALUES: [f64; 5] = [32.0, 26.0, 22.0, 18.0, 14.0];
 
+const COLOR_BG: egui::Color32 = egui::Color32::from_rgb(10, 11, 12);
+const COLOR_SURFACE: egui::Color32 = egui::Color32::from_rgb(19, 21, 24);
+const COLOR_SURFACE_RAISED: egui::Color32 = egui::Color32::from_rgb(23, 25, 28);
+const COLOR_SURFACE_HOVER: egui::Color32 = egui::Color32::from_rgb(30, 32, 35);
+const COLOR_BORDER: egui::Color32 = egui::Color32::from_rgb(43, 46, 50);
+const COLOR_TEXT: egui::Color32 = egui::Color32::from_rgb(239, 241, 243);
+const COLOR_MUTED: egui::Color32 = egui::Color32::from_rgb(177, 182, 188);
+const COLOR_FAINT: egui::Color32 = egui::Color32::from_rgb(134, 139, 146);
+const COLOR_ACCENT: egui::Color32 = egui::Color32::from_rgb(255, 104, 79);
+const COLOR_ACCENT_HOVER: egui::Color32 = egui::Color32::from_rgb(255, 143, 119);
+const COLOR_ACCENT_TEXT: egui::Color32 = egui::Color32::from_rgb(255, 247, 243);
+const COLOR_BLUE: egui::Color32 = egui::Color32::from_rgb(132, 177, 218);
+
+fn apply_blaze_theme(ctx: &egui::Context) {
+    ctx.set_theme(egui::Theme::Dark);
+    let mut visuals = egui::Visuals::dark();
+    visuals.panel_fill = COLOR_BG;
+    visuals.window_fill = COLOR_BG;
+    visuals.extreme_bg_color = COLOR_BG;
+    visuals.faint_bg_color = COLOR_BG;
+    visuals.widgets.noninteractive.bg_fill = COLOR_BG;
+    visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, COLOR_TEXT);
+    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, COLOR_BORDER);
+    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(34, 36, 39);
+    visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, COLOR_BORDER);
+    visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, COLOR_TEXT);
+    visuals.widgets.hovered.bg_fill = COLOR_SURFACE_HOVER;
+    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, COLOR_ACCENT_HOVER);
+    visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, COLOR_TEXT);
+    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(39, 34, 33);
+    visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, COLOR_ACCENT);
+    visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, COLOR_TEXT);
+    visuals.selection.bg_fill = egui::Color32::from_rgb(92, 45, 39);
+    visuals.selection.stroke = egui::Stroke::new(1.0, COLOR_ACCENT);
+    visuals.hyperlink_color = COLOR_ACCENT_HOVER;
+    ctx.set_visuals(visuals);
+
+    ctx.all_styles_mut(|style| {
+        use egui::{FontFamily, FontId, TextStyle};
+        style.animation_time = 0.14;
+        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+        style.spacing.button_padding = egui::vec2(14.0, 9.0);
+        style.spacing.interact_size = egui::vec2(40.0, 28.0);
+        style.text_styles.insert(TextStyle::Body, FontId::new(14.0, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Button, FontId::new(13.5, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Small, FontId::new(11.5, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Heading, FontId::new(22.0, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Monospace, FontId::new(12.5, FontFamily::Monospace));
+        style.visuals.override_text_color = Some(COLOR_TEXT);
+    });
+}
+
 fn open_external_url(url: &str) -> Result<(), String> {
     open::that(url).map_err(|error| format!("Could not open the browser: {error}"))
 }
@@ -801,41 +853,11 @@ impl BlazeApp {
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         egui_extras::install_image_loaders(&cc.egui_ctx);
 
-        // Keep native window decorations in the same dark theme as the app.
-        cc.egui_ctx.set_theme(egui::Theme::Dark);
+        // Apply the shared website/application design tokens.
+        apply_blaze_theme(&cc.egui_ctx);
         cc.egui_ctx.send_viewport_cmd(
             egui::ViewportCommand::Title(APP_TITLE.to_owned()),
         );
-
-        let mut visuals = egui::Visuals::dark();
-        let app_background = egui::Color32::from_rgb(10, 11, 12);
-        let panel_border = egui::Color32::from_rgb(42, 44, 47);
-        visuals.panel_fill = app_background;
-        visuals.window_fill = app_background;
-        visuals.extreme_bg_color = app_background;
-        visuals.faint_bg_color = app_background;
-        visuals.widgets.noninteractive.bg_fill = app_background;
-        visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, panel_border);
-        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(34, 36, 39);
-        visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(46, 49, 52);
-        visuals.widgets.active.bg_fill = egui::Color32::from_rgb(255, 104, 79);
-        visuals.hyperlink_color = egui::Color32::from_rgb(255, 120, 96);
-        visuals.selection.bg_fill = egui::Color32::from_rgb(92, 45, 39);
-        visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 104, 79));
-        cc.egui_ctx.set_visuals(visuals);
-
-        // A single rounded geometric sans-serif system, with restrained hierarchy.
-        cc.egui_ctx.all_styles_mut(|style| {
-            use egui::{FontFamily, FontId, TextStyle};
-            style.animation_time = 0.14;
-            style.spacing.item_spacing = egui::vec2(8.0, 5.0);
-            style.spacing.button_padding = egui::vec2(12.0, 7.0);
-            style.text_styles.insert(TextStyle::Body, FontId::new(14.0, FontFamily::Proportional));
-            style.text_styles.insert(TextStyle::Button, FontId::new(13.5, FontFamily::Proportional));
-            style.text_styles.insert(TextStyle::Small, FontId::new(11.5, FontFamily::Proportional));
-            style.text_styles.insert(TextStyle::Heading, FontId::new(22.0, FontFamily::Proportional));
-            style.text_styles.insert(TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace));
-        });
 
         let playback = Playback::new(cc)?;
         let (probe_tx, probe_rx) = mpsc::channel();
