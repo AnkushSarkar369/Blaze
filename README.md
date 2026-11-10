@@ -119,7 +119,7 @@ This is the working product roadmap. Check items off here as they are completed 
 ## Run
 
 ```bash
-cargo run --manifest-path native-app/Cargo.toml
+cargo run -p blaze-native
 ```
 
 Development builds and testing are performed locally. Automated GitHub workflows are intentionally not used.
