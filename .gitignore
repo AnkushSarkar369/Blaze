@@ -1,4 +1,3 @@
 /target/
-/native-app/target/
 /BIN/*
 !/BIN/.gitkeep
