@@ -26,12 +26,12 @@ const DEBUG_LICENSE_KEY: &str = "BLAZE-DEMO-KEY-2026";
 const DETECTION_DB_VALUES: [f64; 5] = [32.0, 26.0, 22.0, 18.0, 14.0];
 
 const COLOR_BG: egui::Color32 = egui::Color32::from_rgb(10, 11, 12);
-const COLOR_SURFACE: egui::Color32 = egui::Color32::from_rgb(19, 21, 24);
+const COLOR_SURFACE: egui::Color32 = COLOR_SURFACE;
 const COLOR_SURFACE_RAISED: egui::Color32 = egui::Color32::from_rgb(23, 25, 28);
 const COLOR_SURFACE_HOVER: egui::Color32 = egui::Color32::from_rgb(30, 32, 35);
 const COLOR_BORDER: egui::Color32 = egui::Color32::from_rgb(43, 46, 50);
-const COLOR_TEXT: egui::Color32 = egui::Color32::from_rgb(239, 241, 243);
-const COLOR_MUTED: egui::Color32 = egui::Color32::from_rgb(177, 182, 188);
+const COLOR_TEXT: egui::Color32 = COLOR_TEXT;
+const COLOR_MUTED: egui::Color32 = COLOR_MUTED;
 const COLOR_FAINT: egui::Color32 = egui::Color32::from_rgb(134, 139, 146);
 const COLOR_ACCENT: egui::Color32 = egui::Color32::from_rgb(255, 104, 79);
 const COLOR_ACCENT_HOVER: egui::Color32 = egui::Color32::from_rgb(255, 143, 119);
@@ -233,8 +233,8 @@ fn help_card(ui: &mut egui::Ui, title: &str, description: &str) {
     let bottom_pad = 10.0;
     let title_font = FontId::new(13.5, FontFamily::Proportional);
     let description_font = FontId::new(12.5, FontFamily::Proportional);
-    let title_color = egui::Color32::from_rgb(239, 241, 243);
-    let description_color = egui::Color32::from_rgb(177, 182, 188);
+    let title_color = COLOR_TEXT;
+    let description_color = COLOR_MUTED;
 
     let title_galley = ui.painter().layout_no_wrap(
         title.to_owned(),
@@ -262,12 +262,12 @@ fn help_card(ui: &mut egui::Ui, title: &str, description: &str) {
     painter.rect_filled(
         rect,
         egui::CornerRadius::same(7),
-        egui::Color32::from_rgb(19, 21, 24),
+        COLOR_SURFACE,
     );
     painter.rect_stroke(
         rect,
         egui::CornerRadius::same(7),
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 47, 52)),
+        egui::Stroke::new(1.0, COLOR_BORDER),
         egui::StrokeKind::Inside,
     );
     painter.galley(
@@ -319,7 +319,7 @@ fn help_shortcut(ui: &mut egui::Ui, key: &str, description: &str) {
     painter.rect_stroke(
         rect,
         egui::CornerRadius::same(6),
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 47, 52)),
+        egui::Stroke::new(1.0, COLOR_BORDER),
         egui::StrokeKind::Inside,
     );
     painter.text(
