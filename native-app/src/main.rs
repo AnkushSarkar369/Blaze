@@ -329,7 +329,7 @@ fn help_card(ui: &mut egui::Ui, title: &str, description: &str) {
 
 
 fn copy_support_email(ui: &mut egui::Ui) {
-    let copied_id = ui.id().with("support-email-copied");
+    let copied_id = ui.scope_id().with("support-email-copied");
     let mut copied_recently = ui.ctx().data(|data| {
         data.get_temp::<Instant>(copied_id)
             .is_some_and(|time| time.elapsed() < Duration::from_secs(2))
@@ -352,11 +352,29 @@ fn copy_support_email(ui: &mut egui::Ui) {
         response.on_hover_text("Copy email address");
 
         if copied_recently {
+            let (check_rect, _) =
+                ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+            let check_color = egui::Color32::from_rgb(105, 205, 130);
+            let check_stroke = egui::Stroke::new(1.8, check_color);
+            ui.painter().line_segment(
+                [
+                    egui::pos2(check_rect.left() + 1.0, check_rect.center().y),
+                    egui::pos2(check_rect.left() + 4.5, check_rect.bottom() - 2.0),
+                ],
+                check_stroke,
+            );
+            ui.painter().line_segment(
+                [
+                    egui::pos2(check_rect.left() + 4.5, check_rect.bottom() - 2.0),
+                    egui::pos2(check_rect.right() - 1.0, check_rect.top() + 2.0),
+                ],
+                check_stroke,
+            );
             ui.label(
-                egui::RichText::new("✓ Copied!")
+                egui::RichText::new("Copied!")
                     .size(11.5)
                     .strong()
-                    .color(egui::Color32::from_rgb(105, 205, 130)),
+                    .color(check_color),
             );
             ui.ctx().request_repaint_after(Duration::from_millis(80));
         }
