@@ -1,7 +1,7 @@
 use std::{
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use blaze_engine::{MediaEngine, MediaInfo};
@@ -143,27 +143,36 @@ fn license_state_file() -> Option<PathBuf> {
     Some(config_dir.join("Blaze").join("license-state"))
 }
 
-fn load_license_state() -> (bool, u32) {
+fn load_license_state() -> (u32, Option<String>) {
     let Some(path) = license_state_file() else {
-        return (false, 0);
+        return (0, None);
     };
     let Ok(contents) = std::fs::read_to_string(path) else {
-        return (false, 0);
+        return (0, None);
     };
 
     let mut lines = contents.lines();
-    let stored_activation = lines.next() == Some("true");
+    let _stored_activation = lines.next() == Some("true");
     let successful_exports = lines
         .next()
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(0)
         .min(FREE_EXPORT_LIMIT);
-    let activation_source_is_gumroad = lines.next() == Some("gumroad-v1");
+    let third_line = lines.next();
+    let (license_key, marker) = if third_line == Some("gumroad-v1") {
+        (None, true)
+    } else {
+        (third_line.filter(|value| !value.is_empty()).map(str::to_owned), lines.next() == Some("gumroad-v1"))
+    };
 
-    (stored_activation && activation_source_is_gumroad, successful_exports)
+    if marker {
+        (successful_exports, license_key)
+    } else {
+        (successful_exports, None)
+    }
 }
 
-fn persist_license_state(activated: bool, successful_exports: u32) {
+fn persist_license_state(activated: bool, successful_exports: u32, license_key: Option<&str>) {
     let Some(path) = license_state_file() else {
         return;
     };
@@ -174,9 +183,10 @@ fn persist_license_state(activated: bool, successful_exports: u32) {
         eprintln!("Blaze: could not create license state directory: {error}");
         return;
     }
+    let key = license_key.unwrap_or("");
     if let Err(error) = std::fs::write(
         path,
-        format!("{}\n{}\ngumroad-v1\n", activated, successful_exports.min(FREE_EXPORT_LIMIT)),
+        format!("{}\n{}\n{}\ngumroad-v1\n", activated, successful_exports.min(FREE_EXPORT_LIMIT), key),
     ) {
         eprintln!("Blaze: could not save license state: {error}");
     }
@@ -848,6 +858,9 @@ struct BlazeApp {
     license_tx: Sender<LicenseResult>,
     license_rx: Receiver<LicenseResult>,
     license_verifying: bool,
+    license_key: Option<String>,
+    license_activation_pending: bool,
+    last_license_check: Instant,
     export_status: Option<(bool, String)>,
     detection_level: usize,
     padding_level: usize,
@@ -907,7 +920,7 @@ impl BlazeApp {
         let (keyframe_tx, keyframe_rx) = mpsc::channel();
         let (export_tx, export_rx) = mpsc::channel();
         let (license_tx, license_rx) = mpsc::channel();
-        let (license_activated, successful_exports) = load_license_state();
+        let (successful_exports, license_key) = load_license_state();
 
         Ok(Self {
             playback,
@@ -940,6 +953,9 @@ impl BlazeApp {
             license_tx,
             license_rx,
             license_verifying: false,
+            license_key,
+            license_activation_pending: false,
+            last_license_check: Instant::now() - Duration::from_secs(60),
             export_status: None,
             detection_level: 2,
             padding_level: 1,
@@ -964,7 +980,7 @@ impl BlazeApp {
             show_license_dialog: false,
             license_key_input: String::new(),
             license_notice: None,
-            license_activated,
+            license_activated: false,
             successful_exports,
         })
     }
@@ -1232,6 +1248,9 @@ impl BlazeApp {
             return;
         }
         self.license_verifying = true;
+        self.license_activation_pending = true;
+        self.license_key = Some(key.clone());
+        self.last_license_check = Instant::now();
         self.license_notice = Some("Checking your purchase with Gumroad…".to_owned());
         let sender = self.license_tx.clone();
         let repaint = ctx.clone();
@@ -1248,17 +1267,26 @@ impl BlazeApp {
             match result {
                 Ok(uses) => {
                     self.license_activated = true;
-                    self.license_notice = Some(format!("Blaze is activated. Cut away! (Gumroad uses: {uses})"));
-                    persist_license_state(self.license_activated, self.successful_exports);
-                    self.license_key_input.clear();
+                    if self.license_activation_pending {
+                        self.license_notice = Some(format!("Blaze is activated. Cut away! (Gumroad uses: {uses})"));
+                        self.license_key_input.clear();
+                    }
+                    self.license_activation_pending = false;
+                    persist_license_state(self.license_activated, self.successful_exports, self.license_key.as_deref());
                 }
-                Err(message) => self.license_notice = Some(message),
+                Err(message) => {
+                    self.license_activated = false;
+                    self.license_activation_pending = false;
+                    self.license_notice = Some(message);
+                    persist_license_state(false, self.successful_exports, self.license_key.as_deref());
+                }
             }
         }
     }
 
     fn start_blaze_export(&mut self, output: PathBuf, ctx: &egui::Context) {
         if self.export_running || !self.can_export() { return; }
+        let license_key = self.license_key.clone();
         let (Some(source), Some(info)) = (self.selected_path.clone(), self.media_info.clone()) else { return; };
         let ranges: Vec<(f64, f64)> = self.edit_regions.iter().map(|r| (r.start, r.end)).collect();
         let duration = info.duration;
@@ -1270,9 +1298,17 @@ impl BlazeApp {
         let repaint = ctx.clone();
 
         std::thread::spawn(move || {
-            let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
-            let engine = MediaEngine::new([tools]);
-            let result = export::export_blaze_video(&engine, &source, &output, duration, &ranges)
+            let result = if let Some(key) = license_key.as_deref() {
+                verify_gumroad_license(key, false).and_then(|_| {
+                    let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
+                    let engine = MediaEngine::new([tools]);
+                    export::export_blaze_video(&engine, &source, &output, duration, &ranges)
+                })
+            } else {
+                let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
+                let engine = MediaEngine::new([tools]);
+                export::export_blaze_video(&engine, &source, &output, duration, &ranges)
+            }
                 .map(|report| {
                     let mut message = format!(
                         "Blaze Export completed.\n{}\nDuration: {:.2}s",
@@ -1297,6 +1333,7 @@ impl BlazeApp {
         ctx: &egui::Context,
     ) {
         if self.export_running || !self.can_export() { return; }
+        let license_key = self.license_key.clone();
         let (Some(source), Some(info)) = (self.selected_path.clone(), self.media_info.clone()) else { return; };
         let ranges: Vec<(f64, f64)> = self.edit_regions.iter().map(|r| (r.start, r.end)).collect();
         self.export_generation = self.export_generation.wrapping_add(1);
@@ -1307,8 +1344,13 @@ impl BlazeApp {
         let repaint = ctx.clone();
 
         std::thread::spawn(move || {
-            let result = export::export_interchange(format, &source, &info, &ranges, &output)
-                .map(|_| format!("Timeline exported:\n{}", output.display()));
+            let result = if let Some(key) = license_key.as_deref() {
+                verify_gumroad_license(key, false).and_then(|_| {
+                    export::export_interchange(format, &source, &info, &ranges, &output)
+                })
+            } else {
+                export::export_interchange(format, &source, &info, &ranges, &output)
+            }.map(|_| format!("Timeline exported:\n{}", output.display()));
             let _ = sender.send((generation, result));
             repaint.request_repaint();
         });
@@ -1323,7 +1365,7 @@ impl BlazeApp {
                     if !self.license_activated {
                         self.successful_exports =
                             self.successful_exports.saturating_add(1).min(FREE_EXPORT_LIMIT);
-                        persist_license_state(self.license_activated, self.successful_exports);
+                        persist_license_state(self.license_activated, self.successful_exports, self.license_key.as_deref());
                     }
                     (true, message)
                 }
@@ -1342,6 +1384,24 @@ impl eframe::App for BlazeApp {
         self.poll_keyframes(ctx);
         self.poll_exports();
         self.poll_license_verification();
+
+        // Revalidate every activated installation at startup and every 60 seconds.
+        if self.license_key.is_some()
+            && !self.license_verifying
+            && self.last_license_check.elapsed() >= Duration::from_secs(60)
+        {
+            let key = self.license_key.clone().unwrap_or_default();
+            self.license_verifying = true;
+            self.license_activation_pending = false;
+            self.last_license_check = Instant::now();
+            let sender = self.license_tx.clone();
+            let repaint = ctx.clone();
+            std::thread::spawn(move || {
+                let result = verify_gumroad_license(&key, false);
+                let _ = sender.send(result);
+                repaint.request_repaint();
+            });
+        }
 
         // Global transport shortcut: handle Space at the app level rather
         // than inside a particular panel, so it works regardless of focus
