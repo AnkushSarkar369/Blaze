@@ -3222,15 +3222,6 @@ impl eframe::App for BlazeApp {
                         });
                     });
                 });
-        } else {
-            // Persistent activation entry shown after Quick Help is dismissed.
-            egui::Area::new(egui::Id::new("activation-entry"))
-                .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-18.0, -12.0))
-                .show(ui.ctx(), |ui| {
-                    if ui.small_button("Activate Blaze").clicked() {
-                        self.show_license_dialog = true;
-                    }
-                });
         }
 
         if self.show_license_dialog {
