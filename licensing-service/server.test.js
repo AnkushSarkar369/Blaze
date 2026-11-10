@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluatePurchase } from "./server.js";
+import { evaluatePurchase, verifyLicense } from "./server.js";
 
 const MONTHLY = { plan: "monthly", productId: "Niyme89XCcFC44ShhEPPrQ==" };
 const PERMANENT = { plan: "permanent", productId: "ksPYCeAJW8TtmOjsBRQ0OA==" };
@@ -89,4 +89,85 @@ test("refunds, chargebacks and unresolved disputes revoke both plans", () => {
 
 test("a product ID mismatch is denied", () => {
   assert.equal(evaluatePurchase(base, PERMANENT).licensed, false);
+});
+
+test("a permanent key is checked against both products and resolves as permanent", async () => {
+  const productChecks = [];
+  const fetchImpl = async (_url, options) => {
+    const form = options.body;
+    const productId = form.get("product_id");
+    productChecks.push(productId);
+    if (productId === MONTHLY.productId) {
+      return { status: 404, ok: false };
+    }
+    return {
+      status: 200,
+      ok: true,
+      json: async () => ({
+        success: true,
+        purchase: {
+          product_id: PERMANENT.productId,
+          refunded: false,
+          chargebacked: false,
+          disputed: false
+        }
+      })
+    };
+  };
+
+  assert.deepEqual(await verifyLicense("permanent-key", false, fetchImpl), {
+    licensed: true, plan: "permanent", status: "permanent", valid_until: null
+  });
+  assert.deepEqual(productChecks, [MONTHLY.productId, PERMANENT.productId]);
+});
+
+test("a monthly key resolves on the first product check without trying permanent", async () => {
+  const productChecks = [];
+  const fetchImpl = async (_url, options) => {
+    const form = options.body;
+    productChecks.push(form.get("product_id"));
+    return {
+      status: 200,
+      ok: true,
+      json: async () => ({
+        success: true,
+        purchase: { ...base, subscription_cancelled_at: "2026-12-10T16:08:18Z" }
+      })
+    };
+  };
+
+  assert.equal((await verifyLicense("monthly-key", false, fetchImpl)).status, "cancelled_active");
+  assert.deepEqual(productChecks, [MONTHLY.productId]);
+});
+
+test("activation increments Gumroad uses once, after a valid entitlement is established", async () => {
+  const usesFlags = [];
+  const fetchImpl = async (_url, options) => {
+    const form = options.body;
+    usesFlags.push(form.get("increment_uses_count"));
+    return {
+      status: 200,
+      ok: true,
+      json: async () => ({ success: true, purchase: base })
+    };
+  };
+
+  assert.equal((await verifyLicense("monthly-key", true, fetchImpl)).licensed, true);
+  assert.deepEqual(usesFlags, ["false", "true"]);
+});
+
+test("routine checks never increment Gumroad uses", async () => {
+  const usesFlags = [];
+  const fetchImpl = async (_url, options) => {
+    usesFlags.push(options.body.get("increment_uses_count"));
+    return { status: 200, ok: true, json: async () => ({ success: true, purchase: base }) };
+  };
+
+  await verifyLicense("monthly-key", false, fetchImpl);
+  assert.deepEqual(usesFlags, ["false"]);
+});
+
+test("Gumroad service errors fail as errors, not as invalid purchases", async () => {
+  const fetchImpl = async () => ({ status: 503, ok: false });
+  await assert.rejects(() => verifyLicense("monthly-key", false, fetchImpl));
 });
