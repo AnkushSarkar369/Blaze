@@ -7,7 +7,7 @@ Server-side verification for the two Gumroad products used by Blaze:
 | Blaze Monthly | `Niyme89XCcFC44ShhEPPrQ==` | Monthly subscription |
 | Blaze Permanent | `ksPYCeAJW8TtmOjsBRQ0OA==` | Permanent licence |
 
-The service tries the submitted key against the Monthly product first, then the Permanent product. Gumroad requests always use `increment_uses_count=false`. No Gumroad secret is required or sent: the license verification endpoint uses the product ID and license key.
+The service tries the submitted key against the Monthly product first, then the Permanent product. Routine checks use `increment_uses_count=false`. On activation, it first validates without consuming a use, then performs one counted verification with `increment_uses_count=true` to preserve the existing Gumroad activation counter. No Gumroad secret is required or sent: the license verification endpoint uses the product ID and license key.
 
 ## Run locally
 
