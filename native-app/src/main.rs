@@ -2399,6 +2399,7 @@ impl eframe::App for BlazeApp {
                             let color = if *success { egui::Color32::LIGHT_GREEN } else { egui::Color32::LIGHT_RED };
                             ui.colored_label(color, message);
                         }
+                    }
                     ToolTab::License => {
                         ui.heading("License");
                         ui.add_space(4.0);
@@ -3112,19 +3113,14 @@ impl eframe::App for BlazeApp {
                 });
         } else {
             // Persistent activation entry shown after Quick Help is dismissed.
-            egui::TopBottomPanel::bottom("license-entry")
-                .frame(egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(10, 11, 12))
-                    .inner_margin(egui::Margin::symmetric(12, 4)))
-                .show(ui, |ui| {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("Enter License Key").clicked() {
-                            self.show_license_dialog = true;
-                        }
-                    });
+            egui::Area::new(egui::Id::new("license-entry"))
+                .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-18.0, -12.0))
+                .show(ui.ctx(), |ui| {
+                    if ui.small_button("Enter License Key").clicked() {
+                        self.show_license_dialog = true;
+                    }
                 });
         }
-    }
 
         if self.show_license_dialog {
             egui::Window::new("Enter License Key")
