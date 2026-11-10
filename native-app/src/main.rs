@@ -21,8 +21,10 @@ use waveform::Waveform;
 
 const APP_TITLE: &str = "Blaze — Ankush Sarkar";
 const FREE_EXPORT_LIMIT: u32 = 2;
-const GUMROAD_PRODUCT_ID: &str = "ksPYCeAJW8TtmOjsBRQ0OA==";
-const GUMROAD_VERIFY_URL: &str = "https://api.gumroad.com/v2/licenses/verify";
+const LICENSE_API_URL: &str = match option_env!("BLAZE_LICENSE_API_URL") {
+    Some(url) => url,
+    None => "https://licensing.blaze.example/v1/verify",
+};
 const DETECTION_DB_VALUES: [f64; 5] = [32.0, 26.0, 22.0, 18.0, 14.0];
 
 const COLOR_BG: egui::Color32 = egui::Color32::from_rgb(10, 11, 12);
@@ -77,46 +79,39 @@ fn open_external_url(url: &str) -> Result<(), String> {
     open::that(url).map_err(|error| format!("Could not open the browser: {error}"))
 }
 
-fn verify_gumroad_license(license_key: &str, increment_uses: bool) -> LicenseResult {
+fn verify_gumroad_license(license_key: &str, _increment_uses: bool) -> LicenseResult {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
         .map_err(|error| format!("Could not prepare license verification: {error}"))?;
 
     let response = client
-        .post(GUMROAD_VERIFY_URL)
-        .form(&[
-            ("product_id", GUMROAD_PRODUCT_ID),
-            ("license_key", license_key),
-            ("increment_uses_count", if increment_uses { "true" } else { "false" }),
-        ])
+        .post(LICENSE_API_URL)
+        .json(&serde_json::json!({ "license_key": license_key }))
         .send()
-        .map_err(|error| format!("Could not reach Gumroad. Check your internet connection and try again. ({error})"))?;
+        .map_err(|error| format!("Could not reach the Blaze licensing service. Check your internet connection and try again. ({error})"))?;
 
     let status = response.status();
     let body: serde_json::Value = response
         .json()
-        .map_err(|error| format!("Gumroad returned an unreadable response: {error}"))?;
+        .map_err(|error| format!("The licensing service returned an unreadable response: {error}"))?;
 
-    if !status.is_success() || body.get("success").and_then(|v| v.as_bool()) != Some(true) {
-        return Err(body.get("message").and_then(|v| v.as_str())
-            .unwrap_or("This license key could not be verified.").to_owned());
+    if !status.is_success() {
+        return Err(body.get("error").and_then(|v| v.as_str())
+            .map(|code| match code {
+                "verification_unavailable" => "Gumroad verification is temporarily unavailable. Try again later.",
+                "licensing_not_configured" => "Blaze licensing is not configured yet.",
+                _ => "The Blaze licensing service could not verify this key.",
+            })
+            .unwrap_or("The Blaze licensing service could not verify this key.").to_owned());
     }
 
-    let purchase = body.get("purchase")
-        .ok_or_else(|| "Gumroad did not return purchase details.".to_owned())?;
-    if purchase.get("product_id").and_then(|v| v.as_str()) != Some(GUMROAD_PRODUCT_ID) {
-        return Err("This license key does not belong to Blaze.".to_owned());
-    }
-    if purchase.get("refunded").and_then(|v| v.as_bool()) == Some(true) {
-        return Err("This purchase has been refunded.".to_owned());
-    }
-    if purchase.get("chargebacked").and_then(|v| v.as_bool()) == Some(true) {
-        return Err("This purchase has been charged back.".to_owned());
-    }
-    if purchase.get("disputed").and_then(|v| v.as_bool()) == Some(true)
-        && purchase.get("dispute_won").and_then(|v| v.as_bool()) != Some(true) {
-        return Err("This purchase is currently disputed.".to_owned());
+    if body.get("licensed").and_then(|v| v.as_bool()) != Some(true) {
+        return Err(match body.get("status").and_then(|v| v.as_str()) {
+            Some("expired") => "Your Blaze Monthly subscription has ended.".to_owned(),
+            Some("revoked") => "This purchase has been refunded, charged back, or disputed.".to_owned(),
+            _ => "This license is not valid for Blaze Monthly.".to_owned(),
+        });
     }
 
     Ok(())
