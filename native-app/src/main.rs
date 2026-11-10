@@ -3428,11 +3428,8 @@ impl eframe::App for BlazeApp {
                                         }
                                         HelpTab::Activation => {
                                             help_page_heading(ui, "Activation & license transfers", "Activate Blaze with your Gumroad license and keep access when moving devices.");
-                                            help_card(ui, "Activate Blaze", "Purchase Blaze to receive a license key. Open the License tab in the Tools panel, paste your key and select Activate Blaze. Your purchase is verified online.");
-                                            help_card(ui, "License status", "Once activated, Blaze verifies your license online periodically and before exports. A successful activation unlocks licensed exports on this device.");
-                                            help_card(ui, "Reinstalling or changing devices", "If you reinstall Blaze, replace your computer or switch operating systems, contact support to request a license transfer. Do this before activating on the new device.");
-                                            help_card(ui, "Request a license transfer", "Email workingankush369@gmail.com with the subject “Blaze License Migration”. Include your purchase email and explain that you are moving to a new device. Transfers are handled manually.");
-                                            help_card(ui, "Why transfers are manual", "License transfers are handled by the Blaze team to protect the license system. There is no self-service deactivation button in the application.");
+                                            help_card(ui, "Activate Blaze", "Purchase Blaze to receive a license key. Open the License tab in the Tools panel, paste your key and select Activate Blaze.");
+                                            help_card(ui, "Move to another device", "If you reinstall Blaze, replace your computer or switch operating systems, email workingankush369@gmail.com with the subject “Blaze License Migration” to request a license transfer. Include your purchase email and let us know which device or operating system you are moving to.");
                                         }
                                     }
                                     ui.add_space(12.0);
