@@ -881,6 +881,7 @@ struct BlazeApp {
     help_tab: HelpTab,
     pending_preview_fit: bool,
     show_license_dialog: bool,
+    show_migration_dialog: bool,
     license_key_input: String,
     license_notice: Option<String>,
     license_activated: bool,
@@ -976,6 +977,7 @@ impl BlazeApp {
             help_tab: HelpTab::Guide,
             pending_preview_fit: false,
             show_license_dialog: false,
+            show_migration_dialog: false,
             license_key_input: String::new(),
             license_notice: None,
             license_activated: false,
@@ -1268,6 +1270,7 @@ impl BlazeApp {
                     if self.license_activation_pending {
                         self.license_notice = Some("Blaze is activated. Cut away!".to_owned());
                         self.license_key_input.clear();
+                        self.show_migration_dialog = true;
                     }
                     self.license_activation_pending = false;
                     persist_license_state(self.license_activated, self.successful_exports, self.license_key.as_deref());
@@ -3465,6 +3468,37 @@ impl eframe::App for BlazeApp {
             }
             if close_license_dialog {
                 self.show_license_dialog = false;
+            }
+        }
+
+        if self.show_migration_dialog {
+            let mut close_migration_dialog = false;
+            egui::Window::new("Blaze is activated")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(390.0)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .open(&mut self.show_migration_dialog)
+                .show(ui.ctx(), |ui| {
+                    ui.label(egui::RichText::new("Your license is now active on this device.")
+                        .strong());
+                    ui.add_space(10.0);
+                    ui.label("If you reinstall Blaze or switch to a different device or operating system, please email us to request a license transfer.");
+                    ui.add_space(10.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Contact:");
+                        ui.hyperlink_to(
+                            "workingankush369@gmail.com",
+                            "mailto:workingankush369@gmail.com?subject=Blaze%20License%20Migration",
+                        );
+                    });
+                    ui.add_space(12.0);
+                    if ui.button("Got it").clicked() {
+                        close_migration_dialog = true;
+                    }
+                });
+            if close_migration_dialog {
+                self.show_migration_dialog = false;
             }
         }
     }
