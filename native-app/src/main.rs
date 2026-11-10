@@ -79,7 +79,7 @@ fn open_external_url(url: &str) -> Result<(), String> {
     open::that(url).map_err(|error| format!("Could not open the browser: {error}"))
 }
 
-fn verify_blaze_license(license_key: &str) -> LicenseResult {
+fn verify_blaze_license(license_key: &str, increment_uses: bool) -> LicenseResult {
     if LICENSE_API_URL.is_empty() {
         return Err("Blaze licensing is not deployed yet. Please try again later.".to_owned());
     }
@@ -91,7 +91,7 @@ fn verify_blaze_license(license_key: &str) -> LicenseResult {
 
     let response = client
         .post(LICENSE_API_URL)
-        .json(&serde_json::json!({ "license_key": license_key }))
+        .json(&serde_json::json!({ "license_key": license_key, "increment_uses_count": increment_uses }))
         .send()
         .map_err(|error| format!("Could not reach the Blaze licensing service. Check your internet connection and try again. ({error})"))?;
 
@@ -1325,7 +1325,7 @@ impl BlazeApp {
         let sender = self.license_tx.clone();
         let repaint = ctx.clone();
         std::thread::spawn(move || {
-            let result = verify_blaze_license(&key);
+            let result = verify_blaze_license(&key, true);
             let _ = sender.send(result);
             repaint.request_repaint();
         });
@@ -1380,7 +1380,7 @@ impl BlazeApp {
 
         std::thread::spawn(move || {
             let result = if let Some(key) = license_key.as_deref() {
-                verify_gumroad_license(key, false).and_then(|_| {
+                verify_blaze_license(key, false).and_then(|_| {
                     let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
                     let engine = MediaEngine::new([tools]);
                     export::export_blaze_video(&engine, &source, &output, duration, &ranges)
@@ -1479,7 +1479,7 @@ impl eframe::App for BlazeApp {
             let sender = self.license_tx.clone();
             let repaint = ctx.clone();
             std::thread::spawn(move || {
-                let result = verify_gumroad_license(&key, false);
+                let result = verify_blaze_license(&key, false);
                 let _ = sender.send(result);
                 repaint.request_repaint();
             });
