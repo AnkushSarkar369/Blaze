@@ -683,7 +683,7 @@ fn mode_selection_card(
     let visuals = ui.visuals();
     let accent = match icon {
         ModeCardIcon::Blaze => egui::Color32::from_rgb(255, 120, 92),
-        ModeCardIcon::Precision => egui::Color32::from_rgb(132, 177, 218),
+        ModeCardIcon::Precision => egui::Color32::from_rgb(255, 120, 92),
     };
     let fill = if !enabled {
         egui::Color32::from_rgb(25, 26, 28)
