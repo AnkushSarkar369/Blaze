@@ -2544,10 +2544,32 @@ impl eframe::App for BlazeApp {
                                         remaining, FREE_EXPORT_LIMIT
                                     )).size(12.0).color(ui.visuals().weak_text_color()));
                                     ui.add_space(10.0);
-                                    if ui.add(
-                                        egui::Button::new(egui::RichText::new("Get Activation Key!").strong())
-                                            .min_size(egui::vec2(ui.available_width(), 34.0))
-                                    ).clicked() {
+                                    let get_key_clicked = ui.scope(|ui| {
+                                        let widgets = &mut ui.style_mut().visuals.widgets;
+                                        let button_text = egui::Color32::from_rgb(255, 247, 243);
+                                        widgets.inactive.bg_fill = egui::Color32::from_rgb(255, 104, 79);
+                                        widgets.inactive.bg_stroke = egui::Stroke::new(
+                                            1.0, egui::Color32::from_rgb(255, 104, 79)
+                                        );
+                                        widgets.inactive.fg_stroke = egui::Stroke::new(1.0, button_text);
+                                        widgets.hovered.bg_fill = egui::Color32::from_rgb(255, 143, 119);
+                                        widgets.hovered.bg_stroke = egui::Stroke::new(
+                                            1.0, egui::Color32::from_rgb(255, 143, 119)
+                                        );
+                                        widgets.hovered.fg_stroke = egui::Stroke::new(1.0, button_text);
+                                        widgets.active.bg_fill = egui::Color32::from_rgb(190, 72, 54);
+                                        widgets.active.bg_stroke = egui::Stroke::new(
+                                            1.0, egui::Color32::from_rgb(190, 72, 54)
+                                        );
+                                        widgets.active.fg_stroke = egui::Stroke::new(1.0, button_text);
+                                        ui.add_sized(
+                                            [ui.available_width(), 36.0],
+                                            egui::Button::new(
+                                                egui::RichText::new("Get Activation Key!").strong()
+                                            ).corner_radius(egui::CornerRadius::same(7))
+                                        ).clicked()
+                                    }).inner;
+                                    if get_key_clicked {
                                         ui.ctx().open_url(egui::OpenUrl::new_tab(
                                             "https://ankushsarkar369.github.io/blaze.github.io/"
                                         ));
