@@ -20,6 +20,7 @@ The application does not use a browser engine, WebView, React, or Tauri at runti
 - Silence detection with preset and expert controls
 - Skip Cuts playback
 - Asynchronous media analysis and export jobs
+- Gumroad license-key activation with periodic entitlement verification
 
 ## Export
 
@@ -52,6 +53,8 @@ This is the working product roadmap. Check items off here as they are completed 
 ### 2. Product design and UX
 
 - [ ] Review and improve the overall application design.
+- [ ] Add standard right-click Cut, Copy, and Paste actions to editable text fields.
+- [ ] Add timeline right-click actions to set an "Add starting point" and an "Add ending point" (mouse-driven equivalents of the existing start/end-point workflow).
 - [ ] Review responsive behaviour at the supported window sizes.
 - [ ] Revisit the application colour system and decide whether to adopt a true-black interface. (Deferred decision.)
 
@@ -90,12 +93,11 @@ This is the working product roadmap. Check items off here as they are completed 
 
 ### 6. Licensing and commercial model
 
-- [ ] Define the free and paid feature split.
-- [ ] Decide pricing, license duration, activation limits, and device-transfer policy.
-- [ ] Decide whether activation and ongoing use require an internet connection.
-- [ ] Design the license and entitlement system before implementing DRM.
-- [ ] Implement proportionate licensing/DRM protections without compromising legitimate offline use.
-- [ ] Test activation, deactivation, reinstall, device changes, expired licenses, and service outages.
+- [x] Implement Gumroad license-key activation and online license verification.
+- [x] Recheck license validity at startup, periodically during use, and before export.
+- [x] Add customer-facing guidance for requesting a manual license transfer after reinstalling or changing devices/operating systems.
+- [ ] Finalise and publish pricing and the free/paid feature split.
+- [ ] Test reinstall, device changes, revoked/refunded licenses, and verification-service outages.
 - [ ] Document privacy, data collection, refunds, and support policies.
 
 ### 7. Website and sales
