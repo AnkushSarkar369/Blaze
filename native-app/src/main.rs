@@ -1426,7 +1426,7 @@ impl BlazeApp {
 
         std::thread::spawn(move || {
             let result = if let Some(key) = license_key.as_deref() {
-                verify_gumroad_license(key, false).and_then(|_| {
+                verify_blaze_license(key, false).and_then(|_| {
                     export::export_interchange(format, &source, &info, &ranges, &output)
                 })
             } else {
