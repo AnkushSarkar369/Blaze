@@ -198,28 +198,29 @@ fn help_page_heading(ui: &mut egui::Ui, title: &str, subtitle: &str) {
     use egui::{FontFamily, FontId};
     ui.label(
         egui::RichText::new(title)
-            .font(FontId::new(19.0, FontFamily::Proportional))
-            .strong(),
+            .font(FontId::new(20.0, FontFamily::Proportional))
+            .strong()
+            .color(COLOR_TEXT),
     );
-    ui.add_space(3.0);
+    ui.add_space(5.0);
     ui.label(
         egui::RichText::new(subtitle)
             .font(FontId::new(12.5, FontFamily::Proportional))
-            .color(ui.visuals().weak_text_color()),
+            .color(COLOR_MUTED),
     );
-    ui.add_space(10.0);
+    ui.add_space(12.0);
 }
 
 fn help_section_label(ui: &mut egui::Ui, label: &str) {
     use egui::{FontFamily, FontId};
-    ui.add_space(10.0);
+    ui.add_space(12.0);
     ui.label(
         egui::RichText::new(label)
             .font(FontId::new(10.5, FontFamily::Proportional))
             .strong()
-            .color(egui::Color32::from_rgb(255, 132, 108)),
+            .color(COLOR_ACCENT_HOVER),
     );
-    ui.add_space(6.0);
+    ui.add_space(7.0);
 }
 
 fn help_card(ui: &mut egui::Ui, title: &str, description: &str) {
