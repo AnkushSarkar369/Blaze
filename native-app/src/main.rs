@@ -158,8 +158,9 @@ fn load_license_state() -> (bool, u32) {
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(0)
         .min(FREE_EXPORT_LIMIT);
+    let activation_source_is_gumroad = lines.next() == Some("gumroad-v1");
 
-    (stored_activation, successful_exports)
+    (stored_activation && activation_source_is_gumroad, successful_exports)
 }
 
 fn persist_license_state(activated: bool, successful_exports: u32) {
@@ -175,7 +176,7 @@ fn persist_license_state(activated: bool, successful_exports: u32) {
     }
     if let Err(error) = std::fs::write(
         path,
-        format!("{}\n{}\n", activated, successful_exports.min(FREE_EXPORT_LIMIT)),
+        format!("{}\n{}\ngumroad-v1\n", activated, successful_exports.min(FREE_EXPORT_LIMIT)),
     ) {
         eprintln!("Blaze: could not save license state: {error}");
     }
@@ -2680,12 +2681,14 @@ impl eframe::App for BlazeApp {
                                 .desired_width(f32::INFINITY));
                             ui.add_space(8.0);
                             let activate_clicked = ui.add_enabled(
-                                !self.license_key_input.trim().is_empty(),
-                                egui::Button::new("Activate Blaze")
+                                !self.license_key_input.trim().is_empty()
+                                    && !self.license_verifying
+                                    && !self.license_activated,
+                                egui::Button::new(if self.license_verifying { "Checking…" } else { "Activate Blaze" })
                                     .min_size(egui::vec2(ui.available_width(), 36.0)),
                             ).clicked();
                             if activate_clicked {
-                                self.activate_license_key();
+                                self.activate_license_key(ui.ctx());
                             }
                         }
                         if let Some(message) = &self.license_notice {
