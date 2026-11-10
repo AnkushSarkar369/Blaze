@@ -3224,10 +3224,10 @@ impl eframe::App for BlazeApp {
                 });
         } else {
             // Persistent activation entry shown after Quick Help is dismissed.
-            egui::Area::new(egui::Id::new("license-entry"))
+            egui::Area::new(egui::Id::new("activation-entry"))
                 .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-18.0, -12.0))
                 .show(ui.ctx(), |ui| {
-                    if ui.small_button("Enter License Key").clicked() {
+                    if ui.small_button("Activate Blaze").clicked() {
                         self.show_license_dialog = true;
                     }
                 });
@@ -3236,7 +3236,7 @@ impl eframe::App for BlazeApp {
         if self.show_license_dialog {
             let mut close_license_dialog = false;
             let mut activate_license_requested = false;
-            egui::Window::new("Enter License Key")
+            egui::Window::new("Activate Blaze")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(390.0)
@@ -3246,7 +3246,7 @@ impl eframe::App for BlazeApp {
                     ui.label("Enter your activation key to unlock Blaze.");
                     ui.add_space(8.0);
                     ui.add(egui::TextEdit::singleline(&mut self.license_key_input)
-                        .hint_text("Enter license key")
+                        .hint_text("Enter activation key")
                         .desired_width(f32::INFINITY));
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
