@@ -1,24 +1,41 @@
 # Blaze licensing service
 
-Server-side Gumroad verification for Blaze Monthly. Gumroad product configuration and API communication remain on the server; the desktop client receives only a minimal entitlement result.
+Server-side verification for the two Gumroad products used by Blaze:
 
-## Local run
+| Product | Gumroad product ID | Entitlement |
+|---|---|---|
+| Blaze Monthly | `Niyme89XCcFC44ShhEPPrQ==` | Monthly subscription |
+| Blaze Permanent | `ksPYCeAJW8TtmOjsBRQ0OA==` | Permanent licence |
+
+The service tries the submitted key against the Monthly product first, then the Permanent product. Gumroad requests always use `increment_uses_count=false`. No Gumroad secret is required or sent: the license verification endpoint uses the product ID and license key.
+
+## Run locally
 
 Requires Node.js 20+.
 
 ```sh
 cd licensing-service
-cp .env.example .env
-# Export the variables from .env in your shell.
-export GUMROAD_PRODUCT_ID='Niyme89XCcFC44ShhEPPrQ=='
 npm test
+GUMROAD_MONTHLY_PRODUCT_ID='Niyme89XCcFC44ShhEPPrQ==' \
+GUMROAD_PERMANENT_PRODUCT_ID='ksPYCeAJW8TtmOjsBRQ0OA==' \
 npm start
 ```
 
-`GET /health` returns a health check. `POST /v1/verify` accepts JSON `{"license_key":"..."}` and returns `licensed`, `plan`, `status`, and `valid_until`. License keys and Gumroad purchase details are never written to logs or returned to the client.
+`GET /health` returns a health check. `POST /v1/verify` accepts JSON `{"license_key":"..."}` and returns only the entitlement:
+
+```json
+{"licensed":true,"plan":"monthly","status":"cancelled_active","valid_until":"2026-12-10T16:08:18Z"}
+```
+
+For a permanent key, the response is `{"licensed":true,"plan":"permanent","status":"permanent","valid_until":null}`.
+
+## Entitlement rules
+
+- **Monthly:** must match the Monthly product and report `recurrence: "monthly"`. Active memberships are allowed. Cancellation, fixed-length end, or failed-renewal timestamps are treated as the scheduled end of access: a future date remains active, and access is denied at or after that date.
+- **Permanent:** must match the Permanent product. It has no subscription expiry check.
+- **Both:** refunded purchases, chargebacks, and unresolved disputes are denied.
+- Invalid keys return an unlicensed result. Gumroad/network failures return HTTP 503; the desktop app fails closed.
 
 ## Deploy
 
-Deploy this directory as a Node 20+ web service. Configure `GUMROAD_PRODUCT_ID` and optionally `GUMROAD_VERIFY_SECRET` as host environment variables. Serve behind HTTPS. Set `BLAZE_LICENSE_API_URL` at build time for the desktop client to the service's absolute `/v1/verify` URL. Do not put the Gumroad verification secret in the desktop application.
-
-Subscription rules: active subscriptions are allowed; cancelled subscriptions remain allowed until Gumroad's `subscription_cancelled_at` paid-through timestamp; ended/failed subscriptions, refunds, chargebacks, unresolved disputes, wrong product IDs and non-monthly purchases are denied. API/network errors fail closed in the app.
+Deploy this directory as a Node 20+ HTTPS web service. Set the two product ID environment variables above. Build the native app with `BLAZE_LICENSE_API_URL` set to the service's absolute HTTPS `/v1/verify` endpoint. Do not put provider secrets or license keys in source control.
