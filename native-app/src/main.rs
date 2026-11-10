@@ -1,5 +1,6 @@
 use std::{
     path::PathBuf,
+    process::Command,
     sync::mpsc::{self, Receiver, Sender},
     time::Duration,
 };
@@ -24,6 +25,33 @@ const FREE_EXPORT_LIMIT: u32 = 2;
 #[cfg(debug_assertions)]
 const DEBUG_LICENSE_KEY: &str = "BLAZE-DEMO-KEY-2026";
 const DETECTION_DB_VALUES: [f64; 5] = [32.0, 26.0, 22.0, 18.0, 14.0];
+
+fn open_external_url(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("Could not open the browser: {error}"))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(url)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("Could not open the browser: {error}"))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("Could not open the browser: {error}"))
+    }
+}
 
 fn license_state_file() -> Option<PathBuf> {
     let config_dir = if cfg!(target_os = "windows") {
@@ -2570,9 +2598,16 @@ impl eframe::App for BlazeApp {
                                         ).clicked()
                                     }).inner;
                                     if get_key_clicked {
-                                        ui.ctx().open_url(egui::OpenUrl::new_tab(
+                                        match open_external_url(
                                             "https://ankushsarkar369.github.io/blaze.github.io/"
-                                        ));
+                                        ) {
+                                            Ok(()) => self.license_notice = None,
+                                            Err(error) => {
+                                                self.license_notice = Some(
+                                                    format!("Couldn't open the website: {error}")
+                                                );
+                                            }
+                                        }
                                     }
                                 }
                             });
