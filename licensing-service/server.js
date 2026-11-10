@@ -1,4 +1,5 @@
 import http from "node:http";
+import { pathToFileURL } from "node:url";
 
 const PORT = Number(process.env.PORT || 8787);
 const PRODUCTS = [
@@ -53,20 +54,20 @@ export function evaluatePurchase(purchase, product, now = Date.now()) {
     ["subscription_failed_at", "payment_failed_active"]
   ];
 
-  let validUntil = null;
-  let activeStatus = "active";
-
+  const scheduledEnds = [];
   for (const [field, status] of endFields) {
     const value = purchase[field];
     if (value == null || value === "") continue;
 
     const timestamp = Date.parse(value);
     if (!Number.isFinite(timestamp) || timestamp <= now) return denied("expired");
-
-    validUntil = value;
-    activeStatus = status;
-    break;
+    scheduledEnds.push({ value, timestamp, status });
   }
+
+  scheduledEnds.sort((a, b) => a.timestamp - b.timestamp);
+  const nextEnd = scheduledEnds[0] || null;
+  const validUntil = nextEnd?.value || null;
+  const activeStatus = nextEnd?.status || "active";
 
   return {
     licensed: true,
@@ -154,7 +155,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-if (process.env.NODE_ENV !== "test") {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`Blaze licensing service listening on ${PORT}`);
   });
