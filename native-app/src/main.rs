@@ -20,7 +20,76 @@ mod waveform;
 use waveform::Waveform;
 
 const APP_TITLE: &str = "Blaze — Ankush Sarkar";
+const FREE_EXPORT_LIMIT: u32 = 2;
+#[cfg(debug_assertions)]
+const DEBUG_LICENSE_KEY: &str = "BLAZE-DEMO-KEY-2026";
 const DETECTION_DB_VALUES: [f64; 5] = [32.0, 26.0, 22.0, 18.0, 14.0];
+
+fn license_state_file() -> Option<PathBuf> {
+    let config_dir = if cfg!(target_os = "windows") {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        std::env::var_os("HOME")
+            .map(|home| PathBuf::from(home).join("Library/Application Support"))
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+    }?;
+
+    Some(config_dir.join("Blaze").join("license-state"))
+}
+
+fn load_license_state() -> (bool, u32) {
+    let Some(path) = license_state_file() else {
+        return (false, 0);
+    };
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return (false, 0);
+    };
+
+    let mut lines = contents.lines();
+    let stored_activation = lines.next() == Some("true");
+    let successful_exports = lines
+        .next()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(0)
+        .min(FREE_EXPORT_LIMIT);
+
+    // The local demo activation is deliberately restricted to development builds.
+    (cfg!(debug_assertions) && stored_activation, successful_exports)
+}
+
+fn persist_license_state(activated: bool, successful_exports: u32) {
+    let Some(path) = license_state_file() else {
+        return;
+    };
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    if let Err(error) = std::fs::create_dir_all(parent) {
+        eprintln!("Blaze: could not create license state directory: {error}");
+        return;
+    }
+    if let Err(error) = std::fs::write(
+        path,
+        format!("{}\\n{}\\n", activated, successful_exports.min(FREE_EXPORT_LIMIT)),
+    ) {
+        eprintln!("Blaze: could not save license state: {error}");
+    }
+}
+
+fn is_valid_activation_key(value: &str) -> bool {
+    #[cfg(debug_assertions)]
+    {
+        value.trim().eq_ignore_ascii_case(DEBUG_LICENSE_KEY)
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = value;
+        false
+    }
+}
 const PADDING_MS_VALUES: [f64; 3] = [120.0, 60.0, 20.0];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -706,6 +775,8 @@ struct BlazeApp {
     show_license_dialog: bool,
     license_key_input: String,
     license_notice: Option<String>,
+    license_activated: bool,
+    successful_exports: u32,
 }
 
 fn nearest_keyframe(keyframes: &[f64], time: f64) -> Option<f64> {
@@ -768,6 +839,7 @@ impl BlazeApp {
         let (silence_tx, silence_rx) = mpsc::channel();
         let (keyframe_tx, keyframe_rx) = mpsc::channel();
         let (export_tx, export_rx) = mpsc::channel();
+        let (license_activated, successful_exports) = load_license_state();
 
         Ok(Self {
             playback,
@@ -821,6 +893,8 @@ impl BlazeApp {
             show_license_dialog: false,
             license_key_input: String::new(),
             license_notice: None,
+            license_activated,
+            successful_exports,
         })
     }
 
@@ -1077,8 +1151,28 @@ impl BlazeApp {
         }
     }
 
+    fn can_export(&self) -> bool {
+        self.license_activated || self.successful_exports < FREE_EXPORT_LIMIT
+    }
+
+    fn activate_license_key(&mut self) -> bool {
+        if is_valid_activation_key(&self.license_key_input) {
+            self.license_activated = true;
+            self.license_notice = Some(
+                "Development key accepted. Blaze is activated in this test build.".to_owned(),
+            );
+            persist_license_state(self.license_activated, self.successful_exports);
+            true
+        } else {
+            self.license_notice = Some(
+                "Invalid activation key. Check the key and try again.".to_owned(),
+            );
+            false
+        }
+    }
+
     fn start_blaze_export(&mut self, output: PathBuf, ctx: &egui::Context) {
-        if self.export_running { return; }
+        if self.export_running || !self.can_export() { return; }
         let (Some(source), Some(info)) = (self.selected_path.clone(), self.media_info.clone()) else { return; };
         let ranges: Vec<(f64, f64)> = self.edit_regions.iter().map(|r| (r.start, r.end)).collect();
         let duration = info.duration;
@@ -1116,7 +1210,7 @@ impl BlazeApp {
         output: PathBuf,
         ctx: &egui::Context,
     ) {
-        if self.export_running { return; }
+        if self.export_running || !self.can_export() { return; }
         let (Some(source), Some(info)) = (self.selected_path.clone(), self.media_info.clone()) else { return; };
         let ranges: Vec<(f64, f64)> = self.edit_regions.iter().map(|r| (r.start, r.end)).collect();
         self.export_generation = self.export_generation.wrapping_add(1);
@@ -1139,7 +1233,14 @@ impl BlazeApp {
             if generation != self.export_generation { continue; }
             self.export_running = false;
             self.export_status = Some(match result {
-                Ok(message) => (true, message),
+                Ok(message) => {
+                    if !self.license_activated {
+                        self.successful_exports =
+                            self.successful_exports.saturating_add(1).min(FREE_EXPORT_LIMIT);
+                        persist_license_state(self.license_activated, self.successful_exports);
+                    }
+                    (true, message)
+                }
                 Err(error) => (false, error),
             });
         }
@@ -2298,6 +2399,8 @@ impl eframe::App for BlazeApp {
                             Some("Blaze Export requires usable video keyframes.")
                         } else if self.edit_regions.is_empty() {
                             Some("Create at least one cut region before exporting.")
+                        } else if !self.can_export() {
+                            Some("Free export limit reached. Activate Blaze to continue exporting.")
                         } else {
                             None
                         };
@@ -2355,7 +2458,8 @@ impl eframe::App for BlazeApp {
                         let timestamp_available = self.selected_path.is_some()
                             && self.media_info.is_some()
                             && !self.loading
-                            && !self.export_running;
+                            && !self.export_running
+                            && self.can_export();
                         let timestamp_formats = [
                             ("Adobe Premiere Pro (FCP7 XML)", "xml", "Premiere_FCP7_XML", InterchangeFormat::PremiereXml),
                             ("DaVinci Resolve (FCP7 XML)", "xml", "DaVinci_Resolve_FCP7_XML", InterchangeFormat::DavinciResolve),
@@ -2385,7 +2489,10 @@ impl eframe::App for BlazeApp {
                             }
                         }
 
-                        if !timestamp_available {
+                        if !self.can_export() {
+                            ui.label(egui::RichText::new("Free export limit reached. Activate Blaze to continue exporting.")
+                                .small().color(egui::Color32::from_rgb(255, 132, 108)));
+                        } else if !timestamp_available {
                             ui.label(egui::RichText::new("Import a video to enable timestamp exports.")
                                 .small().color(ui.visuals().weak_text_color()));
                         }
@@ -2403,7 +2510,7 @@ impl eframe::App for BlazeApp {
                     ToolTab::License => {
                         ui.heading("License");
                         ui.add_space(4.0);
-                        ui.label(egui::RichText::new("Manage your Blaze license and device activation.")
+                        ui.label(egui::RichText::new("Check your activation status and manage access to Blaze.")
                             .size(12.0).color(ui.visuals().weak_text_color()));
                         ui.add_space(16.0);
                         egui::Frame::new()
@@ -2416,52 +2523,57 @@ impl eframe::App for BlazeApp {
                                     ui.label(egui::RichText::new("LICENSE STATUS").size(10.5).strong()
                                         .color(egui::Color32::from_rgb(255, 132, 108)));
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        ui.label(egui::RichText::new("FREE").size(11.0).strong()
-                                            .color(ui.visuals().weak_text_color()));
+                                        let (status, color) = if self.license_activated {
+                                            ("ACTIVATED", egui::Color32::LIGHT_GREEN)
+                                        } else {
+                                            ("FREE", ui.visuals().weak_text_color())
+                                        };
+                                        ui.label(egui::RichText::new(status).size(11.0).strong().color(color));
                                     });
                                 });
                                 ui.add_space(8.0);
-                                ui.label(egui::RichText::new("Free version").size(17.0).strong());
-                                ui.label(egui::RichText::new("Your free export allowance is available.").size(12.0)
-                                    .color(ui.visuals().weak_text_color()));
-                                ui.add_space(12.0);
-                                ui.separator();
-                                ui.add_space(8.0);
-                                ui.label(egui::RichText::new("Blaze Lifetime").strong());
-                                ui.label("One-time payment · One active device · Unlimited exports");
-                                ui.label("All future Blaze updates included.");
-                                ui.add_space(12.0);
-                                ui.add_enabled(false, egui::Button::new("Buy Lifetime — $89")
-                                    .min_size(egui::vec2(ui.available_width(), 36.0)));
-                                ui.label(egui::RichText::new("Checkout will be connected when payment integration is ready.")
-                                    .size(11.0).color(ui.visuals().weak_text_color()));
+                                if self.license_activated {
+                                    ui.label(egui::RichText::new("Blaze Activated").size(17.0).strong());
+                                    ui.label(egui::RichText::new("Unlimited exports are unlocked on this installation.")
+                                        .size(12.0).color(ui.visuals().weak_text_color()));
+                                } else {
+                                    ui.label(egui::RichText::new("Free version").size(17.0).strong());
+                                    let remaining = FREE_EXPORT_LIMIT.saturating_sub(self.successful_exports);
+                                    ui.label(egui::RichText::new(format!(
+                                        "{} of {} free exports remaining.",
+                                        remaining, FREE_EXPORT_LIMIT
+                                    )).size(12.0).color(ui.visuals().weak_text_color()));
+                                }
                             });
-                        ui.add_space(18.0);
-                        ui.strong("Already purchased?");
-                        ui.label(egui::RichText::new("Enter the license key from your purchase to activate Blaze on this device.")
-                            .size(12.0).color(ui.visuals().weak_text_color()));
-                        ui.add_space(8.0);
-                        ui.add(egui::TextEdit::singleline(&mut self.license_key_input)
-                            .hint_text("Enter license key")
-                            .desired_width(f32::INFINITY));
-                        ui.add_space(8.0);
-                        if ui.add_enabled(!self.license_key_input.trim().is_empty(),
-                            egui::Button::new("Activate License")
-                                .min_size(egui::vec2(ui.available_width(), 36.0))).clicked() {
-                            self.license_notice = Some("License activation is not connected yet.".to_owned());
+
+                        if !self.license_activated {
+                            ui.add_space(18.0);
+                            ui.strong("Get Activation Key!");
+                            ui.label(egui::RichText::new("Already have an activation key? Enter it below to unlock Blaze.")
+                                .size(12.0).color(ui.visuals().weak_text_color()));
+                            ui.add_space(8.0);
+                            ui.add(egui::TextEdit::singleline(&mut self.license_key_input)
+                                .hint_text("Enter activation key")
+                                .desired_width(f32::INFINITY));
+                            ui.add_space(8.0);
+                            let activate_clicked = ui.add_enabled(
+                                !self.license_key_input.trim().is_empty(),
+                                egui::Button::new("Activate Blaze")
+                                    .min_size(egui::vec2(ui.available_width(), 36.0)),
+                            ).clicked();
+                            if activate_clicked {
+                                self.activate_license_key();
+                            }
                         }
                         if let Some(message) = &self.license_notice {
                             ui.add_space(8.0);
-                            ui.colored_label(egui::Color32::from_rgb(235, 183, 113), message);
+                            let color = if self.license_activated {
+                                egui::Color32::LIGHT_GREEN
+                            } else {
+                                egui::Color32::from_rgb(235, 183, 113)
+                            };
+                            ui.colored_label(color, message);
                         }
-                        ui.add_space(18.0);
-                        ui.separator();
-                        ui.add_space(10.0);
-                        ui.strong("License terms");
-                        ui.label(egui::RichText::new("One active device at a time. Deactivate this device before moving the license to another computer.")
-                            .size(12.0).color(ui.visuals().weak_text_color()));
-                        ui.label(egui::RichText::new("A Lifetime purchase includes unlimited exports and all future updates.")
-                            .size(12.0).color(ui.visuals().weak_text_color()));
                     }
                     }
                     });
@@ -3123,6 +3235,7 @@ impl eframe::App for BlazeApp {
 
         if self.show_license_dialog {
             let mut close_license_dialog = false;
+            let mut activate_license_requested = false;
             egui::Window::new("Enter License Key")
                 .collapsible(false)
                 .resizable(false)
@@ -3139,7 +3252,7 @@ impl eframe::App for BlazeApp {
                     ui.horizontal(|ui| {
                         if ui.add_enabled(!self.license_key_input.trim().is_empty(),
                             egui::Button::new("Activate").min_size(egui::vec2(105.0, 32.0))).clicked() {
-                            self.license_notice = Some("License activation is not connected yet.".to_owned());
+                            activate_license_requested = true;
                         }
                         if ui.button("Cancel").clicked() {
                             close_license_dialog = true;
@@ -3153,6 +3266,9 @@ impl eframe::App for BlazeApp {
                     ui.label(egui::RichText::new("Activation will be available when the licensing server is connected.")
                         .size(11.0).color(ui.visuals().weak_text_color()));
                 });
+            if activate_license_requested && self.activate_license_key() {
+                close_license_dialog = true;
+            }
             if close_license_dialog {
                 self.show_license_dialog = false;
             }
