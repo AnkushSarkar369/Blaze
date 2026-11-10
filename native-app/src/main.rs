@@ -1,6 +1,5 @@
 use std::{
     path::PathBuf,
-    process::Command,
     sync::mpsc::{self, Receiver, Sender},
     time::Duration,
 };
@@ -27,30 +26,7 @@ const DEBUG_LICENSE_KEY: &str = "BLAZE-DEMO-KEY-2026";
 const DETECTION_DB_VALUES: [f64; 5] = [32.0, 26.0, 22.0, 18.0, 14.0];
 
 fn open_external_url(url: &str) -> Result<(), String> {
-    #[cfg(target_os = "linux")]
-    {
-        Command::new("xdg-open")
-            .arg(url)
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| format!("Could not open the browser: {error}"))
-    }
-    #[cfg(target_os = "macos")]
-    {
-        Command::new("open")
-            .arg(url)
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| format!("Could not open the browser: {error}"))
-    }
-    #[cfg(target_os = "windows")]
-    {
-        Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| format!("Could not open the browser: {error}"))
-    }
+    open::that(url).map_err(|error| format!("Could not open the browser: {error}"))
 }
 
 fn license_state_file() -> Option<PathBuf> {
