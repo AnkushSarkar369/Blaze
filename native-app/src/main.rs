@@ -2464,7 +2464,6 @@ impl eframe::App for BlazeApp {
                             .size(12.0).color(ui.visuals().weak_text_color()));
                     }
                     }
-                        }
                     });
 
                 // Fill the remaining panel area after the scroll viewport.
@@ -3154,6 +3153,7 @@ impl eframe::App for BlazeApp {
                         .size(11.0).color(ui.visuals().weak_text_color()));
                 });
         }
+    }
 
     fn on_exit(&mut self, gl: Option<&glow::Context>) {
         self.playback.shutdown(gl);
