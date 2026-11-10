@@ -2771,7 +2771,7 @@ impl eframe::App for BlazeApp {
                                         Some(LicensePlan::Monthly) => (
                                             "Blaze Monthly",
                                             self.license_valid_until.as_deref()
-                                                .map(|date| format!("Subscription cancelled. Access remains active through {date}."))
+                                                .map(|date| format!("Access remains active through {date} UTC."))
                                                 .unwrap_or_else(|| "Your monthly subscription is active.".to_owned())
                                         ),
                                         Some(LicensePlan::Permanent) => (
