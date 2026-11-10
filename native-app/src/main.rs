@@ -2534,7 +2534,7 @@ impl eframe::App for BlazeApp {
                                 ui.add_space(8.0);
                                 if self.license_activated {
                                     ui.label(egui::RichText::new("Blaze Activated").size(17.0).strong());
-                                    ui.label(egui::RichText::new("Unlimited exports are unlocked on this installation.")
+                                    ui.label(egui::RichText::new("Blaze is activated. Cut away!")
                                         .size(12.0).color(ui.visuals().weak_text_color()));
                                 } else {
                                     ui.label(egui::RichText::new("Free version").size(17.0).strong());
