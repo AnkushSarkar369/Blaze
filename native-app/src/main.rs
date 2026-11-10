@@ -73,7 +73,7 @@ fn persist_license_state(activated: bool, successful_exports: u32) {
     }
     if let Err(error) = std::fs::write(
         path,
-        format!("{}\\n{}\\n", activated, successful_exports.min(FREE_EXPORT_LIMIT)),
+        format!("{}\n{}\n", activated, successful_exports.min(FREE_EXPORT_LIMIT)),
     ) {
         eprintln!("Blaze: could not save license state: {error}");
     }
@@ -3243,7 +3243,7 @@ impl eframe::App for BlazeApp {
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .open(&mut self.show_license_dialog)
                 .show(ui.ctx(), |ui| {
-                    ui.label("Activate Blaze with the license key from your purchase.");
+                    ui.label("Enter your activation key to unlock Blaze.");
                     ui.add_space(8.0);
                     ui.add(egui::TextEdit::singleline(&mut self.license_key_input)
                         .hint_text("Enter license key")
@@ -3263,7 +3263,7 @@ impl eframe::App for BlazeApp {
                         ui.colored_label(egui::Color32::from_rgb(235, 183, 113), message);
                     }
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new("Activation will be available when the licensing server is connected.")
+                    ui.label(egui::RichText::new("Development builds accept the local test key; production key verification requires the licensing service.")
                         .size(11.0).color(ui.visuals().weak_text_color()));
                 });
             if activate_license_requested && self.activate_license_key() {
