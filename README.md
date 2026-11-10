@@ -24,7 +24,7 @@ The application does not use a browser engine, WebView, React, or Tauri at runti
 
 ## Licensing
 
-Blaze supports two separate Gumroad products: **Blaze Monthly** (recurring subscription) and **Blaze Permanent** (one-time permanent licence). The desktop app sends the entered license key to the server-side service in `licensing-service/`. The service checks the key against both product IDs and returns the matched entitlement. Monthly access ends at Gumroad's membership end timestamp; a permanent licence has no subscription expiry. Both products are subject to refund, chargeback and dispute checks.
+Blaze supports two separate Gumroad products: **Blaze Monthly** (recurring subscription) and **Blaze Permanent** (one-time permanent licence). The desktop app sends the entered license key to the server-side service in `licensing-service/`. The service checks the key against both product IDs and returns the matched entitlement. Activation increments Gumroad's Uses counter once; periodic checks and export-time checks do not consume uses. Monthly access ends at Gumroad's membership end timestamp; a permanent licence has no subscription expiry. Both products are subject to refund, chargeback and dispute checks.
 
 Deploy the service and build the desktop app with `BLAZE_LICENSE_API_URL` set to the service's HTTPS `/v1/verify` endpoint. See `licensing-service/README.md` for setup and tests.
 
