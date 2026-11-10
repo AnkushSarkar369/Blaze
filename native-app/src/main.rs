@@ -23,7 +23,7 @@ const APP_TITLE: &str = "Blaze — Ankush Sarkar";
 const FREE_EXPORT_LIMIT: u32 = 2;
 const LICENSE_API_URL: &str = match option_env!("BLAZE_LICENSE_API_URL") {
     Some(url) => url,
-    None => "https://licensing.blaze.example/v1/verify",
+    None => "",
 };
 const DETECTION_DB_VALUES: [f64; 5] = [32.0, 26.0, 22.0, 18.0, 14.0];
 
@@ -80,6 +80,9 @@ fn open_external_url(url: &str) -> Result<(), String> {
 }
 
 fn verify_gumroad_license(license_key: &str, _increment_uses: bool) -> LicenseResult {
+    if LICENSE_API_URL.is_empty() {
+        return Err("Blaze licensing is not deployed yet. Please try again later.".to_owned());
+    }
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
