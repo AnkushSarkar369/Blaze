@@ -1465,7 +1465,7 @@ impl eframe::App for BlazeApp {
         self.poll_keyframes(ctx);
         self.poll_exports();
         self.poll_license_verification();
-        ctx.request_repaint_after(Duration::from_secs(15));
+        ctx.request_repaint_after(Duration::from_secs(60));
 
         // Revalidate activated installations at startup and every five minutes.
         if self.license_key.is_some()
