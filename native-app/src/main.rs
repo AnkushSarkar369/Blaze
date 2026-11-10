@@ -27,16 +27,12 @@ const DETECTION_DB_VALUES: [f64; 5] = [32.0, 26.0, 22.0, 18.0, 14.0];
 
 const COLOR_BG: egui::Color32 = egui::Color32::from_rgb(10, 11, 12);
 const COLOR_SURFACE: egui::Color32 = egui::Color32::from_rgb(19, 21, 24);
-const COLOR_SURFACE_RAISED: egui::Color32 = egui::Color32::from_rgb(23, 25, 28);
 const COLOR_SURFACE_HOVER: egui::Color32 = egui::Color32::from_rgb(30, 32, 35);
 const COLOR_BORDER: egui::Color32 = egui::Color32::from_rgb(43, 46, 50);
 const COLOR_TEXT: egui::Color32 = egui::Color32::from_rgb(239, 241, 243);
 const COLOR_MUTED: egui::Color32 = egui::Color32::from_rgb(177, 182, 188);
-const COLOR_FAINT: egui::Color32 = egui::Color32::from_rgb(134, 139, 146);
 const COLOR_ACCENT: egui::Color32 = egui::Color32::from_rgb(255, 104, 79);
 const COLOR_ACCENT_HOVER: egui::Color32 = egui::Color32::from_rgb(255, 143, 119);
-const COLOR_ACCENT_TEXT: egui::Color32 = egui::Color32::from_rgb(255, 247, 243);
-const COLOR_BLUE: egui::Color32 = egui::Color32::from_rgb(132, 177, 218);
 
 fn apply_blaze_theme(ctx: &egui::Context) {
     ctx.set_theme(egui::Theme::Dark);
@@ -329,6 +325,42 @@ fn help_card(ui: &mut egui::Ui, title: &str, description: &str) {
         description_color,
     );
     ui.add_space(7.0);
+}
+
+
+fn copy_support_email(ui: &mut egui::Ui) {
+    let copied_id = ui.id().with("support-email-copied");
+    let mut copied_recently = ui.ctx().data(|data| {
+        data.get_temp::<Instant>(copied_id)
+            .is_some_and(|time| time.elapsed() < Duration::from_secs(2))
+    });
+
+    ui.horizontal(|ui| {
+        let response = ui.add(
+            egui::Label::new(
+                egui::RichText::new("workingankush369@gmail.com")
+                    .color(COLOR_ACCENT_HOVER)
+                    .underline(),
+            )
+            .sense(egui::Sense::click()),
+        );
+        if response.clicked() {
+            ui.ctx().copy_text("workingankush369@gmail.com".to_owned());
+            ui.ctx().data_mut(|data| data.insert_temp(copied_id, Instant::now()));
+            copied_recently = true;
+        }
+        response.on_hover_text("Copy email address");
+
+        if copied_recently {
+            ui.label(
+                egui::RichText::new("✓ Copied!")
+                    .size(11.5)
+                    .strong()
+                    .color(egui::Color32::from_rgb(105, 205, 130)),
+            );
+            ui.ctx().request_repaint_after(Duration::from_millis(80));
+        }
+    });
 }
 
 fn help_shortcut(ui: &mut egui::Ui, key: &str, description: &str) {
@@ -2702,10 +2734,7 @@ impl eframe::App for BlazeApp {
                                                 "If you reinstall Blaze or switch to a different device or operating system, email us to request a license transfer."
                                             ).size(12.0).color(ui.visuals().weak_text_color()));
                                             ui.add_space(7.0);
-                                            ui.hyperlink_to(
-                                                "workingankush369@gmail.com",
-                                                "mailto:workingankush369@gmail.com?subject=Blaze%20License%20Migration",
-                                            );
+                                            copy_support_email(ui);
                                         });
                                 } else {
                                     ui.label(egui::RichText::new("Free version").size(17.0).strong());
@@ -3429,7 +3458,8 @@ impl eframe::App for BlazeApp {
                                         HelpTab::Activation => {
                                             help_page_heading(ui, "Activation & license transfers", "Activate Blaze with your Gumroad license and keep access when moving devices.");
                                             help_card(ui, "Activate Blaze", "Purchase Blaze to receive a license key. Open the License tab in the Tools panel, paste your key and select Activate Blaze.");
-                                            help_card(ui, "Move to another device", "If you reinstall Blaze, replace your computer or switch operating systems, email workingankush369@gmail.com with the subject “Blaze License Migration” to request a license transfer. Include your purchase email and let us know which device or operating system you are moving to.");
+                                            help_card(ui, "Move to another device", "If you reinstall Blaze, replace your computer or switch operating systems, contact us to request a license transfer. Include your purchase email and let us know which device or operating system you are moving to.");
+                                             copy_support_email(ui);
                                         }
                                     }
                                     ui.add_space(12.0);
