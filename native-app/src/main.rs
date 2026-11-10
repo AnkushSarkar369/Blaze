@@ -123,9 +123,7 @@ fn verify_gumroad_license(license_key: &str, increment_uses: bool) -> LicenseRes
         return Err("This purchase is currently disputed.".to_owned());
     }
 
-    body.get("uses").and_then(|v| v.as_u64())
-        .and_then(|uses| u32::try_from(uses).ok())
-        .ok_or_else(|| "Gumroad verified the purchase but returned no usage count.".to_owned())
+    Ok(())
 }
 
 fn license_state_file() -> Option<PathBuf> {
@@ -821,7 +819,7 @@ type ProbeResult = (u64, Result<(PathBuf, MediaInfo), String>);
 type SilenceResult = (u64, Result<Vec<SilenceInterval>, String>);
 type KeyframeResult = (u64, Result<Vec<f64>, String>);
 type ExportResult = (u64, Result<String, String>);
-type LicenseResult = Result<u32, String>;
+type LicenseResult = Result<(), String>;
 enum WaveformMessage {
     Progress { generation: u64, fraction: f32 },
     Complete { generation: u64, result: Result<Vec<u8>, String> },
@@ -1265,10 +1263,10 @@ impl BlazeApp {
         while let Ok(result) = self.license_rx.try_recv() {
             self.license_verifying = false;
             match result {
-                Ok(uses) => {
+                Ok(()) => {
                     self.license_activated = true;
                     if self.license_activation_pending {
-                        self.license_notice = Some(format!("Blaze is activated. Cut away! (Gumroad uses: {uses})"));
+                        self.license_notice = Some("Blaze is activated. Cut away!".to_owned());
                         self.license_key_input.clear();
                     }
                     self.license_activation_pending = false;
@@ -2738,20 +2736,26 @@ impl eframe::App for BlazeApp {
 
                         if !self.license_activated {
                             ui.add_space(14.0);
-                            ui.label(egui::RichText::new("Already have an activation key?")
+                            ui.label(egui::RichText::new("Enter your license key")
                                 .size(12.0).color(ui.visuals().weak_text_color()));
                             ui.add_space(6.0);
                             ui.add(egui::TextEdit::singleline(&mut self.license_key_input)
-                                .hint_text("Enter activation key")
+                                .hint_text("Paste your license key")
                                 .desired_width(f32::INFINITY));
                             ui.add_space(8.0);
-                            let activate_clicked = ui.add_enabled(
-                                !self.license_key_input.trim().is_empty()
-                                    && !self.license_verifying
-                                    && !self.license_activated,
-                                egui::Button::new(if self.license_verifying { "Checking…" } else { "Activate Blaze" })
-                                    .min_size(egui::vec2(ui.available_width(), 36.0)),
-                            ).clicked();
+                            let activate_width = ui.available_width();
+                            let activate_clicked = ui.horizontal_centered(|ui| {
+                                ui.add_enabled(
+                                    !self.license_key_input.trim().is_empty()
+                                        && !self.license_verifying
+                                        && !self.license_activated,
+                                    egui::Button::new(
+                                        egui::RichText::new(
+                                            if self.license_verifying { "Checking…" } else { "Activate Blaze" }
+                                        ).strong()
+                                    ).min_size(egui::vec2(activate_width, 36.0)),
+                                ).clicked()
+                            }).inner;
                             if activate_clicked {
                                 self.activate_license_key(ui.ctx());
                             }
@@ -3425,10 +3429,10 @@ impl eframe::App for BlazeApp {
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .open(&mut self.show_license_dialog)
                 .show(ui.ctx(), |ui| {
-                    ui.label("Enter your activation key to unlock Blaze.");
+                    ui.label("Enter your license key to activate Blaze.");
                     ui.add_space(8.0);
                     ui.add(egui::TextEdit::singleline(&mut self.license_key_input)
-                        .hint_text("Enter activation key")
+                        .hint_text("Paste your license key")
                         .desired_width(f32::INFINITY));
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
