@@ -40,17 +40,7 @@ Timestamp interchange currently models one source media file with one linked vid
 
 This is the working product roadmap. It lists unfinished work only; completed items are removed.
 
-### 1. Product audit and planning
-
-- [ ] Audit the existing product, architecture, workflows, and feature set.
-- [ ] Audit the Tools Tab: information architecture, controls, grouping, and editing-mode workflows.
-- [ ] Audit the complete interface: hierarchy, layout, visual consistency, accessibility, and interaction design.
-- [ ] Create a consolidated bug and regression inventory, with reproducible steps and severity.
-- [ ] Run an independent, read-only repository audit with Claude (no code changes during the initial review).
-- [ ] Compare the independent audit with our findings; accept or reject recommendations deliberately.
-- [ ] Prioritise the work into an implementation plan before major redesign.
-
-### 2. Product design and UX
+### 1. Product design and UX
 
 - [ ] Review and improve the overall application design.
 - [ ] Add standard right-click Cut, Copy, and Paste actions to editable text fields.
@@ -58,7 +48,7 @@ This is the working product roadmap. It lists unfinished work only; completed it
 - [ ] Review responsive behaviour at the supported window sizes.
 - [ ] Revisit the application colour system and decide whether to adopt a true-black interface. (Deferred decision.)
 
-### 3. Bugs, reliability, and performance
+### 2. Bugs, reliability, and performance
 
 - [ ] Triage the bug inventory and prioritise data-loss, export, playback, and editing defects.
 - [ ] Fix confirmed functional bugs.
@@ -70,45 +60,18 @@ This is the working product roadmap. It lists unfinished work only; completed it
 - [ ] Profile performance and resource use on the target low-spec hardware.
 - [ ] Run regression testing after significant changes and maintain a record of verified results.
 
-### 4. Export and NLE compatibility
+### 3. Mix
 
-- [ ] Validate generated FCPXML 1.14 against the current Apple DTD and import it into Final Cut Pro 12.x.
-- [ ] Validate FCP7 XML import in DaVinci Resolve and Adobe Premiere Pro.
-- [ ] Validate OpenTimelineIO import in DaVinci Resolve and Adobe Premiere Pro.
-- [ ] Validate CMX 3600 EDL imports in supported NLEs.
-- [ ] Test Blaze stream-copy export with varied codecs, containers, frame rates, keyframe spacing, audio layouts, and cut positions.
-- [ ] Document known export limitations and compatibility.
-
-### 5. Cross-platform readiness and packaging
-
-- [ ] Define supported Linux distributions and minimum system requirements.
-- [ ] Create and verify distributable Linux packages.
-- [ ] Establish a reproducible Windows build.
-- [ ] Test the application on a physical Windows device.
-- [ ] Verify Windows media-tool discovery, playback, import/export paths, permissions, and file dialogs.
-- [ ] Resolve platform-specific bugs and document installation requirements.
-- [ ] Define release versioning and a repeatable release process.
-
-### 6. Licensing and commercial model
-
-- [ ] Finalise and publish pricing and the free/paid feature split.
-- [ ] Test reinstall, device changes, revoked/refunded licenses, and verification-service outages.
-- [ ] Document privacy, data collection, refunds, and support policies.
-
-### 7. Website and sales
-
-- [ ] Add pricing and plan comparison.
-- [ ] Integrate checkout and payment processing.
-- [ ] Implement license delivery and account/order workflows.
-- [ ] Add downloads, installation instructions, documentation, and support contact.
-- [ ] Test the complete purchase-to-activation journey.
+- [ ] Website integration.
+- [ ] Auto-Update Functionality
+- [ ] Use on a windows build & Github's mac
 
 ### 8. Release readiness
 
-- [ ] Complete Linux release testing.
-- [ ] Complete Windows release testing.
-- [ ] Verify clean installation, upgrade, and uninstall paths.
-- [ ] Prepare release notes and known-issues documentation.
+- [ ] Linux
+- [ ] Windows
+- [ ] MacOS
+- [ ] Auto-Update
 - [ ] Publish the first stable public release.
 
 ## Run
