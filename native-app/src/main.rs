@@ -1276,7 +1276,11 @@ impl BlazeApp {
                 }
                 Err(message) => {
                     self.license_activated = false;
+                    let activation_failed = self.license_activation_pending;
                     self.license_activation_pending = false;
+                    if activation_failed {
+                        self.license_key = None;
+                    }
                     self.license_notice = Some(message);
                     persist_license_state(false, self.successful_exports, self.license_key.as_deref());
                 }
@@ -1384,6 +1388,7 @@ impl eframe::App for BlazeApp {
         self.poll_keyframes(ctx);
         self.poll_exports();
         self.poll_license_verification();
+        ctx.request_repaint_after(Duration::from_secs(60));
 
         // Revalidate every activated installation at startup and every 60 seconds.
         if self.license_key.is_some()
