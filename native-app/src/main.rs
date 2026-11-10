@@ -35,6 +35,7 @@ enum ToolTab {
     BlazeMode,
     PreciseMode,
     Export,
+    License,
 }
 
 impl ToolTab {
@@ -44,6 +45,7 @@ impl ToolTab {
             Self::BlazeMode => "Blaze Mode",
             Self::PreciseMode => "Precision Mode",
             Self::Export => "Export",
+            Self::License => "License",
         }
     }
 }
@@ -701,6 +703,9 @@ struct BlazeApp {
     show_help: bool,
     help_tab: HelpTab,
     pending_preview_fit: bool,
+    show_license_dialog: bool,
+    license_key_input: String,
+    license_notice: Option<String>,
 }
 
 fn nearest_keyframe(keyframes: &[f64], time: f64) -> Option<f64> {
@@ -813,6 +818,9 @@ impl BlazeApp {
             show_help: true,
             help_tab: HelpTab::Guide,
             pending_preview_fit: false,
+            show_license_dialog: false,
+            license_key_input: String::new(),
+            license_notice: None,
         })
     }
 
@@ -1729,6 +1737,7 @@ impl eframe::App for BlazeApp {
                         });
                     }
                     tabs.push(ToolTab::Export);
+                    tabs.push(ToolTab::License);
 
                     for tab in tabs {
                         if ui.selectable_label(self.active_tool_tab == tab, tab.label()).clicked() {
@@ -2390,6 +2399,69 @@ impl eframe::App for BlazeApp {
                             let color = if *success { egui::Color32::LIGHT_GREEN } else { egui::Color32::LIGHT_RED };
                             ui.colored_label(color, message);
                         }
+                    ToolTab::License => {
+                        ui.heading("License");
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new("Manage your Blaze license and device activation.")
+                            .size(12.0).color(ui.visuals().weak_text_color()));
+                        ui.add_space(16.0);
+                        egui::Frame::new()
+                            .fill(egui::Color32::from_rgb(23, 25, 28))
+                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 46, 50)))
+                            .corner_radius(egui::CornerRadius::same(8))
+                            .inner_margin(egui::Margin::same(14))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new("LICENSE STATUS").size(10.5).strong()
+                                        .color(egui::Color32::from_rgb(255, 132, 108)));
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        ui.label(egui::RichText::new("FREE").size(11.0).strong()
+                                            .color(ui.visuals().weak_text_color()));
+                                    });
+                                });
+                                ui.add_space(8.0);
+                                ui.label(egui::RichText::new("Free version").size(17.0).strong());
+                                ui.label(egui::RichText::new("Your free export allowance is available.").size(12.0)
+                                    .color(ui.visuals().weak_text_color()));
+                                ui.add_space(12.0);
+                                ui.separator();
+                                ui.add_space(8.0);
+                                ui.label(egui::RichText::new("Blaze Lifetime").strong());
+                                ui.label("One-time payment · One active device · Unlimited exports");
+                                ui.label("All future Blaze updates included.");
+                                ui.add_space(12.0);
+                                ui.add_enabled(false, egui::Button::new("Buy Lifetime — $89")
+                                    .min_size(egui::vec2(ui.available_width(), 36.0)));
+                                ui.label(egui::RichText::new("Checkout will be connected when payment integration is ready.")
+                                    .size(11.0).color(ui.visuals().weak_text_color()));
+                            });
+                        ui.add_space(18.0);
+                        ui.strong("Already purchased?");
+                        ui.label(egui::RichText::new("Enter the license key from your purchase to activate Blaze on this device.")
+                            .size(12.0).color(ui.visuals().weak_text_color()));
+                        ui.add_space(8.0);
+                        ui.add(egui::TextEdit::singleline(&mut self.license_key_input)
+                            .hint_text("Enter license key")
+                            .desired_width(f32::INFINITY));
+                        ui.add_space(8.0);
+                        if ui.add_enabled(!self.license_key_input.trim().is_empty(),
+                            egui::Button::new("Activate License")
+                                .min_size(egui::vec2(ui.available_width(), 36.0))).clicked() {
+                            self.license_notice = Some("License activation is not connected yet.".to_owned());
+                        }
+                        if let Some(message) = &self.license_notice {
+                            ui.add_space(8.0);
+                            ui.colored_label(egui::Color32::from_rgb(235, 183, 113), message);
+                        }
+                        ui.add_space(18.0);
+                        ui.separator();
+                        ui.add_space(10.0);
+                        ui.strong("License terms");
+                        ui.label(egui::RichText::new("One active device at a time. Deactivate this device before moving the license to another computer.")
+                            .size(12.0).color(ui.visuals().weak_text_color()));
+                        ui.label(egui::RichText::new("A Lifetime purchase includes unlimited exports and all future updates.")
+                            .size(12.0).color(ui.visuals().weak_text_color()));
+                    }
                     }
                         }
                     });
@@ -3041,6 +3113,39 @@ impl eframe::App for BlazeApp {
         }
 
     }
+
+        if self.show_license_dialog {
+            egui::Window::new("Enter License Key")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(390.0)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .open(&mut self.show_license_dialog)
+                .show(ui.ctx(), |ui| {
+                    ui.label("Activate Blaze with the license key from your purchase.");
+                    ui.add_space(8.0);
+                    ui.add(egui::TextEdit::singleline(&mut self.license_key_input)
+                        .hint_text("Enter license key")
+                        .desired_width(f32::INFINITY));
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if ui.add_enabled(!self.license_key_input.trim().is_empty(),
+                            egui::Button::new("Activate").min_size(egui::vec2(105.0, 32.0))).clicked() {
+                            self.license_notice = Some("License activation is not connected yet.".to_owned());
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.show_license_dialog = false;
+                        }
+                    });
+                    if let Some(message) = &self.license_notice {
+                        ui.add_space(6.0);
+                        ui.colored_label(egui::Color32::from_rgb(235, 183, 113), message);
+                    }
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new("Activation will be available when the licensing server is connected.")
+                        .size(11.0).color(ui.visuals().weak_text_color()));
+                });
+        }
 
     fn on_exit(&mut self, gl: Option<&glow::Context>) {
         self.playback.shutdown(gl);
