@@ -38,7 +38,7 @@ Timestamp interchange currently models one source media file with one linked vid
 
 ## Roadmap / TODO
 
-This is the working product roadmap. Check items off here as they are completed and verified. Keep unfinished work visible; do not mark an item complete merely because implementation has started.
+This is the working product roadmap. It lists unfinished work only; completed items are removed.
 
 ### 1. Product audit and planning
 
@@ -72,8 +72,6 @@ This is the working product roadmap. Check items off here as they are completed 
 
 ### 4. Export and NLE compatibility
 
-- [x] Review the existing interchange implementations and identify their actual underlying formats.
-- [x] Add FCPXML 1.14 output and native OpenTimelineIO JSON export.
 - [ ] Validate generated FCPXML 1.14 against the current Apple DTD and import it into Final Cut Pro 12.x.
 - [ ] Validate FCP7 XML import in DaVinci Resolve and Adobe Premiere Pro.
 - [ ] Validate OpenTimelineIO import in DaVinci Resolve and Adobe Premiere Pro.
@@ -93,17 +91,12 @@ This is the working product roadmap. Check items off here as they are completed 
 
 ### 6. Licensing and commercial model
 
-- [x] Implement Gumroad license-key activation and online license verification.
-- [x] Recheck license validity at startup, periodically during use, and before export.
-- [x] Add customer-facing guidance for requesting a manual license transfer after reinstalling or changing devices/operating systems.
 - [ ] Finalise and publish pricing and the free/paid feature split.
 - [ ] Test reinstall, device changes, revoked/refunded licenses, and verification-service outages.
 - [ ] Document privacy, data collection, refunds, and support policies.
 
 ### 7. Website and sales
 
-- [ ] Define the website structure and product messaging.
-- [ ] Build the Blaze product website.
 - [ ] Add pricing and plan comparison.
 - [ ] Integrate checkout and payment processing.
 - [ ] Implement license delivery and account/order workflows.
