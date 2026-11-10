@@ -21,10 +21,11 @@ use waveform::Waveform;
 
 const APP_TITLE: &str = "Blaze — Ankush Sarkar";
 const FREE_EXPORT_LIMIT: u32 = 2;
-const LICENSE_API_URL: &str = match option_env!("BLAZE_LICENSE_API_URL") {
-    Some(url) => url,
-    None => "",
-};
+const GUMROAD_VERIFY_URL: &str = "https://api.gumroad.com/v2/licenses/verify";
+const GUMROAD_PRODUCTS: [(&str, LicensePlan); 2] = [
+    ("Niyme89XCcFC44ShhEPPrQ==", LicensePlan::Monthly),
+    ("ksPYCeAJW8TtmOjsBRQ0OA==", LicensePlan::Permanent),
+];
 const DETECTION_DB_VALUES: [f64; 5] = [32.0, 26.0, 22.0, 18.0, 14.0];
 
 const COLOR_BG: egui::Color32 = egui::Color32::from_rgb(10, 11, 12);
@@ -79,54 +80,247 @@ fn open_external_url(url: &str) -> Result<(), String> {
     open::that(url).map_err(|error| format!("Could not open the browser: {error}"))
 }
 
-fn verify_blaze_license(license_key: &str, increment_uses: bool) -> LicenseResult {
-    if LICENSE_API_URL.is_empty() {
-        return Err("Blaze licensing is not deployed yet. Please try again later.".to_owned());
+fn request_gumroad_purchase(
+    client: &reqwest::blocking::Client,
+    license_key: &str,
+    product_id: &str,
+    increment_uses: bool,
+) -> Result<Option<serde_json::Value>, String> {
+    let response = client
+        .post(GUMROAD_VERIFY_URL)
+        .form(&[
+            ("product_id", product_id),
+            ("license_key", license_key),
+            ("increment_uses_count", if increment_uses { "true" } else { "false" }),
+        ])
+        .send()
+        .map_err(|error| {
+            format!(
+                "Could not reach Gumroad. Check your internet connection and try again. ({error})"
+            )
+        })?;
+
+    let status = response.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        // Gumroad returns 404 when a key does not belong to the supplied product.
+        return Ok(None);
     }
 
+    let body: serde_json::Value = response
+        .json()
+        .map_err(|error| format!("Gumroad returned an unreadable response: {error}"))?;
+
+    if !status.is_success() {
+        let message = body
+            .get("message")
+            .and_then(|value| value.as_str())
+            .unwrap_or("Gumroad could not verify this licence.");
+        return Err(format!("Gumroad verification failed (HTTP {status}): {message}"));
+    }
+
+    if body.get("success").and_then(|value| value.as_bool()) != Some(true) {
+        return Ok(None);
+    }
+
+    body.get("purchase")
+        .cloned()
+        .map(Some)
+        .ok_or_else(|| "Gumroad did not return purchase details.".to_owned())
+}
+
+fn parse_gumroad_timestamp(value: &str) -> Option<std::time::SystemTime> {
+    let bytes = value.as_bytes();
+    if bytes.len() < 20
+        || bytes.get(4) != Some(&b'-')
+        || bytes.get(7) != Some(&b'-')
+        || bytes.get(10) != Some(&b'T')
+        || bytes.get(13) != Some(&b':')
+        || bytes.get(16) != Some(&b':')
+    {
+        return None;
+    }
+
+    let number = |start: usize, end: usize| -> Option<i64> {
+        let slice = bytes.get(start..end)?;
+        if !slice.iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        std::str::from_utf8(slice).ok()?.parse().ok()
+    };
+
+    let year = number(0, 4)?;
+    let month = number(5, 7)?;
+    let day = number(8, 10)?;
+    let hour = number(11, 13)?;
+    let minute = number(14, 16)?;
+    let second = number(17, 19)?;
+
+    if year < 1
+        || !(1..=12).contains(&month)
+        || !(0..=23).contains(&hour)
+        || !(0..=59).contains(&minute)
+        || !(0..=59).contains(&second)
+    {
+        return None;
+    }
+
+    let leap_year = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_month = match month {
+        2 if leap_year => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    if day < 1 || day > days_in_month {
+        return None;
+    }
+
+    // Convert the Gregorian calendar date to days since 1970-01-01.
+    let adjusted_year = year - i64::from(month <= 2);
+    let era = adjusted_year.div_euclid(400);
+    let year_of_era = adjusted_year - era * 400;
+    let shifted_month = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * shifted_month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days_since_epoch = era * 146_097 + day_of_era - 719_468;
+
+    let mut position = 19;
+    if bytes.get(position) == Some(&b'.') {
+        position += 1;
+        let fraction_start = position;
+        while bytes.get(position).is_some_and(u8::is_ascii_digit) {
+            position += 1;
+        }
+        if position == fraction_start {
+            return None;
+        }
+    }
+
+    let offset_seconds = match bytes.get(position)? {
+        b'Z' => {
+            position += 1;
+            0
+        }
+        sign @ (b'+' | b'-') => {
+            if bytes.get(position + 3) != Some(&b':') {
+                return None;
+            }
+            let offset_hours = number(position + 1, position + 3)?;
+            let offset_minutes = number(position + 4, position + 6)?;
+            if offset_hours > 23 || offset_minutes > 59 {
+                return None;
+            }
+            position += 6;
+            let offset = offset_hours * 3_600 + offset_minutes * 60;
+            if *sign == b'+' { offset } else { -offset }
+        }
+        _ => return None,
+    };
+    if position != bytes.len() {
+        return None;
+    }
+
+    let unix_seconds = days_since_epoch
+        .checked_mul(86_400)?
+        .checked_add(hour * 3_600 + minute * 60 + second)?
+        .checked_sub(offset_seconds)?;
+    if unix_seconds < 0 {
+        return None;
+    }
+
+    std::time::UNIX_EPOCH.checked_add(Duration::from_secs(unix_seconds as u64))
+}
+
+fn evaluate_gumroad_purchase(
+    purchase: &serde_json::Value,
+    product_id: &str,
+    plan: LicensePlan,
+) -> LicenseResult {
+    if purchase.get("product_id").and_then(|value| value.as_str()) != Some(product_id) {
+        return Err("Gumroad returned a purchase for a different product.".to_owned());
+    }
+    if purchase.get("refunded").and_then(|value| value.as_bool()) == Some(true) {
+        return Err("This purchase has been refunded.".to_owned());
+    }
+    if purchase.get("chargebacked").and_then(|value| value.as_bool()) == Some(true) {
+        return Err("This purchase has been charged back.".to_owned());
+    }
+    if purchase.get("disputed").and_then(|value| value.as_bool()) == Some(true)
+        && purchase.get("dispute_won").and_then(|value| value.as_bool()) != Some(true)
+    {
+        return Err("This purchase is currently disputed.".to_owned());
+    }
+
+    let valid_until = if plan == LicensePlan::Monthly {
+        if purchase.get("recurrence").and_then(|value| value.as_str()) != Some("monthly") {
+            return Err("This key is not linked to a Blaze Monthly subscription.".to_owned());
+        }
+
+        let mut next_end: Option<(std::time::SystemTime, String)> = None;
+        for field in [
+            "subscription_cancelled_at",
+            "subscription_ended_at",
+            "subscription_failed_at",
+        ] {
+            let Some(value) = purchase.get(field) else {
+                continue;
+            };
+            if value.is_null() {
+                continue;
+            }
+            let timestamp = value
+                .as_str()
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| format!("Gumroad returned an invalid {field} timestamp."))?;
+            let end = parse_gumroad_timestamp(timestamp)
+                .ok_or_else(|| format!("Gumroad returned an unreadable {field} timestamp."))?;
+
+            if end <= std::time::SystemTime::now() {
+                return Err("Your Blaze Monthly subscription period has ended.".to_owned());
+            }
+
+            let earlier_end = next_end
+                .as_ref()
+                .map_or(true, |(current_end, _)| end < *current_end);
+            if earlier_end {
+                next_end = Some((end, timestamp.to_owned()));
+            }
+        }
+        next_end.map(|(_, timestamp)| timestamp)
+    } else {
+        None
+    };
+
+    Ok(LicenseEntitlement { plan, valid_until })
+}
+
+fn verify_gumroad_license(license_key: &str, increment_uses: bool) -> LicenseResult {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
         .map_err(|error| format!("Could not prepare license verification: {error}"))?;
 
-    let response = client
-        .post(LICENSE_API_URL)
-        .json(&serde_json::json!({ "license_key": license_key, "increment_uses_count": increment_uses }))
-        .send()
-        .map_err(|error| format!("Could not reach the Blaze licensing service. Check your internet connection and try again. ({error})"))?;
+    // Monthly is checked first, followed by Permanent.
+    for (product_id, plan) in GUMROAD_PRODUCTS {
+        let Some(purchase) = request_gumroad_purchase(&client, license_key, product_id, false)? else {
+            continue;
+        };
 
-    let status = response.status();
-    let body: serde_json::Value = response
-        .json()
-        .map_err(|error| format!("The licensing service returned an unreadable response: {error}"))?;
+        // A matched but revoked or expired purchase must not fall through.
+        let entitlement = evaluate_gumroad_purchase(&purchase, product_id, plan)?;
+        if !increment_uses {
+            return Ok(entitlement);
+        }
 
-    if !status.is_success() {
-        return Err(body.get("error").and_then(|v| v.as_str())
-            .map(|code| match code {
-                "verification_unavailable" => "Gumroad verification is temporarily unavailable. Try again later.",
-                "licensing_not_configured" => "Blaze licensing is not configured yet.",
-                _ => "The Blaze licensing service could not verify this key.",
-            })
-            .unwrap_or("The Blaze licensing service could not verify this key.").to_owned());
+        // Increment Uses only after a successful, uncounted entitlement check.
+        let counted_purchase = request_gumroad_purchase(&client, license_key, product_id, true)?
+            .ok_or_else(|| "Gumroad could not confirm this licence activation.".to_owned())?;
+        return evaluate_gumroad_purchase(&counted_purchase, product_id, plan);
     }
 
-    if body.get("licensed").and_then(|v| v.as_bool()) != Some(true) {
-        return Err(match body.get("status").and_then(|v| v.as_str()) {
-            Some("expired") => "Your Blaze Monthly subscription has ended.".to_owned(),
-            Some("revoked") => "This purchase has been refunded, charged back, or disputed.".to_owned(),
-            _ => "This key does not match an active Blaze Monthly or Permanent licence.".to_owned(),
-        });
-    }
-
-    let plan = match body.get("plan").and_then(|v| v.as_str()) {
-        Some("monthly") => LicensePlan::Monthly,
-        Some("permanent") => LicensePlan::Permanent,
-        _ => return Err("The licensing service returned an unknown licence type.".to_owned()),
-    };
-    let valid_until = body.get("valid_until").and_then(|v| v.as_str()).map(str::to_owned);
-
-    Ok(LicenseEntitlement { plan, valid_until })
+    Err("This key does not match an active Blaze Monthly or Permanent licence.".to_owned())
 }
+
 
 fn license_state_file() -> Option<PathBuf> {
     let config_dir = if cfg!(target_os = "windows") {
@@ -1325,7 +1519,7 @@ impl BlazeApp {
         let sender = self.license_tx.clone();
         let repaint = ctx.clone();
         std::thread::spawn(move || {
-            let result = verify_blaze_license(&key, true);
+            let result = verify_gumroad_license(&key, true);
             let _ = sender.send(result);
             repaint.request_repaint();
         });
@@ -1380,7 +1574,7 @@ impl BlazeApp {
 
         std::thread::spawn(move || {
             let result = if let Some(key) = license_key.as_deref() {
-                verify_blaze_license(key, false).and_then(|_| {
+                verify_gumroad_license(key, false).and_then(|_| {
                     let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
                     let engine = MediaEngine::new([tools]);
                     export::export_blaze_video(&engine, &source, &output, duration, &ranges)
@@ -1426,7 +1620,7 @@ impl BlazeApp {
 
         std::thread::spawn(move || {
             let result = if let Some(key) = license_key.as_deref() {
-                verify_blaze_license(key, false).and_then(|_| {
+                verify_gumroad_license(key, false).and_then(|_| {
                     export::export_interchange(format, &source, &info, &ranges, &output)
                 })
             } else {
@@ -1467,10 +1661,10 @@ impl eframe::App for BlazeApp {
         self.poll_license_verification();
         ctx.request_repaint_after(Duration::from_secs(60));
 
-        // Revalidate activated installations at startup and every five minutes.
+        // Revalidate activated installations at startup and every 60 seconds.
         if self.license_key.is_some()
             && !self.license_verifying
-            && self.last_license_check.elapsed() >= Duration::from_secs(300)
+            && self.last_license_check.elapsed() >= Duration::from_secs(60)
         {
             let key = self.license_key.clone().unwrap_or_default();
             self.license_verifying = true;
@@ -1479,7 +1673,7 @@ impl eframe::App for BlazeApp {
             let sender = self.license_tx.clone();
             let repaint = ctx.clone();
             std::thread::spawn(move || {
-                let result = verify_blaze_license(&key, false);
+                let result = verify_gumroad_license(&key, false);
                 let _ = sender.send(result);
                 repaint.request_repaint();
             });

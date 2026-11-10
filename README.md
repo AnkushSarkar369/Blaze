@@ -20,13 +20,22 @@ The application does not use a browser engine, WebView, React, or Tauri at runti
 - Silence detection with preset and expert controls
 - Skip Cuts playback
 - Asynchronous media analysis and export jobs
-- Gumroad Monthly and Permanent license-key activation through the Blaze licensing service
+- Direct Gumroad Monthly and Permanent licence verification in the native Rust application
 
 ## Licensing
 
-Blaze supports two separate Gumroad products: **Blaze Monthly** (recurring subscription) and **Blaze Permanent** (one-time permanent licence). The desktop app sends the entered license key to the server-side service in `licensing-service/`. The service checks the key against both product IDs and returns the matched entitlement. Activation increments Gumroad's Uses counter once; periodic checks and export-time checks do not consume uses. Monthly access ends at Gumroad's membership end timestamp; a permanent licence has no subscription expiry. Both products are subject to refund, chargeback and dispute checks.
+Blaze verifies licence keys directly with Gumroad from the native Rust application. No separate licensing server, Node.js runtime, or `BLAZE_LICENSE_API_URL` configuration is required.
 
-Deploy the service and build the desktop app with `BLAZE_LICENSE_API_URL` set to the service's HTTPS `/v1/verify` endpoint. See `licensing-service/README.md` for setup and tests.
+Two separate Gumroad products are supported:
+
+| Product | Gumroad product ID | Entitlement |
+|---|---|---|
+| Blaze Monthly | `Niyme89XCcFC44ShhEPPrQ==` | Monthly subscription |
+| Blaze Permanent | `ksPYCeAJW8TtmOjsBRQ0OA==` | Permanent licence |
+
+The app checks the Monthly product first and then the Permanent product. A successful activation increments Gumroad's Uses counter once, after the key has matched and passed entitlement checks. Periodic revalidation and export-time checks use `increment_uses_count=false`.
+
+Monthly keys must report a monthly recurrence. Gumroad's subscription cancellation, end, and failed-renewal timestamps are treated as the end of paid access: access remains valid until a future timestamp and is denied once that timestamp has passed. Permanent keys do not have a subscription expiry. Refunds, chargebacks, and unresolved disputes invalidate either product.
 
 ## Export
 
