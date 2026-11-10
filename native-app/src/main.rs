@@ -21,8 +21,8 @@ use waveform::Waveform;
 
 const APP_TITLE: &str = "Blaze — Ankush Sarkar";
 const FREE_EXPORT_LIMIT: u32 = 2;
-#[cfg(debug_assertions)]
-const DEBUG_LICENSE_KEY: &str = "BLAZE-DEMO-KEY-2026";
+const GUMROAD_PRODUCT_ID: &str = "ksPYCeAJW8TtmOjsBRQ0OA==";
+const GUMROAD_VERIFY_URL: &str = "https://api.gumroad.com/v2/licenses/verify";
 const DETECTION_DB_VALUES: [f64; 5] = [32.0, 26.0, 22.0, 18.0, 14.0];
 
 const COLOR_BG: egui::Color32 = egui::Color32::from_rgb(10, 11, 12);
@@ -81,6 +81,53 @@ fn open_external_url(url: &str) -> Result<(), String> {
     open::that(url).map_err(|error| format!("Could not open the browser: {error}"))
 }
 
+fn verify_gumroad_license(license_key: &str, increment_uses: bool) -> LicenseResult {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|error| format!("Could not prepare license verification: {error}"))?;
+
+    let response = client
+        .post(GUMROAD_VERIFY_URL)
+        .form(&[
+            ("product_id", GUMROAD_PRODUCT_ID),
+            ("license_key", license_key),
+            ("increment_uses_count", if increment_uses { "true" } else { "false" }),
+        ])
+        .send()
+        .map_err(|error| format!("Could not reach Gumroad. Check your internet connection and try again. ({error})"))?;
+
+    let status = response.status();
+    let body: serde_json::Value = response
+        .json()
+        .map_err(|error| format!("Gumroad returned an unreadable response: {error}"))?;
+
+    if !status.is_success() || body.get("success").and_then(|v| v.as_bool()) != Some(true) {
+        return Err(body.get("message").and_then(|v| v.as_str())
+            .unwrap_or("This license key could not be verified.").to_owned());
+    }
+
+    let purchase = body.get("purchase")
+        .ok_or_else(|| "Gumroad did not return purchase details.".to_owned())?;
+    if purchase.get("product_id").and_then(|v| v.as_str()) != Some(GUMROAD_PRODUCT_ID) {
+        return Err("This license key does not belong to Blaze.".to_owned());
+    }
+    if purchase.get("refunded").and_then(|v| v.as_bool()) == Some(true) {
+        return Err("This purchase has been refunded.".to_owned());
+    }
+    if purchase.get("chargebacked").and_then(|v| v.as_bool()) == Some(true) {
+        return Err("This purchase has been charged back.".to_owned());
+    }
+    if purchase.get("disputed").and_then(|v| v.as_bool()) == Some(true)
+        && purchase.get("dispute_won").and_then(|v| v.as_bool()) != Some(true) {
+        return Err("This purchase is currently disputed.".to_owned());
+    }
+
+    body.get("uses").and_then(|v| v.as_u64())
+        .and_then(|uses| u32::try_from(uses).ok())
+        .ok_or_else(|| "Gumroad verified the purchase but returned no usage count.".to_owned())
+}
+
 fn license_state_file() -> Option<PathBuf> {
     let config_dir = if cfg!(target_os = "windows") {
         std::env::var_os("APPDATA").map(PathBuf::from)
@@ -112,8 +159,7 @@ fn load_license_state() -> (bool, u32) {
         .unwrap_or(0)
         .min(FREE_EXPORT_LIMIT);
 
-    // The local demo activation is deliberately restricted to development builds.
-    (cfg!(debug_assertions) && stored_activation, successful_exports)
+    (stored_activation, successful_exports)
 }
 
 fn persist_license_state(activated: bool, successful_exports: u32) {
@@ -135,17 +181,6 @@ fn persist_license_state(activated: bool, successful_exports: u32) {
     }
 }
 
-fn is_valid_activation_key(value: &str) -> bool {
-    #[cfg(debug_assertions)]
-    {
-        value.trim().eq_ignore_ascii_case(DEBUG_LICENSE_KEY)
-    }
-    #[cfg(not(debug_assertions))]
-    {
-        let _ = value;
-        false
-    }
-}
 const PADDING_MS_VALUES: [f64; 3] = [120.0, 60.0, 20.0];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -775,6 +810,7 @@ type ProbeResult = (u64, Result<(PathBuf, MediaInfo), String>);
 type SilenceResult = (u64, Result<Vec<SilenceInterval>, String>);
 type KeyframeResult = (u64, Result<Vec<f64>, String>);
 type ExportResult = (u64, Result<String, String>);
+type LicenseResult = Result<u32, String>;
 enum WaveformMessage {
     Progress { generation: u64, fraction: f32 },
     Complete { generation: u64, result: Result<Vec<u8>, String> },
@@ -808,6 +844,9 @@ struct BlazeApp {
     export_rx: Receiver<ExportResult>,
     export_generation: u64,
     export_running: bool,
+    license_tx: Sender<LicenseResult>,
+    license_rx: Receiver<LicenseResult>,
+    license_verifying: bool,
     export_status: Option<(bool, String)>,
     detection_level: usize,
     padding_level: usize,
@@ -866,6 +905,7 @@ impl BlazeApp {
         let (silence_tx, silence_rx) = mpsc::channel();
         let (keyframe_tx, keyframe_rx) = mpsc::channel();
         let (export_tx, export_rx) = mpsc::channel();
+        let (license_tx, license_rx) = mpsc::channel();
         let (license_activated, successful_exports) = load_license_state();
 
         Ok(Self {
@@ -896,6 +936,9 @@ impl BlazeApp {
             export_rx,
             export_generation: 0,
             export_running: false,
+            license_tx,
+            license_rx,
+            license_verifying: false,
             export_status: None,
             detection_level: 2,
             padding_level: 1,
@@ -1182,19 +1225,34 @@ impl BlazeApp {
         self.license_activated || self.successful_exports < FREE_EXPORT_LIMIT
     }
 
-    fn activate_license_key(&mut self) -> bool {
-        if is_valid_activation_key(&self.license_key_input) {
-            self.license_activated = true;
-            self.license_notice = Some(
-                "Development key accepted. Blaze is activated in this test build.".to_owned(),
-            );
-            persist_license_state(self.license_activated, self.successful_exports);
-            true
-        } else {
-            self.license_notice = Some(
-                "Invalid activation key. Check the key and try again.".to_owned(),
-            );
-            false
+    fn activate_license_key(&mut self, ctx: &egui::Context) {
+        let key = self.license_key_input.trim().to_owned();
+        if key.is_empty() || self.license_verifying || self.license_activated {
+            return;
+        }
+        self.license_verifying = true;
+        self.license_notice = Some("Checking your purchase with Gumroad…".to_owned());
+        let sender = self.license_tx.clone();
+        let repaint = ctx.clone();
+        std::thread::spawn(move || {
+            let result = verify_gumroad_license(&key, true);
+            let _ = sender.send(result);
+            repaint.request_repaint();
+        });
+    }
+
+    fn poll_license_verification(&mut self) {
+        while let Ok(result) = self.license_rx.try_recv() {
+            self.license_verifying = false;
+            match result {
+                Ok(uses) => {
+                    self.license_activated = true;
+                    self.license_notice = Some(format!("Blaze is activated. Cut away! (Gumroad uses: {uses})"));
+                    persist_license_state(self.license_activated, self.successful_exports);
+                    self.license_key_input.clear();
+                }
+                Err(message) => self.license_notice = Some(message),
+            }
         }
     }
 
@@ -1282,6 +1340,7 @@ impl eframe::App for BlazeApp {
         self.poll_silence();
         self.poll_keyframes(ctx);
         self.poll_exports();
+        self.poll_license_verification();
 
         // Global transport shortcut: handle Space at the app level rather
         // than inside a particular panel, so it works regardless of focus
@@ -3305,8 +3364,13 @@ impl eframe::App for BlazeApp {
                         .desired_width(f32::INFINITY));
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
-                        if ui.add_enabled(!self.license_key_input.trim().is_empty(),
-                            egui::Button::new("Activate").min_size(egui::vec2(105.0, 32.0))).clicked() {
+                        if ui.add_enabled(
+                            !self.license_key_input.trim().is_empty()
+                                && !self.license_verifying
+                                && !self.license_activated,
+                            egui::Button::new(if self.license_verifying { "Checking…" } else { "Activate" })
+                                .min_size(egui::vec2(105.0, 32.0)),
+                        ).clicked() {
                             activate_license_requested = true;
                         }
                         if ui.button("Cancel").clicked() {
@@ -3318,10 +3382,13 @@ impl eframe::App for BlazeApp {
                         ui.colored_label(egui::Color32::from_rgb(235, 183, 113), message);
                     }
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new("Development builds accept the local test key; production key verification requires the licensing service.")
+                    ui.label(egui::RichText::new("Your key is verified with Gumroad over the internet.")
                         .size(11.0).color(ui.visuals().weak_text_color()));
                 });
-            if activate_license_requested && self.activate_license_key() {
+            if activate_license_requested {
+                self.activate_license_key(ui.ctx());
+            }
+            if self.license_activated {
                 close_license_dialog = true;
             }
             if close_license_dialog {
