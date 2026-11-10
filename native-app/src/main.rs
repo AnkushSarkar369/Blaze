@@ -3110,8 +3110,20 @@ impl eframe::App for BlazeApp {
                         });
                     });
                 });
+        } else {
+            // Persistent activation entry shown after Quick Help is dismissed.
+            egui::TopBottomPanel::bottom("license-entry")
+                .frame(egui::Frame::new()
+                    .fill(egui::Color32::from_rgb(10, 11, 12))
+                    .inner_margin(egui::Margin::symmetric(12, 4)))
+                .show(ui, |ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("Enter License Key").clicked() {
+                            self.show_license_dialog = true;
+                        }
+                    });
+                });
         }
-
     }
 
         if self.show_license_dialog {
