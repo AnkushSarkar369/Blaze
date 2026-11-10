@@ -2543,15 +2543,23 @@ impl eframe::App for BlazeApp {
                                         "{} of {} free exports remaining.",
                                         remaining, FREE_EXPORT_LIMIT
                                     )).size(12.0).color(ui.visuals().weak_text_color()));
+                                    ui.add_space(10.0);
+                                    if ui.add(
+                                        egui::Button::new(egui::RichText::new("Get Activation Key!").strong())
+                                            .min_size(egui::vec2(ui.available_width(), 34.0))
+                                    ).clicked() {
+                                        ui.ctx().open_url(egui::OpenUrl::new_tab(
+                                            "https://ankushsarkar369.github.io/blaze.github.io/"
+                                        ));
+                                    }
                                 }
                             });
 
                         if !self.license_activated {
-                            ui.add_space(18.0);
-                            ui.strong("Get Activation Key!");
-                            ui.label(egui::RichText::new("Already have an activation key? Enter it below to unlock Blaze.")
+                            ui.add_space(14.0);
+                            ui.label(egui::RichText::new("Already have an activation key?")
                                 .size(12.0).color(ui.visuals().weak_text_color()));
-                            ui.add_space(8.0);
+                            ui.add_space(6.0);
                             ui.add(egui::TextEdit::singleline(&mut self.license_key_input)
                                 .hint_text("Enter activation key")
                                 .desired_width(f32::INFINITY));
