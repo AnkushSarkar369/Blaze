@@ -21,7 +21,7 @@ Blaze uses the hand-written Rust bindings without requiring mpv headers or pkg-c
 ## Run
 
 ```bash
-cargo run --manifest-path native-app/Cargo.toml
+cargo run -p blaze-native
 ```
 
 The app expects the existing FFmpeg/FFprobe tools in the repository's `BIN/` directory or in `~/bin`, matching the media engine's existing lookup behaviour.
