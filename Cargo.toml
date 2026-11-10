@@ -1,5 +1,6 @@
 [workspace]
 members = [
     "crates/blaze-engine",
+    "native-app",
 ]
 resolver = "2"
