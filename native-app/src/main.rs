@@ -21,8 +21,10 @@ use waveform::Waveform;
 
 const APP_TITLE: &str = "Blaze — Ankush Sarkar";
 const FREE_EXPORT_LIMIT: u32 = 2;
-const GUMROAD_PRODUCT_ID: &str = "ksPYCeAJW8TtmOjsBRQ0OA==";
-const GUMROAD_VERIFY_URL: &str = "https://api.gumroad.com/v2/licenses/verify";
+const LICENSE_API_URL: &str = match option_env!("BLAZE_LICENSE_API_URL") {
+    Some(url) => url,
+    None => "",
+};
 const DETECTION_DB_VALUES: [f64; 5] = [32.0, 26.0, 22.0, 18.0, 14.0];
 
 const COLOR_BG: egui::Color32 = egui::Color32::from_rgb(10, 11, 12);
@@ -77,49 +79,53 @@ fn open_external_url(url: &str) -> Result<(), String> {
     open::that(url).map_err(|error| format!("Could not open the browser: {error}"))
 }
 
-fn verify_gumroad_license(license_key: &str, increment_uses: bool) -> LicenseResult {
+fn verify_blaze_license(license_key: &str, increment_uses: bool) -> LicenseResult {
+    if LICENSE_API_URL.is_empty() {
+        return Err("Blaze licensing is not deployed yet. Please try again later.".to_owned());
+    }
+
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
         .map_err(|error| format!("Could not prepare license verification: {error}"))?;
 
     let response = client
-        .post(GUMROAD_VERIFY_URL)
-        .form(&[
-            ("product_id", GUMROAD_PRODUCT_ID),
-            ("license_key", license_key),
-            ("increment_uses_count", if increment_uses { "true" } else { "false" }),
-        ])
+        .post(LICENSE_API_URL)
+        .json(&serde_json::json!({ "license_key": license_key, "increment_uses_count": increment_uses }))
         .send()
-        .map_err(|error| format!("Could not reach Gumroad. Check your internet connection and try again. ({error})"))?;
+        .map_err(|error| format!("Could not reach the Blaze licensing service. Check your internet connection and try again. ({error})"))?;
 
     let status = response.status();
     let body: serde_json::Value = response
         .json()
-        .map_err(|error| format!("Gumroad returned an unreadable response: {error}"))?;
+        .map_err(|error| format!("The licensing service returned an unreadable response: {error}"))?;
 
-    if !status.is_success() || body.get("success").and_then(|v| v.as_bool()) != Some(true) {
-        return Err(body.get("message").and_then(|v| v.as_str())
-            .unwrap_or("This license key could not be verified.").to_owned());
-    }
-
-    let purchase = body.get("purchase")
-        .ok_or_else(|| "Gumroad did not return purchase details.".to_owned())?;
-    if purchase.get("product_id").and_then(|v| v.as_str()) != Some(GUMROAD_PRODUCT_ID) {
-        return Err("This license key does not belong to Blaze.".to_owned());
-    }
-    if purchase.get("refunded").and_then(|v| v.as_bool()) == Some(true) {
-        return Err("This purchase has been refunded.".to_owned());
-    }
-    if purchase.get("chargebacked").and_then(|v| v.as_bool()) == Some(true) {
-        return Err("This purchase has been charged back.".to_owned());
-    }
-    if purchase.get("disputed").and_then(|v| v.as_bool()) == Some(true)
-        && purchase.get("dispute_won").and_then(|v| v.as_bool()) != Some(true) {
-        return Err("This purchase is currently disputed.".to_owned());
+    if !status.is_success() {
+        return Err(body.get("error").and_then(|v| v.as_str())
+            .map(|code| match code {
+                "verification_unavailable" => "Gumroad verification is temporarily unavailable. Try again later.",
+                "licensing_not_configured" => "Blaze licensing is not configured yet.",
+                _ => "The Blaze licensing service could not verify this key.",
+            })
+            .unwrap_or("The Blaze licensing service could not verify this key.").to_owned());
     }
 
-    Ok(())
+    if body.get("licensed").and_then(|v| v.as_bool()) != Some(true) {
+        return Err(match body.get("status").and_then(|v| v.as_str()) {
+            Some("expired") => "Your Blaze Monthly subscription has ended.".to_owned(),
+            Some("revoked") => "This purchase has been refunded, charged back, or disputed.".to_owned(),
+            _ => "This key does not match an active Blaze Monthly or Permanent licence.".to_owned(),
+        });
+    }
+
+    let plan = match body.get("plan").and_then(|v| v.as_str()) {
+        Some("monthly") => LicensePlan::Monthly,
+        Some("permanent") => LicensePlan::Permanent,
+        _ => return Err("The licensing service returned an unknown licence type.".to_owned()),
+    };
+    let valid_until = body.get("valid_until").and_then(|v| v.as_str()).map(str::to_owned);
+
+    Ok(LicenseEntitlement { plan, valid_until })
 }
 
 fn license_state_file() -> Option<PathBuf> {
@@ -870,7 +876,18 @@ type ProbeResult = (u64, Result<(PathBuf, MediaInfo), String>);
 type SilenceResult = (u64, Result<Vec<SilenceInterval>, String>);
 type KeyframeResult = (u64, Result<Vec<f64>, String>);
 type ExportResult = (u64, Result<String, String>);
-type LicenseResult = Result<(), String>;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LicensePlan {
+    Monthly,
+    Permanent,
+}
+
+struct LicenseEntitlement {
+    plan: LicensePlan,
+    valid_until: Option<String>,
+}
+
+type LicenseResult = Result<LicenseEntitlement, String>;
 enum WaveformMessage {
     Progress { generation: u64, fraction: f32 },
     Complete { generation: u64, result: Result<Vec<u8>, String> },
@@ -935,6 +952,8 @@ struct BlazeApp {
     license_key_input: String,
     license_notice: Option<String>,
     license_activated: bool,
+    license_plan: Option<LicensePlan>,
+    license_valid_until: Option<String>,
     successful_exports: u32,
 }
 
@@ -1030,6 +1049,8 @@ impl BlazeApp {
             license_key_input: String::new(),
             license_notice: None,
             license_activated: false,
+            license_plan: None,
+            license_valid_until: None,
             successful_exports,
         })
     }
@@ -1300,11 +1321,11 @@ impl BlazeApp {
         self.license_activation_pending = true;
         self.license_key = Some(key.clone());
         self.last_license_check = Instant::now();
-        self.license_notice = Some("Checking your purchase with Gumroad…".to_owned());
+        self.license_notice = Some("Checking your Blaze licence…".to_owned());
         let sender = self.license_tx.clone();
         let repaint = ctx.clone();
         std::thread::spawn(move || {
-            let result = verify_gumroad_license(&key, true);
+            let result = verify_blaze_license(&key, true);
             let _ = sender.send(result);
             repaint.request_repaint();
         });
@@ -1314,10 +1335,15 @@ impl BlazeApp {
         while let Ok(result) = self.license_rx.try_recv() {
             self.license_verifying = false;
             match result {
-                Ok(()) => {
+                Ok(entitlement) => {
                     self.license_activated = true;
+                    self.license_plan = Some(entitlement.plan);
+                    self.license_valid_until = entitlement.valid_until;
                     if self.license_activation_pending {
-                        self.license_notice = Some("Blaze is activated. Cut away!".to_owned());
+                        self.license_notice = Some(match entitlement.plan {
+                            LicensePlan::Monthly => "Blaze Monthly is activated. Cut away!".to_owned(),
+                            LicensePlan::Permanent => "Blaze Permanent is activated. Cut away!".to_owned(),
+                        });
                         self.license_key_input.clear();
                     }
                     self.license_activation_pending = false;
@@ -1325,6 +1351,8 @@ impl BlazeApp {
                 }
                 Err(message) => {
                     self.license_activated = false;
+                    self.license_plan = None;
+                    self.license_valid_until = None;
                     let activation_failed = self.license_activation_pending;
                     self.license_activation_pending = false;
                     if activation_failed {
@@ -1352,7 +1380,7 @@ impl BlazeApp {
 
         std::thread::spawn(move || {
             let result = if let Some(key) = license_key.as_deref() {
-                verify_gumroad_license(key, false).and_then(|_| {
+                verify_blaze_license(key, false).and_then(|_| {
                     let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
                     let engine = MediaEngine::new([tools]);
                     export::export_blaze_video(&engine, &source, &output, duration, &ranges)
@@ -1398,7 +1426,7 @@ impl BlazeApp {
 
         std::thread::spawn(move || {
             let result = if let Some(key) = license_key.as_deref() {
-                verify_gumroad_license(key, false).and_then(|_| {
+                verify_blaze_license(key, false).and_then(|_| {
                     export::export_interchange(format, &source, &info, &ranges, &output)
                 })
             } else {
@@ -1437,12 +1465,12 @@ impl eframe::App for BlazeApp {
         self.poll_keyframes(ctx);
         self.poll_exports();
         self.poll_license_verification();
-        ctx.request_repaint_after(Duration::from_secs(60));
+        ctx.request_repaint_after(Duration::from_secs(15));
 
-        // Revalidate every activated installation at startup and every 60 seconds.
+        // Revalidate activated installations at startup and every five minutes.
         if self.license_key.is_some()
             && !self.license_verifying
-            && self.last_license_check.elapsed() >= Duration::from_secs(60)
+            && self.last_license_check.elapsed() >= Duration::from_secs(300)
         {
             let key = self.license_key.clone().unwrap_or_default();
             self.license_verifying = true;
@@ -1451,7 +1479,7 @@ impl eframe::App for BlazeApp {
             let sender = self.license_tx.clone();
             let repaint = ctx.clone();
             std::thread::spawn(move || {
-                let result = verify_gumroad_license(&key, false);
+                let result = verify_blaze_license(&key, false);
                 let _ = sender.send(result);
                 repaint.request_repaint();
             });
@@ -2725,7 +2753,12 @@ impl eframe::App for BlazeApp {
                                         .color(egui::Color32::from_rgb(255, 132, 108)));
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                         let (status, color) = if self.license_activated {
-                                            ("ACTIVATED", egui::Color32::LIGHT_GREEN)
+                                            let label = match self.license_plan {
+                                                Some(LicensePlan::Monthly) => "MONTHLY",
+                                                Some(LicensePlan::Permanent) => "PERMANENT",
+                                                None => "ACTIVATED",
+                                            };
+                                            (label, egui::Color32::LIGHT_GREEN)
                                         } else {
                                             ("FREE", ui.visuals().weak_text_color())
                                         };
@@ -2734,8 +2767,21 @@ impl eframe::App for BlazeApp {
                                 });
                                 ui.add_space(8.0);
                                 if self.license_activated {
-                                    ui.label(egui::RichText::new("Blaze Activated").size(17.0).strong());
-                                    ui.label(egui::RichText::new("Blaze is activated. Cut away!")
+                                    let (plan_title, plan_description) = match self.license_plan {
+                                        Some(LicensePlan::Monthly) => (
+                                            "Blaze Monthly",
+                                            self.license_valid_until.as_deref()
+                                                .map(|date| format!("Access remains active through {date} UTC."))
+                                                .unwrap_or_else(|| "Your monthly subscription is active.".to_owned())
+                                        ),
+                                        Some(LicensePlan::Permanent) => (
+                                            "Blaze Permanent",
+                                            "Your permanent licence is active. No subscription expiry.".to_owned()
+                                        ),
+                                        None => ("Blaze Activated", "Your licence is active.".to_owned()),
+                                    };
+                                    ui.label(egui::RichText::new(plan_title).size(17.0).strong());
+                                    ui.label(egui::RichText::new(plan_description)
                                         .size(12.0).color(ui.visuals().weak_text_color()));
                                     ui.add_space(14.0);
                                     egui::Frame::new()
@@ -3529,7 +3575,7 @@ impl eframe::App for BlazeApp {
                         ui.colored_label(egui::Color32::from_rgb(235, 183, 113), message);
                     }
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new("Your key is verified with Gumroad over the internet.")
+                    ui.label(egui::RichText::new("Your key is verified online with the Blaze licensing service.")
                         .size(11.0).color(ui.visuals().weak_text_color()));
                 });
             if activate_license_requested {
