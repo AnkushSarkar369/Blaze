@@ -3122,6 +3122,7 @@ impl eframe::App for BlazeApp {
         }
 
         if self.show_license_dialog {
+            let mut close_license_dialog = false;
             egui::Window::new("Enter License Key")
                 .collapsible(false)
                 .resizable(false)
@@ -3141,7 +3142,7 @@ impl eframe::App for BlazeApp {
                             self.license_notice = Some("License activation is not connected yet.".to_owned());
                         }
                         if ui.button("Cancel").clicked() {
-                            self.show_license_dialog = false;
+                            close_license_dialog = true;
                         }
                     });
                     if let Some(message) = &self.license_notice {
@@ -3152,6 +3153,9 @@ impl eframe::App for BlazeApp {
                     ui.label(egui::RichText::new("Activation will be available when the licensing server is connected.")
                         .size(11.0).color(ui.visuals().weak_text_color()));
                 });
+            if close_license_dialog {
+                self.show_license_dialog = false;
+            }
         }
     }
 
