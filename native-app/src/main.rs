@@ -1299,7 +1299,7 @@ impl BlazeApp {
         let sender = self.license_tx.clone();
         let repaint = ctx.clone();
         std::thread::spawn(move || {
-            let result = verify_gumroad_license(&key, true);
+            let result = verify_gumroad_license(&key, false);
             let _ = sender.send(result);
             repaint.request_repaint();
         });
@@ -1432,12 +1432,12 @@ impl eframe::App for BlazeApp {
         self.poll_keyframes(ctx);
         self.poll_exports();
         self.poll_license_verification();
-        ctx.request_repaint_after(Duration::from_secs(60));
+        ctx.request_repaint_after(Duration::from_secs(15));
 
-        // Revalidate every activated installation at startup and every 60 seconds.
+        // Revalidate activated installations at startup and every five minutes.
         if self.license_key.is_some()
             && !self.license_verifying
-            && self.last_license_check.elapsed() >= Duration::from_secs(60)
+            && self.last_license_check.elapsed() >= Duration::from_secs(300)
         {
             let key = self.license_key.clone().unwrap_or_default();
             self.license_verifying = true;
