@@ -1529,7 +1529,7 @@ impl eframe::App for BlazeApp {
         // The Tools controls need enough horizontal room for their labels,
         // values, and sliders. Keep that as the minimum, while allowing the
         // splitter to leave as little as 240 px for the preview at its maximum.
-        let tools_min_width = 360.0_f32.min(root_rect.width().max(0.0));
+        let tools_min_width = 420.0_f32.min(root_rect.width().max(0.0));
         let tools_max_width = (root_rect.width() - 240.0)
             .max(tools_min_width);
 
@@ -1564,8 +1564,8 @@ impl eframe::App for BlazeApp {
             tools_panel_id,
         )
         .map(|state| state.outer_rect.width())
-        .map(|width| if (width - 380.0).abs() < 1.0 { 420.0 } else { width })
-        .unwrap_or(420.0)
+        .map(|width| if (width - 380.0).abs() < 1.0 || (width - 420.0).abs() < 1.0 { 460.0 } else { width })
+        .unwrap_or(460.0)
         .clamp(tools_min_width, tools_max_width);
         let normalized_tools_rect = egui::Rect::from_min_size(
             egui::Pos2::ZERO,
@@ -1971,7 +1971,7 @@ impl eframe::App for BlazeApp {
             )
             .show_separator_line(false)
             .resizable(false)
-            .default_size(420.0)
+            .default_size(460.0)
             .exact_size(saved_tools_width)
             .show(ui, |ui| {
                 let tools_panel_rect = ui.max_rect();
@@ -3087,7 +3087,7 @@ impl eframe::App for BlazeApp {
         if tools_resize_response.double_clicked() {
             let width = self.media_info.as_ref()
                 .map(|info| default_tools_width(root_rect, info))
-                .unwrap_or(420.0)
+                .unwrap_or(460.0)
                 .clamp(tools_min_width, tools_max_width);
             let panel_rect = egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -3593,8 +3593,8 @@ fn default_tools_width(root_rect: egui::Rect, info: &MediaInfo) -> f32 {
         .unwrap_or(16.0 / 9.0);
     let preview_height = (root_rect.height() - 220.0 - 54.0).max(160.0);
     let preview_width = (preview_height * aspect + 14.0)
-        .clamp(240.0, (root_rect.width() - 240.0).max(240.0));
-    (root_rect.width() - preview_width).max(240.0)
+        .clamp(240.0, (root_rect.width() - 420.0).max(240.0));
+    (root_rect.width() - preview_width).max(420.0)
 }
 
 fn format_ruler_time(seconds: f64, step: f64) -> String {
