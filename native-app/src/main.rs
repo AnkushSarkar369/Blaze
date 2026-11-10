@@ -2751,7 +2751,7 @@ impl eframe::App for BlazeApp {
                                         && !self.license_activated,
                                     egui::Button::new(
                                         egui::RichText::new(
-                                            if self.license_verifying { "Checking…" } else { "Activate Blaze" }
+                                            if self.license_verifying { "Checking…" } else { "Activate Blaze!" }
                                         ).strong()
                                     ).min_size(egui::vec2(activate_width, 36.0)),
                                 ).clicked()
