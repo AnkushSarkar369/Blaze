@@ -220,7 +220,7 @@ impl ToolTab {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum HelpTab { Guide, KeyboardMouse, Timeline, Blaze, Precision, Export }
+enum HelpTab { Guide, KeyboardMouse, Timeline, Blaze, Precision, Export, Activation }
 
 impl HelpTab {
     fn label(self) -> &'static str {
@@ -231,6 +231,7 @@ impl HelpTab {
             Self::Blaze => "Blaze Mode",
             Self::Precision => "Precision Mode",
             Self::Export => "Export",
+            Self::Activation => "Activation",
         }
     }
 }
@@ -881,7 +882,6 @@ struct BlazeApp {
     help_tab: HelpTab,
     pending_preview_fit: bool,
     show_license_dialog: bool,
-    show_migration_dialog: bool,
     license_key_input: String,
     license_notice: Option<String>,
     license_activated: bool,
@@ -977,7 +977,6 @@ impl BlazeApp {
             help_tab: HelpTab::Guide,
             pending_preview_fit: false,
             show_license_dialog: false,
-            show_migration_dialog: false,
             license_key_input: String::new(),
             license_notice: None,
             license_activated: false,
@@ -1270,7 +1269,6 @@ impl BlazeApp {
                     if self.license_activation_pending {
                         self.license_notice = Some("Blaze is activated. Cut away!".to_owned());
                         self.license_key_input.clear();
-                        self.show_migration_dialog = true;
                     }
                     self.license_activation_pending = false;
                     persist_license_state(self.license_activated, self.successful_exports, self.license_key.as_deref());
@@ -2689,6 +2687,26 @@ impl eframe::App for BlazeApp {
                                     ui.label(egui::RichText::new("Blaze Activated").size(17.0).strong());
                                     ui.label(egui::RichText::new("Blaze is activated. Cut away!")
                                         .size(12.0).color(ui.visuals().weak_text_color()));
+                                    ui.add_space(14.0);
+                                    egui::Frame::new()
+                                        .fill(egui::Color32::from_rgb(19, 21, 24))
+                                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 46, 50)))
+                                        .corner_radius(egui::CornerRadius::same(7))
+                                        .inner_margin(egui::Margin::same(12))
+                                        .show(ui, |ui| {
+                                            ui.label(egui::RichText::new("MOVING TO ANOTHER DEVICE?")
+                                                .size(10.5).strong()
+                                                .color(egui::Color32::from_rgb(255, 132, 108)));
+                                            ui.add_space(6.0);
+                                            ui.label(egui::RichText::new(
+                                                "If you reinstall Blaze or switch to a different device or operating system, email us to request a license transfer."
+                                            ).size(12.0).color(ui.visuals().weak_text_color()));
+                                            ui.add_space(7.0);
+                                            ui.hyperlink_to(
+                                                "workingankush369@gmail.com",
+                                                "mailto:workingankush369@gmail.com?subject=Blaze%20License%20Migration",
+                                            );
+                                        });
                                 } else {
                                     ui.label(egui::RichText::new("Free version").size(17.0).strong());
                                     let remaining = FREE_EXPORT_LIMIT.saturating_sub(self.successful_exports);
@@ -3281,6 +3299,7 @@ impl eframe::App for BlazeApp {
                                     HelpTab::Blaze,
                                     HelpTab::Precision,
                                     HelpTab::Export,
+                                    HelpTab::Activation,
                                 ] {
                                     let selected = self.help_tab == tab;
                                     let width = (ui.available_width() - 18.0).max(100.0);
@@ -3407,6 +3426,14 @@ impl eframe::App for BlazeApp {
                                             help_card(ui, "Review the cut list", "Check every region on the timeline and confirm the start and end boundaries.");
                                             help_card(ui, "Choose the right output", "Use Blaze Mode for keyframe-aligned stream-copy output, or an NLE interchange file to continue editing in a supported video editor.");
                                         }
+                                        HelpTab::Activation => {
+                                            help_page_heading(ui, "Activation & license transfers", "Activate Blaze with your Gumroad license and keep access when moving devices.");
+                                            help_card(ui, "Activate Blaze", "Purchase Blaze to receive a license key. Open the License tab in the Tools panel, paste your key and select Activate Blaze. Your purchase is verified online.");
+                                            help_card(ui, "License status", "Once activated, Blaze verifies your license online periodically and before exports. A successful activation unlocks licensed exports on this device.");
+                                            help_card(ui, "Reinstalling or changing devices", "If you reinstall Blaze, replace your computer or switch operating systems, contact support to request a license transfer. Do this before activating on the new device.");
+                                            help_card(ui, "Request a license transfer", "Email workingankush369@gmail.com with the subject “Blaze License Migration”. Include your purchase email and explain that you are moving to a new device. Transfers are handled manually.");
+                                            help_card(ui, "Why transfers are manual", "License transfers are handled by the Blaze team to protect the license system. There is no self-service deactivation button in the application.");
+                                        }
                                     }
                                     ui.add_space(12.0);
                                     ui.separator();
@@ -3471,36 +3498,6 @@ impl eframe::App for BlazeApp {
             }
         }
 
-        if self.show_migration_dialog {
-            let mut close_migration_dialog = false;
-            egui::Window::new("Blaze is activated")
-                .collapsible(false)
-                .resizable(false)
-                .default_width(390.0)
-                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-                .open(&mut self.show_migration_dialog)
-                .show(ui.ctx(), |ui| {
-                    ui.label(egui::RichText::new("Your license is now active on this device.")
-                        .strong());
-                    ui.add_space(10.0);
-                    ui.label("If you reinstall Blaze or switch to a different device or operating system, please email us to request a license transfer.");
-                    ui.add_space(10.0);
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("Contact:");
-                        ui.hyperlink_to(
-                            "workingankush369@gmail.com",
-                            "mailto:workingankush369@gmail.com?subject=Blaze%20License%20Migration",
-                        );
-                    });
-                    ui.add_space(12.0);
-                    if ui.button("Got it").clicked() {
-                        close_migration_dialog = true;
-                    }
-                });
-            if close_migration_dialog {
-                self.show_migration_dialog = false;
-            }
-        }
     }
 
     fn on_exit(&mut self, gl: Option<&glow::Context>) {
