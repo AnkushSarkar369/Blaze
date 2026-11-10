@@ -76,14 +76,14 @@ export function evaluatePurchase(purchase, product, now = Date.now()) {
   };
 }
 
-async function verifyAgainstProduct(licenseKey, product) {
+async function verifyAgainstProduct(licenseKey, product, incrementUsesCount = false, fetchImpl = fetch) {
   const form = new URLSearchParams({
     product_id: product.productId,
     license_key: licenseKey,
-    increment_uses_count: "false"
+    increment_uses_count: incrementUsesCount ? "true" : "false"
   });
 
-  const response = await fetch("https://api.gumroad.com/v2/licenses/verify", {
+  const response = await fetchImpl("https://api.gumroad.com/v2/licenses/verify", {
     method: "POST",
     body: form,
     signal: AbortSignal.timeout(15000)
@@ -99,14 +99,21 @@ async function verifyAgainstProduct(licenseKey, product) {
   return payload.purchase || null;
 }
 
-export async function verifyLicense(licenseKey) {
+export async function verifyLicense(licenseKey, incrementUsesCount = false, fetchImpl = fetch) {
   for (const product of PRODUCTS) {
-    const purchase = await verifyAgainstProduct(licenseKey, product);
+    const purchase = await verifyAgainstProduct(licenseKey, product, false, fetchImpl);
     if (!purchase) continue;
 
     // A key matched a product. Do not fall through to a different product if
     // its entitlement is revoked or expired.
-    return evaluatePurchase(purchase, product);
+    const entitlement = evaluatePurchase(purchase, product);
+    if (!entitlement.licensed || !incrementUsesCount) return entitlement;
+
+    // Preserve the original activation behaviour: count an activation once,
+    // but never count routine checks, exports, or invalid/expired keys.
+    const countedPurchase = await verifyAgainstProduct(licenseKey, product, true, fetchImpl);
+    if (!countedPurchase) return denied("invalid");
+    return evaluatePurchase(countedPurchase, product);
   }
 
   return denied("invalid");
@@ -134,12 +141,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   const key = typeof input.license_key === "string" ? input.license_key.trim() : "";
+  const incrementUsesCount = input.increment_uses_count === true;
   if (!key || key.length > 256) {
     return json(res, 400, { error: "invalid_license_key" });
   }
 
   try {
-    return json(res, 200, await verifyLicense(key));
+    return json(res, 200, await verifyLicense(key, incrementUsesCount));
   } catch {
     // Deliberately do not log the submitted key or Gumroad's purchase payload.
     return json(res, 503, { error: "verification_unavailable" });
