@@ -59,7 +59,7 @@ The state file is stored at the platform's normal application-configuration loca
 - macOS: `~/Library/Application Support/Blaze/license-state`
 - Linux: `$XDG_CONFIG_HOME/Blaze/license-state`, or `~/.config/Blaze/license-state` when `XDG_CONFIG_HOME` is unset
 
-The local state file is not encrypted; it contains the Gumroad key in plaintext. Device binding is intended to deter casual copying of an activation-state file, not a determined attacker who can inspect or patch the executable or modify local state. The embedded application salt is not a server-side secret, and the SHA-256 verifier is not a cryptographic DRM boundary.
+The local state file is not encrypted; it contains the Gumroad key in plaintext. Device binding is intended to deter casual copying of an activation-state file, not a determined attacker who can inspect or patch the executable or modify local state. The embedded application salt is not a server-side secret, and the SHA-256 verifier is not a cryptographic DRM boundary. On Unix, Blaze creates the application state directory with mode `0700` and the state file with mode `0600`.
 
 These identifiers are operating-system/platform identifiers, not guaranteed immutable hardware serial numbers. Reinstalling or cloning an operating system, regenerating its machine ID, or changing the platform identifier can cause Blaze to request activation again. Existing `gumroad-v1` state files require a one-time reactivation so the new device binding can be written.
 
