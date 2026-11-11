@@ -373,7 +373,7 @@ fn license_state_file() -> Option<PathBuf> {
 
 // The salt is an application-specific domain separator, not a server secret.
 // Anything embedded in a desktop binary can be recovered by a determined attacker.
-const LICENSE_BINDING_SALT: &[u8] = b"blaze-local-device-binding-v2";
+const LICENSE_BINDING_SALT: &[u8] = b"blaze-local-device-binding-v1";
 
 #[cfg(target_os = "windows")]
 fn machine_identifier() -> Result<String, String> {
@@ -466,7 +466,7 @@ fn device_hid() -> Result<String, String> {
 
 fn license_binding_for_hid(license_key: &str, hid: &str) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"Blaze local licence binding v2\0");
+    hasher.update(b"Blaze local licence binding v1\0");
     hasher.update(LICENSE_BINDING_SALT);
     hasher.update([0]);
     hasher.update(hid.as_bytes());
@@ -479,8 +479,8 @@ fn current_license_binding(license_key: &str) -> Result<String, String> {
     Ok(license_binding_for_hid(license_key, &device_hid()?))
 }
 
-// State v3 stores a device-bound entitlement and the last successful Gumroad
-// verification. A cached activation remains usable for at most 24 hours.
+// V1 activation state stores a device-bound entitlement and the last successful
+// Gumroad verification. A cached activation remains usable for at most 24 hours.
 #[derive(Clone)]
 struct CachedLicense {
     license_key: String,
@@ -540,7 +540,7 @@ fn load_license_state() -> (Option<CachedLicense>, Option<String>) {
     };
 
     let fields: Vec<&str> = contents.lines().collect();
-    if fields.len() != 7 || fields[6] != "blaze-device-v3" || fields[0] != "true" {
+    if fields.len() != 7 || fields[6] != "blaze-device-v1" || fields[0] != "true" {
         return (None, Some("Blaze's saved licence state is outdated or corrupted. Please activate again.".to_owned()));
     }
 
@@ -560,8 +560,10 @@ fn load_license_state() -> (Option<CachedLicense>, Option<String>) {
     } else {
         Some(fields[4].to_owned())
     };
-    if (plan == LicensePlan::Monthly
-        && valid_until.as_deref().and_then(parse_gumroad_timestamp).is_none())
+    let invalid_monthly_end = valid_until
+        .as_deref()
+        .is_some_and(|value| parse_gumroad_timestamp(value).is_none());
+    if (plan == LicensePlan::Monthly && invalid_monthly_end)
         || (plan == LicensePlan::Permanent && valid_until.is_some())
     {
         return (None, Some("Blaze's saved subscription details are malformed. Please activate again.".to_owned()));
@@ -636,7 +638,7 @@ fn persist_license_state(
     let valid_until = entitlement.valid_until.as_deref().unwrap_or("");
     let verified_seconds = last_verified.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
     let contents = format!(
-        "true\n{}\n{}\n{}\n{}\n{}\nblaze-device-v3\n",
+        "true\n{}\n{}\n{}\n{}\n{}\nblaze-device-v1\n",
         license_key,
         binding,
         plan,
@@ -730,7 +732,7 @@ mod license_binding_tests {
     }
 
     #[test]
-    fn permanent_activation_has_a_strict_24_hour_grace_window() {
+    fn permanent_activation_is_valid_through_24_hour_grace_boundary() {
         let now = UNIX_EPOCH + Duration::from_secs(2_000_000_000);
         let verified_at = now - LICENSE_GRACE_PERIOD;
         assert!(license_cache_is_valid(

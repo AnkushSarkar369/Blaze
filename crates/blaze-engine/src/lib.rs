@@ -247,10 +247,6 @@ impl MediaEngine {
         Ok(timestamps)
     }
 
-    pub fn generate_waveform(&self, path: &str, channels: usize) -> Result<Vec<u8>, String> {
-        self.generate_waveform_with_progress(path, channels, 0.0, |_| {})
-    }
-
     /// Generates waveform peaks while reporting decoded-audio progress from 0.0 to 1.0.
     pub fn generate_waveform_with_progress(
         &self,

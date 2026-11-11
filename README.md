@@ -1,4 +1,4 @@
-# Blaze
+# Blaze V1
 
 Blaze is a lightweight native desktop video-cutting application.
 
@@ -61,7 +61,7 @@ The state file is stored at the platform's normal application-configuration loca
 
 The local state file is not encrypted; it contains the Gumroad key in plaintext, the entitlement plan, any Monthly subscription end timestamp, and the last successful verification time. Device binding is intended to deter casual copying of an activation-state file, not a determined attacker who can inspect or patch the executable or modify local state. The embedded application salt is not a server-side secret, and the SHA-256 verifier is not a cryptographic DRM boundary. On Unix, Blaze creates the application state directory with mode `0700` and the state file with mode `0600`.
 
-These identifiers are operating-system/platform identifiers, not guaranteed immutable hardware serial numbers. Reinstalling or cloning an operating system, regenerating its machine ID, or changing the platform identifier can cause Blaze to request activation again. The current local state format is `blaze-device-v3`.
+These identifiers are operating-system/platform identifiers, not guaranteed immutable hardware serial numbers. Reinstalling or cloning an operating system, regenerating its machine ID, or changing the platform identifier can require activation again.
 
 ### Entitlement checks
 
@@ -111,13 +111,13 @@ This is the working product roadmap. It lists unfinished work only; completed it
 - [ ] Auto-Update Functionality
 - [ ] Use on a windows build & Github's mac
 
-### 8. Release readiness
+### 4. Release readiness
 
 - [ ] Linux
 - [ ] Windows
 - [ ] MacOS
 - [ ] Auto-Update
-- [ ] Publish the first stable public release.
+- [ ] Publish Blaze V1.
 
 ## Run
 
