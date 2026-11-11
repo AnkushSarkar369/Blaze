@@ -1,0 +1,123 @@
+name: Windows Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "native-app/**"
+      - ".github/workflows/windows.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Build Windows x64
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Download LGPL libmpv development package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $release = Invoke-RestMethod `
+            -Headers @{ "User-Agent" = "Blaze-Windows-CI" } `
+            -Uri "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest"
+
+          $asset = $release.assets |
+            Where-Object { $_.name -match '^mpv-dev-lgpl-x86_64-.*\.7z$' } |
+            Select-Object -First 1
+
+          if (-not $asset) {
+            throw "No x86_64 LGPL MPV development archive was found in the latest zhongfly/mpv-winbuild release."
+          }
+
+          $archive = Join-Path $env:RUNNER_TEMP "mpv-dev-lgpl.7z"
+          $extract = Join-Path $env:RUNNER_TEMP "mpv-dev-lgpl"
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archive
+
+          $sevenZip = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
+          if (-not (Test-Path $sevenZip)) {
+            choco install 7zip --yes --no-progress
+          }
+          if (-not (Test-Path $sevenZip)) {
+            throw "7-Zip was not found after installation."
+          }
+
+          & $sevenZip x $archive "-o$extract" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not extract the MPV development archive."
+          }
+
+          $importLibrary = Get-ChildItem -Path $extract -Filter "mpv.lib" -File -Recurse |
+            Select-Object -First 1
+          if (-not $importLibrary) {
+            throw "The MPV archive did not contain mpv.lib, which the MSVC Rust linker needs."
+          }
+
+          $mpvDll = Get-ChildItem -Path $extract -Filter "libmpv-2.dll" -File -Recurse |
+            Select-Object -First 1
+          if (-not $mpvDll) {
+            throw "The MPV archive did not contain libmpv-2.dll."
+          }
+
+          "MPV_LIBRARY_DIR=$($importLibrary.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "MPV_DLL_DIR=$($mpvDll.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          Write-Host "Using MPV import library: $($importLibrary.FullName)"
+          Write-Host "Using MPV runtime directory: $($mpvDll.Directory.FullName)"
+
+      - name: Build Blaze
+        run: cargo build --locked --release -p blaze-native
+
+      - name: Assemble Windows CI preview
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $stage = Join-Path $env:GITHUB_WORKSPACE "dist\Blaze-Windows-x64"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+
+          Copy-Item "target\release\blaze-native.exe" (Join-Path $stage "Blaze.exe")
+
+          # Copy the MPV runtime and the DLL dependencies shipped beside it.
+          Get-ChildItem -Path $env:MPV_DLL_DIR -Filter "*.dll" -File |
+            Copy-Item -Destination $stage -Force
+
+          @"
+          Blaze Windows CI Preview
+
+          This is an early Windows build intended for GUI and startup testing.
+          FFmpeg and FFprobe are not bundled yet, so media import, analysis and export
+          are not expected to work in this preview.
+
+          Run Blaze.exe from this folder. Keep the DLL files beside Blaze.exe.
+          "@ | Set-Content -Path (Join-Path $stage "README.txt") -Encoding utf8
+
+          if (-not (Test-Path (Join-Path $stage "Blaze.exe"))) {
+            throw "Blaze.exe was not staged."
+          }
+          if (-not (Test-Path (Join-Path $stage "libmpv-2.dll"))) {
+            throw "libmpv-2.dll was not staged."
+          }
+
+      - name: Upload Windows CI preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: Blaze-Windows-x64-CI-Preview
+          path: dist/Blaze-Windows-x64/
+          if-no-files-found: error
+          retention-days: 14
