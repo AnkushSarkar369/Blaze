@@ -126,6 +126,9 @@ impl Playback {
             Mpv::builder()?
                 .set_property("vo", "libmpv")?
                 .set_property("hwdec", "vaapi-copy")?
+                // Keep libmpv on the Intel VA-API path instead of probing
+                // unrelated NVIDIA/CUDA hardware backends.
+                .set_property("gpu-hwdec-interop", "vaapi")?
                 // Haswell VA-API exposes MPEG-2, H.264 and VC-1 decode profiles.
                 // HEVC and other unsupported codecs deliberately fall back to software.
                 .set_property("hwdec-codecs", "h264,mpeg2video,vc1")?
