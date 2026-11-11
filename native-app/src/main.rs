@@ -471,9 +471,17 @@ fn load_license_state() -> (u32, Option<String>, Option<String>) {
     };
 
     let fields: Vec<&str> = contents.lines().collect();
+    // Preserve a readable export counter even when a later write left the
+    // state file truncated. The warning below still requires reactivation.
+    let successful_exports = fields
+        .get(1)
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(0)
+        .min(FREE_EXPORT_LIMIT);
+
     if fields.len() < 4 {
         return (
-            0,
+            successful_exports,
             None,
             Some("Blaze's saved licence state is incomplete or corrupted. Please activate again.".to_owned()),
         );
@@ -483,7 +491,7 @@ fn load_license_state() -> (u32, Option<String>, Option<String>) {
         Ok(value) => value,
         Err(_) => {
             return (
-                0,
+                successful_exports,
                 None,
                 Some("Blaze's saved licence state is malformed. Please activate again.".to_owned()),
             );
@@ -491,16 +499,13 @@ fn load_license_state() -> (u32, Option<String>, Option<String>) {
     };
     // Entitlement is always revalidated with Gumroad; this flag is metadata only.
 
-    let successful_exports = match fields[1].parse::<u32>() {
-        Ok(value) => value.min(FREE_EXPORT_LIMIT),
-        Err(_) => {
-            return (
-                0,
-                None,
-                Some("Blaze's saved export counter is malformed. Please activate again.".to_owned()),
-            );
-        }
-    };
+    if fields[1].parse::<u32>().is_err() {
+        return (
+            0,
+            None,
+            Some("Blaze's saved export counter is malformed. Please activate again.".to_owned()),
+        );
+    }
 
     let license_key = fields
         .get(2)
