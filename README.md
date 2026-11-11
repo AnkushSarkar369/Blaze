@@ -33,11 +33,37 @@ Two separate Gumroad products are supported:
 | Blaze Monthly | `Niyme89XCcFC44ShhEPPrQ==` | Monthly subscription |
 | Blaze Permanent | `ksPYCeAJW8TtmOjsBRQ0OA==` | Permanent licence |
 
-The app checks the Monthly product first and then the Permanent product. A successful manual activation increments Gumroad's Uses counter once, after the key has matched and passed entitlement checks. Periodic revalidation and export-time checks use `increment_uses_count=false`.
+### Activation and Gumroad Uses
 
-Each activation is also bound locally to the current device. Blaze derives a stable device identifier from Windows `MachineGuid`, Linux `/etc/machine-id` (falling back to `/var/lib/dbus/machine-id`), or macOS `IOPlatformUUID`. It hashes that identifier into the HID, then stores an opaque SHA-256 binding derived from the HID and Gumroad key in the local license-state file. On every launch Blaze recomputes the HID and checks the saved binding. Copying the app and its local state to a different computer therefore does not carry the activation across; the licence key must be entered again on that device. The HID and binding remain local and are not sent to Gumroad.
+Blaze checks the Monthly product first and then the Permanent product. During a manual activation it first verifies the key without incrementing Uses. Only after the key and entitlement pass does it make a second verification request with `increment_uses_count=true`. This increments Gumroad's Uses counter once for that activation.
 
-This is local copy protection, not tamper-proof DRM: a determined attacker can inspect or patch a desktop binary. Gumroad's Uses counter is an activation-event signal for manual review; it does not identify unique devices. Existing `gumroad-v1` local activations require a one-time reactivation to establish the device binding.
+Periodic licence revalidation and export-time checks use `increment_uses_count=false`; they do not intentionally add Uses events. The Gumroad dashboard associates the activation event with the relevant purchase/key record, which gives the publisher an audit trail for investigating repeated or suspicious activations. Uses is an activation-event counter, not a list of hardware IDs or a unique-device registry.
+
+### Local device binding
+
+A successful activation is bound to the current installation's operating-system machine identifier:
+
+| Platform | Identifier source |
+|---|---|
+| Windows | Registry `HKLM\\SOFTWARE\\Microsoft\\Cryptography\\MachineGuid` |
+| Linux | `/etc/machine-id`, falling back to `/var/lib/dbus/machine-id` |
+| macOS | `IOPlatformUUID` from `ioreg` |
+
+Blaze hashes the identifier into a deterministic HID. The same identifier produces the same HID on subsequent launches. A second SHA-256 value is then derived from an application-specific domain separator, the HID, and the Gumroad licence key. The local state file stores the licence key and this verifier. At startup Blaze recomputes the HID and verifier and compares the result with the saved value.
+
+Consequently, copying the application and its saved activation state to a computer with a different machine identifier does not copy the activation. The key must be entered and activated on that computer. The HID and verifier are not sent to Gumroad.
+
+The state file is stored at the platform's normal application-configuration location:
+
+- Windows: `%APPDATA%\\Blaze\\license-state`
+- macOS: `~/Library/Application Support/Blaze/license-state`
+- Linux: `$XDG_CONFIG_HOME/Blaze/license-state`, or `~/.config/Blaze/license-state` when `XDG_CONFIG_HOME` is unset
+
+The local state file is not encrypted; it contains the Gumroad key in plaintext. Device binding is intended to deter casual copying of an activation-state file, not a determined attacker who can inspect or patch the executable or modify local state. The embedded application salt is not a server-side secret, and the SHA-256 verifier is not a cryptographic DRM boundary.
+
+These identifiers are operating-system/platform identifiers, not guaranteed immutable hardware serial numbers. Reinstalling or cloning an operating system, regenerating its machine ID, or changing the platform identifier can cause Blaze to request activation again. Existing `gumroad-v1` state files require a one-time reactivation so the new device binding can be written.
+
+### Entitlement checks
 
 Monthly keys must report a monthly recurrence. Gumroad's subscription cancellation, end, and failed-renewal timestamps are treated as the end of paid access: access remains valid until a future timestamp and is denied once that timestamp has passed. Permanent keys do not have a subscription expiry. Refunds, chargebacks, and unresolved disputes invalidate either product.
 
