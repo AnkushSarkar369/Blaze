@@ -4,6 +4,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use sha2::{Digest, Sha256};
+
 use blaze_engine::{MediaEngine, MediaInfo};
 use blaze_engine::export::{self, InterchangeFormat};
 use blaze_engine::silence::{
@@ -337,32 +339,164 @@ fn license_state_file() -> Option<PathBuf> {
     Some(config_dir.join("Blaze").join("license-state"))
 }
 
-fn load_license_state() -> (u32, Option<String>) {
+// The salt is an application-specific domain separator, not a server secret.
+// Anything embedded in a desktop binary can be recovered by a determined attacker.
+const LICENSE_BINDING_SALT: &[u8] = b"blaze-local-device-binding-v2";
+
+#[cfg(target_os = "windows")]
+fn machine_identifier() -> Result<String, String> {
+    let output = std::process::Command::new("reg.exe")
+        .args([
+            "query",
+            r"HKLM\SOFTWARE\Microsoft\Cryptography",
+            "/v",
+            "MachineGuid",
+        ])
+        .output()
+        .map_err(|error| format!("Could not read the Windows MachineGuid: {error}"))?;
+
+    if !output.status.success() {
+        return Err("Windows did not return the MachineGuid registry value.".to_owned());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .find_map(|line| {
+            let mut parts = line.split_whitespace();
+            let name = parts.next()?;
+            if name.eq_ignore_ascii_case("MachineGuid") {
+                parts.last().map(str::to_owned)
+            } else {
+                None
+            }
+        })
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "The Windows MachineGuid value was not present.".to_owned())
+}
+
+#[cfg(target_os = "macos")]
+fn machine_identifier() -> Result<String, String> {
+    let output = std::process::Command::new("ioreg")
+        .args(["-rd1", "-c", "IOPlatformExpertDevice"])
+        .output()
+        .map_err(|error| format!("Could not read the macOS platform identifier: {error}"))?;
+
+    if !output.status.success() {
+        return Err("macOS did not return the IOPlatformUUID value.".to_owned());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .find(|line| line.contains("\"IOPlatformUUID\""))
+        .and_then(|line| line.split_once('='))
+        .map(|(_, value)| value.trim().trim_matches('"').to_owned())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "The macOS IOPlatformUUID value was not present.".to_owned())
+}
+
+#[cfg(target_os = "linux")]
+fn machine_identifier() -> Result<String, String> {
+    for path in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+        if let Ok(contents) = std::fs::read_to_string(path) {
+            let identifier = contents.trim();
+            if !identifier.is_empty() {
+                return Ok(identifier.to_owned());
+            }
+        }
+    }
+
+    Err("Could not read /etc/machine-id or /var/lib/dbus/machine-id.".to_owned())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+fn machine_identifier() -> Result<String, String> {
+    Err("Device-bound licensing is not supported on this operating system.".to_owned())
+}
+
+fn digest_hex(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push_str(&format!("{byte:02x}"));
+    }
+    output
+}
+
+// Recomputed whenever Blaze starts. The same OS/device identifier yields the same HID.
+fn device_hid() -> Result<String, String> {
+    let identifier = machine_identifier()?;
+    let mut hasher = Sha256::new();
+    hasher.update(b"Blaze device identifier v1\0");
+    hasher.update(identifier.trim().as_bytes());
+    Ok(digest_hex(&hasher.finalize()))
+}
+
+fn license_binding_for_hid(license_key: &str, hid: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"Blaze local licence binding v2\0");
+    hasher.update(LICENSE_BINDING_SALT);
+    hasher.update([0]);
+    hasher.update(hid.as_bytes());
+    hasher.update([0]);
+    hasher.update(license_key.trim().as_bytes());
+    digest_hex(&hasher.finalize())
+}
+
+fn current_license_binding(license_key: &str) -> Result<String, String> {
+    Ok(license_binding_for_hid(license_key, &device_hid()?))
+}
+
+// State format v2 stores the Gumroad key plus an opaque device-bound verifier.
+// Legacy gumroad-v1 activations require one reactivation to establish the binding.
+fn load_license_state() -> (u32, Option<String>, Option<String>) {
     let Some(path) = license_state_file() else {
-        return (0, None);
+        return (0, None, None);
     };
     let Ok(contents) = std::fs::read_to_string(path) else {
-        return (0, None);
+        return (0, None, None);
     };
 
-    let mut lines = contents.lines();
-    let _stored_activation = lines.next() == Some("true");
-    let successful_exports = lines
-        .next()
+    let fields: Vec<&str> = contents.lines().collect();
+    let successful_exports = fields
+        .get(1)
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(0)
         .min(FREE_EXPORT_LIMIT);
-    let third_line = lines.next();
-    let (license_key, marker) = if third_line == Some("gumroad-v1") {
-        (None, true)
-    } else {
-        (third_line.filter(|value| !value.is_empty()).map(str::to_owned), lines.next() == Some("gumroad-v1"))
-    };
+    let license_key = fields
+        .get(2)
+        .filter(|value| !value.is_empty())
+        .map(|value| (*value).to_owned());
 
-    if marker {
-        (successful_exports, license_key)
-    } else {
-        (successful_exports, None)
+    match fields.last().copied() {
+        Some("blaze-device-v2") => {
+            let Some(key) = license_key else {
+                return (successful_exports, None, None);
+            };
+            let stored_binding = fields.get(3).copied().unwrap_or("");
+            match current_license_binding(&key) {
+                Ok(expected_binding) if stored_binding == expected_binding => {
+                    (successful_exports, Some(key), None)
+                }
+                Ok(_) => (
+                    successful_exports,
+                    None,
+                    Some("This licence activation belongs to a different device. Enter your key to activate this computer.".to_owned()),
+                ),
+                Err(error) => (
+                    successful_exports,
+                    None,
+                    Some(format!("Blaze could not verify this device's identity: {error}")),
+                ),
+            }
+        }
+        Some("gumroad-v1") if license_key.is_some() => (
+            successful_exports,
+            None,
+            Some("Blaze now uses device-bound activation. Enter your licence key once to bind this installation.".to_owned()),
+        ),
+        Some("gumroad-v1") => (successful_exports, None, None),
+        _ => (successful_exports, None, None),
     }
 }
 
@@ -377,12 +511,48 @@ fn persist_license_state(activated: bool, successful_exports: u32, license_key: 
         eprintln!("Blaze: could not create license state directory: {error}");
         return;
     }
-    let key = license_key.unwrap_or("");
+
+    let (key, binding) = match license_key {
+        Some(key) => match current_license_binding(key) {
+            Ok(binding) => (key, binding),
+            Err(error) => {
+                eprintln!("Blaze: could not bind licence to this device: {error}");
+                return;
+            }
+        },
+        None => ("", String::new()),
+    };
+
     if let Err(error) = std::fs::write(
         path,
-        format!("{}\n{}\n{}\ngumroad-v1\n", activated, successful_exports.min(FREE_EXPORT_LIMIT), key),
+        format!(
+            "{}\n{}\n{}\n{}\nblaze-device-v2\n",
+            activated,
+            successful_exports.min(FREE_EXPORT_LIMIT),
+            key,
+            binding
+        ),
     ) {
         eprintln!("Blaze: could not save license state: {error}");
+    }
+}
+
+#[cfg(test)]
+mod license_binding_tests {
+    use super::*;
+
+    #[test]
+    fn binding_is_deterministic_for_the_same_device_and_key() {
+        let first = license_binding_for_hid("gumroad-key", "device-hid");
+        let second = license_binding_for_hid("gumroad-key", "device-hid");
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn binding_changes_with_the_device_or_license_key() {
+        let expected = license_binding_for_hid("gumroad-key", "device-a");
+        assert_ne!(expected, license_binding_for_hid("gumroad-key", "device-b"));
+        assert_ne!(expected, license_binding_for_hid("different-key", "device-a"));
     }
 }
 
@@ -1182,7 +1352,7 @@ impl BlazeApp {
         let (keyframe_tx, keyframe_rx) = mpsc::channel();
         let (export_tx, export_rx) = mpsc::channel();
         let (license_tx, license_rx) = mpsc::channel();
-        let (successful_exports, license_key) = load_license_state();
+        let (successful_exports, license_key, license_state_notice) = load_license_state();
 
         Ok(Self {
             playback,
@@ -1239,9 +1409,9 @@ impl BlazeApp {
             show_help: true,
             help_tab: HelpTab::Guide,
             pending_preview_fit: false,
-            show_license_dialog: false,
+            show_license_dialog: license_state_notice.is_some(),
             license_key_input: String::new(),
-            license_notice: None,
+            license_notice: license_state_notice,
             license_activated: false,
             license_plan: None,
             license_valid_until: None,
@@ -1509,6 +1679,11 @@ impl BlazeApp {
     fn activate_license_key(&mut self, ctx: &egui::Context) {
         let key = self.license_key_input.trim().to_owned();
         if key.is_empty() || self.license_verifying || self.license_activated {
+            return;
+        }
+        if let Err(error) = device_hid() {
+            self.license_notice = Some(format!("Blaze cannot bind this activation to the current device: {error}"));
+            self.show_license_dialog = true;
             return;
         }
         self.license_verifying = true;

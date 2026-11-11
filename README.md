@@ -33,7 +33,11 @@ Two separate Gumroad products are supported:
 | Blaze Monthly | `Niyme89XCcFC44ShhEPPrQ==` | Monthly subscription |
 | Blaze Permanent | `ksPYCeAJW8TtmOjsBRQ0OA==` | Permanent licence |
 
-The app checks the Monthly product first and then the Permanent product. A successful activation increments Gumroad's Uses counter once, after the key has matched and passed entitlement checks. Periodic revalidation and export-time checks use `increment_uses_count=false`.
+The app checks the Monthly product first and then the Permanent product. A successful manual activation increments Gumroad's Uses counter once, after the key has matched and passed entitlement checks. Periodic revalidation and export-time checks use `increment_uses_count=false`.
+
+Each activation is also bound locally to the current device. Blaze derives a stable device identifier from Windows `MachineGuid`, Linux `/etc/machine-id` (falling back to `/var/lib/dbus/machine-id`), or macOS `IOPlatformUUID`. It hashes that identifier into the HID, then stores an opaque SHA-256 binding derived from the HID and Gumroad key in the local license-state file. On every launch Blaze recomputes the HID and checks the saved binding. Copying the app and its local state to a different computer therefore does not carry the activation across; the licence key must be entered again on that device. The HID and binding remain local and are not sent to Gumroad.
+
+This is local copy protection, not tamper-proof DRM: a determined attacker can inspect or patch a desktop binary. Gumroad's Uses counter is an activation-event signal for manual review; it does not identify unique devices. Existing `gumroad-v1` local activations require a one-time reactivation to establish the device binding.
 
 Monthly keys must report a monthly recurrence. Gumroad's subscription cancellation, end, and failed-renewal timestamps are treated as the end of paid access: access remains valid until a future timestamp and is denied once that timestamp has passed. Permanent keys do not have a subscription expiry. Refunds, chargebacks, and unresolved disputes invalidate either product.
 
