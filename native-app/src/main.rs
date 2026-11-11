@@ -453,7 +453,7 @@ fn current_license_binding(license_key: &str) -> Result<String, String> {
 // Legacy gumroad-v1 activations require one reactivation to establish the binding.
 fn load_license_state() -> (u32, Option<String>, Option<String>) {
     let Some(path) = license_state_file() else {
-        return (0, None, Some("Blaze could not locate its licence-state directory.".to_owned()));
+        return (0, None, None);
     };
 
     let contents = match fs::read_to_string(&path) {
