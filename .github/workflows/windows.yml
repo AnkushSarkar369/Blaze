@@ -62,23 +62,44 @@ jobs:
             throw "Could not extract the MPV development archive."
           }
 
-          $importLibrary = Get-ChildItem -Path $extract -Filter "mpv.lib" -File -Recurse |
-            Select-Object -First 1
-          if (-not $importLibrary) {
-            throw "The MPV archive did not contain mpv.lib, which the MSVC Rust linker needs."
-          }
-
           $mpvDll = Get-ChildItem -Path $extract -Filter "libmpv-2.dll" -File -Recurse |
             Select-Object -First 1
           if (-not $mpvDll) {
             throw "The MPV archive did not contain libmpv-2.dll."
           }
 
-          "MPV_LIBRARY_DIR=$($importLibrary.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          # zhongfly's LGPL archive ships a GNU import library (libmpv.dll.a).
+          # The MSVC Rust target needs an MSVC-format import library instead.
+          # MPV's Windows build documentation supports generating it directly
+          # from the DLL with Microsoft's Library Manager.
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) {
+            throw "Visual Studio vswhere.exe was not found on this Windows runner."
+          }
+
+          $vsRoot = & $vswhere -latest -products "*" -property installationPath
+          if (-not $vsRoot) {
+            throw "No Visual Studio installation was found."
+          }
+
+          $libExe = Get-ChildItem -Path (Join-Path $vsRoot "VC\Tools\MSVC") -Filter "lib.exe" -File -Recurse |
+            Where-Object { $_.FullName -match "\\Hostx64\\x64\\lib\.exe$" } |
+            Select-Object -First 1
+          if (-not $libExe) {
+            throw "The x64 MSVC Library Manager (lib.exe) was not found."
+          }
+
+          $importLibrary = Join-Path $mpvDll.Directory.FullName "mpv.lib"
+          & $libExe.FullName "/name:libmpv-2.dll" "/out:$importLibrary" "/MACHINE:X64"
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $importLibrary)) {
+            throw "MSVC could not generate mpv.lib from libmpv-2.dll."
+          }
+
+          "MPV_LIBRARY_DIR=$($mpvDll.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "MPV_DLL_DIR=$($mpvDll.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-          Write-Host "Using MPV import library: $($importLibrary.FullName)"
-          Write-Host "Using MPV runtime directory: $($mpvDll.Directory.FullName)"
+          Write-Host "Using MPV DLL: $($mpvDll.FullName)"
+          Write-Host "Generated MSVC import library: $importLibrary"
 
       - name: Build Blaze
         run: cargo build --locked --release -p blaze-native
