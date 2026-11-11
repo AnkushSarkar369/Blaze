@@ -68,31 +68,37 @@ jobs:
             throw "The MPV archive did not contain libmpv-2.dll."
           }
 
-          # zhongfly's LGPL archive ships a GNU import library (libmpv.dll.a).
-          # The MSVC Rust target needs an MSVC-format import library instead.
-          # MPV's Windows build documentation supports generating it directly
-          # from the DLL with Microsoft's Library Manager.
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-          if (-not (Test-Path $vswhere)) {
-            throw "Visual Studio vswhere.exe was not found on this Windows runner."
-          }
-
-          $vsRoot = & $vswhere -latest -products "*" -property installationPath
-          if (-not $vsRoot) {
-            throw "No Visual Studio installation was found."
-          }
-
-          $libExe = Get-ChildItem -Path (Join-Path $vsRoot "VC\Tools\MSVC") -Filter "lib.exe" -File -Recurse |
-            Where-Object { $_.FullName -match "\\Hostx64\\x64\\lib\.exe$" } |
+          # MSVC LIB needs a module-definition (.def) file containing the DLL exports.
+          # Generate it from the DLL export table with Microsoft's dumpbin, then
+          # create the MSVC import library from that definition.
+          $vcTools = Join-Path $vsRoot "VC\Tools\MSVC"
+          $dumpbin = Get-ChildItem -Path $vcTools -Filter "dumpbin.exe" -File -Recurse |
+            Where-Object { $_.FullName -match "\\Hostx64\\x64\\dumpbin\.exe$" } |
             Select-Object -First 1
-          if (-not $libExe) {
-            throw "The x64 MSVC Library Manager (lib.exe) was not found."
+          if (-not $dumpbin) {
+            throw "The x64 MSVC dumpbin.exe was not found."
           }
+
+          $exports = @(
+            & $dumpbin.FullName /nologo /exports $mpvDll.FullName |
+              ForEach-Object {
+                if ($_ -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)\s*$') {
+                  $matches[1]
+                }
+              }
+          )
+          if ($LASTEXITCODE -ne 0 -or $exports.Count -eq 0) {
+            throw "Could not read named exports from libmpv-2.dll."
+          }
+
+          $definitionFile = Join-Path $mpvDll.Directory.FullName "libmpv-2.def"
+          @("LIBRARY libmpv-2.dll", "EXPORTS") + $exports |
+            Set-Content -Path $definitionFile -Encoding ascii
 
           $importLibrary = Join-Path $mpvDll.Directory.FullName "mpv.lib"
-          & $libExe.FullName "/name:libmpv-2.dll" "/out:$importLibrary" "/MACHINE:X64"
+          & $libExe.FullName "/def:$definitionFile" "/name:libmpv-2.dll" "/out:$importLibrary" "/MACHINE:X64"
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path $importLibrary)) {
-            throw "MSVC could not generate mpv.lib from libmpv-2.dll."
+            throw "MSVC could not generate mpv.lib from the libmpv-2.def export definition."
           }
 
           "MPV_LIBRARY_DIR=$($mpvDll.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
