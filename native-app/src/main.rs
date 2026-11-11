@@ -122,6 +122,7 @@ fn request_gumroad_purchase(
         let message = format!("Gumroad verification failed (HTTP {status}): {message}");
         return Err(if status.is_server_error()
             || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+            || status == reqwest::StatusCode::REQUEST_TIMEOUT
         {
             LicenseVerificationError::Temporary(message)
         } else {
@@ -517,9 +518,10 @@ fn license_cache_is_valid(
     }
 
     match plan {
-        LicensePlan::Monthly => valid_until
-            .and_then(parse_gumroad_timestamp)
-            .is_some_and(|expiry| now < expiry),
+        LicensePlan::Monthly => match valid_until {
+            None => true,
+            Some(value) => parse_gumroad_timestamp(value).is_some_and(|expiry| now < expiry),
+        },
         LicensePlan::Permanent => valid_until.is_none(),
     }
 }
@@ -725,6 +727,52 @@ mod license_binding_tests {
         let expected = license_binding_for_hid("gumroad-key", "device-a");
         assert_ne!(expected, license_binding_for_hid("gumroad-key", "device-b"));
         assert_ne!(expected, license_binding_for_hid("different-key", "device-a"));
+    }
+
+    #[test]
+    fn permanent_activation_has_a_strict_24_hour_grace_window() {
+        let now = UNIX_EPOCH + Duration::from_secs(2_000_000_000);
+        let verified_at = now - LICENSE_GRACE_PERIOD;
+        assert!(license_cache_is_valid(
+            LicensePlan::Permanent, None, Some(verified_at), now
+        ));
+        assert!(!license_cache_is_valid(
+            LicensePlan::Permanent,
+            None,
+            Some(verified_at - Duration::from_secs(1)),
+            now
+        ));
+    }
+
+    #[test]
+    fn active_monthly_subscription_without_an_end_date_is_valid_in_grace() {
+        let now = SystemTime::now();
+        assert!(license_cache_is_valid(
+            LicensePlan::Monthly, None, Some(now), now
+        ));
+    }
+
+    #[test]
+    fn expired_monthly_subscription_is_not_rescued_by_grace() {
+        let now = SystemTime::now();
+        let verified_at = now - Duration::from_secs(60);
+        assert!(!license_cache_is_valid(
+            LicensePlan::Monthly,
+            Some("2000-01-01T00:00:00Z"),
+            Some(verified_at),
+            now
+        ));
+    }
+
+    #[test]
+    fn clock_rollback_invalidates_cached_activation() {
+        let now = UNIX_EPOCH + Duration::from_secs(2_000_000_000);
+        assert!(!license_cache_is_valid(
+            LicensePlan::Permanent,
+            None,
+            Some(now + Duration::from_secs(1)),
+            now
+        ));
     }
 }
 
