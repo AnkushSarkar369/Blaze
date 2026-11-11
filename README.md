@@ -37,7 +37,7 @@ Two separate Gumroad products are supported:
 
 Blaze checks the Monthly product first and then the Permanent product. During a manual activation it first verifies the key without incrementing Uses. Only after the key and entitlement pass does it make a second verification request with `increment_uses_count=true`. This increments Gumroad's Uses counter once for that activation.
 
-Periodic licence revalidation and export-time checks use `increment_uses_count=false`; they do not intentionally add Uses events. The Gumroad dashboard associates the activation event with the relevant purchase/key record, which gives the publisher an audit trail for investigating repeated or suspicious activations. Uses is an activation-event counter, not a list of hardware IDs or a unique-device registry.
+Periodic licence revalidation uses `increment_uses_count=false`; export jobs do not contact Gumroad. The Gumroad dashboard associates the activation event with the relevant purchase/key record, which gives the publisher an audit trail for investigating repeated or suspicious activations. Uses is an activation-event counter, not a list of hardware IDs or a unique-device registry.
 
 ### Local device binding
 
@@ -59,13 +59,13 @@ The state file is stored at the platform's normal application-configuration loca
 - macOS: `~/Library/Application Support/Blaze/license-state`
 - Linux: `$XDG_CONFIG_HOME/Blaze/license-state`, or `~/.config/Blaze/license-state` when `XDG_CONFIG_HOME` is unset
 
-The local state file is not encrypted; it contains the Gumroad key in plaintext. Device binding is intended to deter casual copying of an activation-state file, not a determined attacker who can inspect or patch the executable or modify local state. The embedded application salt is not a server-side secret, and the SHA-256 verifier is not a cryptographic DRM boundary. On Unix, Blaze creates the application state directory with mode `0700` and the state file with mode `0600`.
+The local state file is not encrypted; it contains the Gumroad key in plaintext, the entitlement plan, any Monthly subscription end timestamp, and the last successful verification time. Device binding is intended to deter casual copying of an activation-state file, not a determined attacker who can inspect or patch the executable or modify local state. The embedded application salt is not a server-side secret, and the SHA-256 verifier is not a cryptographic DRM boundary. On Unix, Blaze creates the application state directory with mode `0700` and the state file with mode `0600`.
 
-These identifiers are operating-system/platform identifiers, not guaranteed immutable hardware serial numbers. Reinstalling or cloning an operating system, regenerating its machine ID, or changing the platform identifier can cause Blaze to request activation again. Existing `gumroad-v1` state files require a one-time reactivation so the new device binding can be written.
+These identifiers are operating-system/platform identifiers, not guaranteed immutable hardware serial numbers. Reinstalling or cloning an operating system, regenerating its machine ID, or changing the platform identifier can cause Blaze to request activation again. The current local state format is `blaze-device-v3`.
 
 ### Entitlement checks
 
-Monthly keys must report a monthly recurrence. Gumroad's subscription cancellation, end, and failed-renewal timestamps are treated as the end of paid access: access remains valid until a future timestamp and is denied once that timestamp has passed. Permanent keys do not have a subscription expiry. Refunds, chargebacks, and unresolved disputes invalidate either product.
+Monthly keys must report a monthly recurrence. Gumroad's subscription cancellation, end, and failed-renewal timestamps are treated as the end of paid access: access remains valid until a future timestamp and is denied once that timestamp has passed. Permanent keys do not have a subscription expiry. Refunds, chargebacks, and unresolved disputes invalidate either product. Blaze verifies an activation at launch and every 12 hours while running. A previously verified activation remains usable for up to 24 hours after its last successful verification if Gumroad or the internet is unavailable. An explicit rejection (including expiry, refund, chargeback, dispute or revocation) invalidates the cached activation immediately. Exports are blocked when no valid activation is available; editing and project work remain accessible.
 
 ## Export
 
