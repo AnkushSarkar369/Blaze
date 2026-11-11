@@ -153,44 +153,105 @@ jobs:
           Write-Host "Using MPV DLL: $($mpvDll.FullName)"
           Write-Host "Generated MSVC import library: $importLibrary"
 
+      - name: Download LGPL FFmpeg static build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # BtbN publishes a static LGPL Windows x64 build. Static binaries avoid
+          # shipping a second set of FFmpeg runtime DLLs alongside ffmpeg.exe.
+          $archive = Join-Path $env:RUNNER_TEMP "ffmpeg-win64-lgpl.zip"
+          $extract = Join-Path $env:RUNNER_TEMP "ffmpeg-win64-lgpl"
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          Expand-Archive -Path $archive -DestinationPath $extract -Force
+
+          $ffmpeg = Get-ChildItem -Path $extract -Filter "ffmpeg.exe" -File -Recurse | Select-Object -First 1
+          $ffprobe = Get-ChildItem -Path $extract -Filter "ffprobe.exe" -File -Recurse | Select-Object -First 1
+          if (-not $ffmpeg -or -not $ffprobe) {
+            throw "The downloaded FFmpeg archive did not contain both ffmpeg.exe and ffprobe.exe."
+          }
+
+          $license = Get-ChildItem -Path $extract -Filter "LICENSE.txt" -File -Recurse | Select-Object -First 1
+          if (-not $license) {
+            throw "The FFmpeg archive did not contain its license notice."
+          }
+
+          "FFMPEG_BIN_DIR=$($ffmpeg.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "FFMPEG_LICENSE_FILE=$($license.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          & $ffmpeg.FullName -version
+          if ($LASTEXITCODE -ne 0) { throw "The bundled FFmpeg executable failed its version check." }
+          & $ffprobe.FullName -version
+          if ($LASTEXITCODE -ne 0) { throw "The bundled FFprobe executable failed its version check." }
+
       - name: Build Blaze
         run: cargo build --release -p blaze-native
 
-      - name: Assemble Windows CI preview
+      - name: Assemble Windows distribution
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
           $stage = Join-Path $env:GITHUB_WORKSPACE "dist\Blaze-Windows-x64"
-          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          $bin = Join-Path $stage "Bin"
+          New-Item -ItemType Directory -Force -Path $bin | Out-Null
 
           Copy-Item "target\release\blaze-native.exe" (Join-Path $stage "Blaze.exe")
 
-          # Copy the MPV runtime and the DLL dependencies shipped beside it.
+          # Windows loads statically imported DLLs from the executable directory
+          # before the application can configure any custom search path. Keep
+          # libmpv beside Blaze.exe; FFmpeg tools live in Bin and are discovered
+          # by blaze-engine from the adjacent BIN directory.
           Get-ChildItem -Path $env:MPV_DLL_DIR -Filter "*.dll" -File |
             Copy-Item -Destination $stage -Force
 
+          Copy-Item (Join-Path $env:FFMPEG_BIN_DIR "ffmpeg.exe") (Join-Path $bin "ffmpeg.exe")
+          Copy-Item (Join-Path $env:FFMPEG_BIN_DIR "ffprobe.exe") (Join-Path $bin "ffprobe.exe")
+          Copy-Item $env:FFMPEG_LICENSE_FILE (Join-Path $stage "FFmpeg-LICENSE.txt")
+
           @"
-          Blaze Windows CI Preview
+          Blaze for Windows x64
 
-          This is an early Windows build intended for GUI and startup testing.
-          FFmpeg and FFprobe are not bundled yet, so media import, analysis and export
-          are not expected to work in this preview.
+          Extract the complete folder and run Blaze.exe.
+          Do not separate Blaze.exe from the DLL files beside it or remove the Bin folder.
 
-          Run Blaze.exe from this folder. Keep the DLL files beside Blaze.exe.
+          Bundled media tools:
+          - Bin\ffmpeg.exe
+          - Bin\ffprobe.exe
+
+          libmpv-2.dll is kept beside Blaze.exe because Windows must locate this
+          linked runtime DLL before the application starts. FFmpeg and FFprobe are
+          discovered automatically from the adjacent Bin folder.
+
+          FFmpeg is an LGPL static build from BtbN/FFmpeg-Builds.
+          See FFmpeg-LICENSE.txt for the included license notice.
+          Build source: https://github.com/BtbN/FFmpeg-Builds
           "@ | Set-Content -Path (Join-Path $stage "README.txt") -Encoding utf8
 
-          if (-not (Test-Path (Join-Path $stage "Blaze.exe"))) {
-            throw "Blaze.exe was not staged."
-          }
-          if (-not (Test-Path (Join-Path $stage "libmpv-2.dll"))) {
-            throw "libmpv-2.dll was not staged."
+          $required = @(
+            (Join-Path $stage "Blaze.exe"),
+            (Join-Path $stage "libmpv-2.dll"),
+            (Join-Path $bin "ffmpeg.exe"),
+            (Join-Path $bin "ffprobe.exe"),
+            (Join-Path $stage "FFmpeg-LICENSE.txt")
+          )
+          foreach ($file in $required) {
+            if (-not (Test-Path $file)) { throw "Required distribution file is missing: $file" }
           }
 
-      - name: Upload Windows CI preview
+          # Verify the exact staged executables, not just the downloaded originals.
+          & (Join-Path $bin "ffmpeg.exe") -version
+          if ($LASTEXITCODE -ne 0) { throw "Staged FFmpeg failed its version check." }
+          & (Join-Path $bin "ffprobe.exe") -version
+          if ($LASTEXITCODE -ne 0) { throw "Staged FFprobe failed its version check." }
+
+      - name: Upload Windows distribution
         uses: actions/upload-artifact@v4
         with:
-          name: Blaze-Windows-x64-CI-Preview
+          name: Blaze-Windows-x64
           path: dist/Blaze-Windows-x64/
           if-no-files-found: error
           retention-days: 14
