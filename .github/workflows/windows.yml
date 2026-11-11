@@ -70,7 +70,8 @@ jobs:
 
           # Locate the Visual Studio installation that actually contains the x64 C++ tools.
           # Do not assume a VS year/edition path: the windows-latest image can change it.
-          $vswhere = Join-Path \${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $programFilesX86 = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)
+          $vswhere = Join-Path $programFilesX86 "Microsoft Visual Studio\Installer\vswhere.exe"
           if (-not (Test-Path $vswhere)) {
             $vswhereCommand = Get-Command "vswhere.exe" -ErrorAction SilentlyContinue
             if ($vswhereCommand) {
