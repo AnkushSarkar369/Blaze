@@ -612,7 +612,7 @@ fn persist_license_state(activated: bool, successful_exports: u32, license_key: 
     };
 
     let contents = format!(
-        "{}\\n{}\\n{}\\n{}\\nblaze-device-v2\\n",
+        "{}\n{}\n{}\n{}\nblaze-device-v2\n",
         activated,
         successful_exports.min(FREE_EXPORT_LIMIT),
         key,
@@ -1855,7 +1855,9 @@ impl BlazeApp {
                     self.license_plan = Some(entitlement.plan);
                     self.license_valid_until = entitlement.valid_until;
                     if self.license_activation_pending {
-                        self.license_key = self.pending_license_key.take();
+                        if let Some(activated_key) = self.pending_license_key.take() {
+                            self.license_key = Some(activated_key);
+                        }
                         self.license_notice = Some(match entitlement.plan {
                             LicensePlan::Monthly => "Blaze Monthly is activated. Cut away!".to_owned(),
                             LicensePlan::Permanent => "Blaze Permanent is activated. Cut away!".to_owned(),
