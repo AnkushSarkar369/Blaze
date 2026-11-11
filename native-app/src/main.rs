@@ -1,7 +1,9 @@
 use std::{
+    fs::{self, OpenOptions},
+    io::Write,
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use sha2::{Digest, Sha256};
@@ -451,18 +453,55 @@ fn current_license_binding(license_key: &str) -> Result<String, String> {
 // Legacy gumroad-v1 activations require one reactivation to establish the binding.
 fn load_license_state() -> (u32, Option<String>, Option<String>) {
     let Some(path) = license_state_file() else {
-        return (0, None, None);
+        return (0, None, Some("Blaze could not locate its licence-state directory.".to_owned()));
     };
-    let Ok(contents) = std::fs::read_to_string(path) else {
-        return (0, None, None);
+
+    let contents = match fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return (0, None, None);
+        }
+        Err(error) => {
+            return (
+                0,
+                None,
+                Some(format!("Blaze could not read its saved licence state: {error}")),
+            );
+        }
     };
 
     let fields: Vec<&str> = contents.lines().collect();
-    let successful_exports = fields
-        .get(1)
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(0)
-        .min(FREE_EXPORT_LIMIT);
+    if fields.len() < 4 {
+        return (
+            0,
+            None,
+            Some("Blaze's saved licence state is incomplete or corrupted. Please activate again.".to_owned()),
+        );
+    }
+
+    let _stored_activation = match fields[0].parse::<bool>() {
+        Ok(value) => value,
+        Err(_) => {
+            return (
+                0,
+                None,
+                Some("Blaze's saved licence state is malformed. Please activate again.".to_owned()),
+            );
+        }
+    };
+    // Entitlement is always revalidated with Gumroad; this flag is metadata only.
+
+    let successful_exports = match fields[1].parse::<u32>() {
+        Ok(value) => value.min(FREE_EXPORT_LIMIT),
+        Err(_) => {
+            return (
+                0,
+                None,
+                Some("Blaze's saved export counter is malformed. Please activate again.".to_owned()),
+            );
+        }
+    };
+
     let license_key = fields
         .get(2)
         .filter(|value| !value.is_empty())
@@ -470,46 +509,95 @@ fn load_license_state() -> (u32, Option<String>, Option<String>) {
 
     match fields.last().copied() {
         Some("blaze-device-v2") => {
-            let Some(key) = license_key else {
-                return (successful_exports, None, None);
-            };
-            let stored_binding = fields.get(3).copied().unwrap_or("");
-            match current_license_binding(&key) {
-                Ok(expected_binding) if stored_binding == expected_binding => {
-                    (successful_exports, Some(key), None)
+            if fields.len() != 5 {
+                return (
+                    successful_exports,
+                    None,
+                    Some("Blaze's device-bound licence state is incomplete or corrupted. Please activate again.".to_owned()),
+                );
+            }
+
+            let stored_binding = fields[3];
+            match (&license_key, stored_binding) {
+                (None, "") => (successful_exports, None, None),
+                (None, _) => (
+                    successful_exports,
+                    None,
+                    Some("Blaze's saved licence state is inconsistent. Please activate again.".to_owned()),
+                ),
+                (Some(_), value)
+                    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) =>
+                {
+                    (
+                        successful_exports,
+                        None,
+                        Some("Blaze's saved device verifier is malformed. Please activate again.".to_owned()),
+                    )
                 }
-                Ok(_) => (
-                    successful_exports,
-                    None,
-                    Some("This licence activation belongs to a different device. Enter your key to activate this computer.".to_owned()),
-                ),
-                Err(error) => (
-                    successful_exports,
-                    None,
-                    Some(format!("Blaze could not verify this device's identity: {error}")),
-                ),
+                (Some(key), value) => match current_license_binding(key) {
+                    Ok(expected_binding) if value == expected_binding => {
+                        (successful_exports, Some(key.clone()), None)
+                    }
+                    Ok(_) => (
+                        successful_exports,
+                        None,
+                        Some("This licence activation belongs to a different device. Enter your key to activate this computer.".to_owned()),
+                    ),
+                    Err(error) => (
+                        successful_exports,
+                        None,
+                        Some(format!("Blaze could not verify this device's identity: {error}")),
+                    ),
+                },
             }
         }
-        Some("gumroad-v1") if license_key.is_some() => (
+        Some("gumroad-v1") => {
+            if fields.len() != 4 {
+                return (
+                    successful_exports,
+                    None,
+                    Some("Blaze's legacy licence state is malformed. Please activate again.".to_owned()),
+                );
+            }
+            if license_key.is_some() {
+                (
+                    successful_exports,
+                    None,
+                    Some("Blaze now uses device-bound activation. Enter your licence key once to bind this installation.".to_owned()),
+                )
+            } else {
+                (successful_exports, None, None)
+            }
+        }
+        _ => (
             successful_exports,
             None,
-            Some("Blaze now uses device-bound activation. Enter your licence key once to bind this installation.".to_owned()),
+            Some("Blaze could not recognise its saved licence state. Please activate again.".to_owned()),
         ),
-        Some("gumroad-v1") => (successful_exports, None, None),
-        _ => (successful_exports, None, None),
     }
 }
 
 fn persist_license_state(activated: bool, successful_exports: u32, license_key: Option<&str>) {
     let Some(path) = license_state_file() else {
+        eprintln!("Blaze: could not locate the license state path.");
         return;
     };
     let Some(parent) = path.parent() else {
+        eprintln!("Blaze: license state path has no parent directory.");
         return;
     };
-    if let Err(error) = std::fs::create_dir_all(parent) {
+    if let Err(error) = fs::create_dir_all(parent) {
         eprintln!("Blaze: could not create license state directory: {error}");
         return;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(error) = fs::set_permissions(parent, fs::Permissions::from_mode(0o700)) {
+            eprintln!("Blaze: could not secure license state directory permissions: {error}");
+            return;
+        }
     }
 
     let (key, binding) = match license_key {
@@ -523,17 +611,73 @@ fn persist_license_state(activated: bool, successful_exports: u32, license_key: 
         None => ("", String::new()),
     };
 
-    if let Err(error) = std::fs::write(
-        path,
-        format!(
-            "{}\n{}\n{}\n{}\nblaze-device-v2\n",
-            activated,
-            successful_exports.min(FREE_EXPORT_LIMIT),
-            key,
-            binding
-        ),
-    ) {
-        eprintln!("Blaze: could not save license state: {error}");
+    let contents = format!(
+        "{}\\n{}\\n{}\\n{}\\nblaze-device-v2\\n",
+        activated,
+        successful_exports.min(FREE_EXPORT_LIMIT),
+        key,
+        binding
+    );
+
+    let same_contents = fs::read_to_string(&path)
+        .map(|existing| existing == contents)
+        .unwrap_or(false);
+
+    #[cfg(unix)]
+    let permissions_are_private = {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(&path)
+            .map(|metadata| metadata.permissions().mode() & 0o777 == 0o600)
+            .unwrap_or(false)
+    };
+    #[cfg(not(unix))]
+    let permissions_are_private = true;
+
+    // Revalidation runs periodically. Avoid disk writes when state is unchanged,
+    // but replace older files whose permissions are too broad.
+    if same_contents && permissions_are_private {
+        return;
+    }
+
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temporary_path = parent.join(format!(
+        "license-state.tmp.{}.{}",
+        std::process::id(),
+        nonce
+    ));
+
+    let write_result = (|| -> std::io::Result<()> {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+
+        let mut temporary_file = options.open(&temporary_path)?;
+        temporary_file.write_all(contents.as_bytes())?;
+        temporary_file.sync_all()?;
+        drop(temporary_file);
+
+        // The temporary file is in the same directory, so rename replaces the
+        // previous state atomically on supported local filesystems.
+        fs::rename(&temporary_path, &path)?;
+
+        #[cfg(unix)]
+        if let Ok(directory) = OpenOptions::new().read(true).open(parent) {
+            let _ = directory.sync_all();
+        }
+
+        Ok(())
+    })();
+
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temporary_path);
+        eprintln!("Blaze: could not atomically save license state: {error}");
     }
 }
 
@@ -1289,6 +1433,7 @@ struct BlazeApp {
     license_rx: Receiver<LicenseResult>,
     license_verifying: bool,
     license_key: Option<String>,
+    pending_license_key: Option<String>,
     license_activation_pending: bool,
     last_license_check: Instant,
     export_status: Option<(bool, String)>,
@@ -1386,6 +1531,7 @@ impl BlazeApp {
             license_rx,
             license_verifying: false,
             license_key,
+            pending_license_key: None,
             license_activation_pending: false,
             last_license_check: Instant::now() - Duration::from_secs(60),
             export_status: None,
@@ -1688,7 +1834,7 @@ impl BlazeApp {
         }
         self.license_verifying = true;
         self.license_activation_pending = true;
-        self.license_key = Some(key.clone());
+        self.pending_license_key = Some(key.clone());
         self.last_license_check = Instant::now();
         self.license_notice = Some("Checking your Blaze licence…".to_owned());
         let sender = self.license_tx.clone();
@@ -1709,6 +1855,7 @@ impl BlazeApp {
                     self.license_plan = Some(entitlement.plan);
                     self.license_valid_until = entitlement.valid_until;
                     if self.license_activation_pending {
+                        self.license_key = self.pending_license_key.take();
                         self.license_notice = Some(match entitlement.plan {
                             LicensePlan::Monthly => "Blaze Monthly is activated. Cut away!".to_owned(),
                             LicensePlan::Permanent => "Blaze Permanent is activated. Cut away!".to_owned(),
@@ -1725,10 +1872,14 @@ impl BlazeApp {
                     let activation_failed = self.license_activation_pending;
                     self.license_activation_pending = false;
                     if activation_failed {
-                        self.license_key = None;
+                        // A failed replacement attempt must not discard the last
+                        // successfully saved key. Only a successful activation
+                        // replaces the persisted licence.
+                        self.pending_license_key = None;
                     }
                     self.license_notice = Some(message);
-                    persist_license_state(false, self.successful_exports, self.license_key.as_deref());
+                    // No persistent state changed on verification failure. In
+                    // particular, do not overwrite an existing valid key.
                 }
             }
         }
