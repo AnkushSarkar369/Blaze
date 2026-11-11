@@ -99,9 +99,10 @@ fn request_gumroad_purchase(
             ("increment_uses_count", if increment_uses { "true" } else { "false" }),
         ])
         .send()
-        .map_err(|error| LicenseVerificationError::Temporary(format!(
-            "Could not reach Gumroad. Check your internet connection and try again. ({error})"
-        )))?;
+        .map_err(|error| {
+            eprintln!("Blaze: licence service request failed: {error}");
+            LicenseVerificationError::Temporary
+        })?;
 
     let status = response.status();
     if status == reqwest::StatusCode::NOT_FOUND {
@@ -109,24 +110,23 @@ fn request_gumroad_purchase(
     }
 
     let body: serde_json::Value = response.json().map_err(|error| {
-        LicenseVerificationError::Temporary(format!(
-            "Gumroad returned an unreadable response: {error}"
-        ))
+        eprintln!("Blaze: licence service returned an unreadable response: {error}");
+        LicenseVerificationError::Temporary
     })?;
 
     if !status.is_success() {
         let message = body
             .get("message")
             .and_then(|value| value.as_str())
-            .unwrap_or("Gumroad could not verify this licence.");
-        let message = format!("Gumroad verification failed (HTTP {status}): {message}");
+            .unwrap_or("No additional details were provided.");
+        eprintln!("Blaze: licence verification returned HTTP {status}: {message}");
         return Err(if status.is_server_error()
             || status == reqwest::StatusCode::TOO_MANY_REQUESTS
             || status == reqwest::StatusCode::REQUEST_TIMEOUT
         {
-            LicenseVerificationError::Temporary(message)
+            LicenseVerificationError::Temporary
         } else {
-            LicenseVerificationError::Rejected(message)
+            LicenseVerificationError::Rejected
         });
     }
 
@@ -137,9 +137,10 @@ fn request_gumroad_purchase(
     body.get("purchase")
         .cloned()
         .map(Some)
-        .ok_or_else(|| LicenseVerificationError::Temporary(
-            "Gumroad did not return purchase details.".to_owned()
-        ))
+        .ok_or_else(|| {
+            eprintln!("Blaze: licence service response did not contain purchase details");
+            LicenseVerificationError::Temporary
+        })
 }
 
 fn parse_gumroad_timestamp(value: &str) -> Option<std::time::SystemTime> {
@@ -251,33 +252,28 @@ fn evaluate_gumroad_purchase(
     plan: LicensePlan,
 ) -> LicenseResult {
     if purchase.get("product_id").and_then(|value| value.as_str()) != Some(product_id) {
-        return Err(LicenseVerificationError::Rejected(
-            "Gumroad returned a purchase for a different product.".to_owned()
-        ));
+        eprintln!("Blaze: licence service returned a purchase for a different product");
+        return Err(LicenseVerificationError::Rejected);
     }
     if purchase.get("refunded").and_then(|value| value.as_bool()) == Some(true) {
-        return Err(LicenseVerificationError::Rejected(
-            "This purchase has been refunded.".to_owned()
-        ));
+        eprintln!("Blaze: purchase has been refunded");
+        return Err(LicenseVerificationError::Rejected);
     }
     if purchase.get("chargebacked").and_then(|value| value.as_bool()) == Some(true) {
-        return Err(LicenseVerificationError::Rejected(
-            "This purchase has been charged back.".to_owned()
-        ));
+        eprintln!("Blaze: purchase has been charged back");
+        return Err(LicenseVerificationError::Rejected);
     }
     if purchase.get("disputed").and_then(|value| value.as_bool()) == Some(true)
         && purchase.get("dispute_won").and_then(|value| value.as_bool()) != Some(true)
     {
-        return Err(LicenseVerificationError::Rejected(
-            "This purchase is currently disputed.".to_owned()
-        ));
+        eprintln!("Blaze: purchase has an unresolved dispute");
+        return Err(LicenseVerificationError::Rejected);
     }
 
     let valid_until = if plan == LicensePlan::Monthly {
         if purchase.get("recurrence").and_then(|value| value.as_str()) != Some("monthly") {
-            return Err(LicenseVerificationError::Rejected(
-                "This key is not linked to a Blaze Monthly subscription.".to_owned()
-            ));
+            eprintln!("Blaze: licence key is not linked to a Monthly subscription");
+            return Err(LicenseVerificationError::Rejected);
         }
 
         let mut next_end: Option<(std::time::SystemTime, String)> = None;
@@ -295,18 +291,19 @@ fn evaluate_gumroad_purchase(
             let timestamp = value
                 .as_str()
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| LicenseVerificationError::Temporary(
-                    format!("Gumroad returned an invalid {field} timestamp.")
-                ))?;
+                .ok_or_else(|| {
+                    eprintln!("Blaze: licence service returned an invalid {field} timestamp");
+                    LicenseVerificationError::Temporary
+                })?;
             let end = parse_gumroad_timestamp(timestamp)
-                .ok_or_else(|| LicenseVerificationError::Temporary(
-                    format!("Gumroad returned an unreadable {field} timestamp.")
-                ))?;
+                .ok_or_else(|| {
+                    eprintln!("Blaze: licence service returned an unreadable {field} timestamp");
+                    LicenseVerificationError::Temporary
+                })?;
 
             if end <= std::time::SystemTime::now() {
-                return Err(LicenseVerificationError::Rejected(
-                    "Your Blaze Monthly subscription period has ended.".to_owned()
-                ));
+                eprintln!("Blaze: Monthly subscription period has ended");
+                return Err(LicenseVerificationError::Rejected);
             }
 
             let earlier_end = next_end
@@ -328,9 +325,10 @@ fn verify_gumroad_license(license_key: &str, increment_uses: bool) -> LicenseRes
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
-        .map_err(|error| LicenseVerificationError::Temporary(
-            format!("Could not prepare licence verification: {error}")
-        ))?;
+        .map_err(|error| {
+            eprintln!("Blaze: could not prepare licence verification: {error}");
+            LicenseVerificationError::Temporary
+        })?;
 
     // Monthly is checked first, followed by Permanent.
     for (product_id, plan) in GUMROAD_PRODUCTS {
@@ -344,15 +342,15 @@ fn verify_gumroad_license(license_key: &str, increment_uses: bool) -> LicenseRes
         }
 
         let counted_purchase = request_gumroad_purchase(&client, license_key, product_id, true)?
-            .ok_or_else(|| LicenseVerificationError::Temporary(
-                "Gumroad could not confirm this licence activation.".to_owned()
-            ))?;
+            .ok_or_else(|| {
+                eprintln!("Blaze: licence service did not confirm activation");
+                LicenseVerificationError::Temporary
+            })?;
         return evaluate_gumroad_purchase(&counted_purchase, product_id, plan);
     }
 
-    Err(LicenseVerificationError::Rejected(
-        "This key does not match an active Blaze Monthly or Permanent licence.".to_owned()
-    ))
+    eprintln!("Blaze: key does not match an active Monthly or Permanent licence");
+    Err(LicenseVerificationError::Rejected)
 }
 
 
@@ -542,13 +540,15 @@ fn load_license_state() -> Option<CachedLicense> {
 
     let fields: Vec<&str> = contents.lines().collect();
     if fields.len() != 7 || fields[6] != "blaze-device-v1" || fields[0] != "true" {
-        eprintln!("Blaze: local activation data is invalid or incompatible");
+        // Old or damaged local state is not an activation failure. Discard it
+        // silently and let the License page handle activation when needed.
+        let _ = fs::remove_file(&path);
         return None;
     }
 
     let license_key = fields[1];
     if license_key.trim().is_empty() {
-        eprintln!("Blaze: local activation data does not contain a licence key");
+        let _ = fs::remove_file(&path);
         return None;
     }
 
@@ -556,7 +556,7 @@ fn load_license_state() -> Option<CachedLicense> {
         "monthly" => LicensePlan::Monthly,
         "permanent" => LicensePlan::Permanent,
         _ => {
-            eprintln!("Blaze: local activation data contains an unknown plan");
+            let _ = fs::remove_file(&path);
             return None;
         }
     };
@@ -572,32 +572,32 @@ fn load_license_state() -> Option<CachedLicense> {
     if (plan == LicensePlan::Monthly && invalid_monthly_end)
         || (plan == LicensePlan::Permanent && valid_until.is_some())
     {
-        eprintln!("Blaze: local activation data contains invalid subscription details");
+        let _ = fs::remove_file(&path);
         return None;
     }
 
     let verified_seconds = match fields[5].parse::<u64>() {
         Ok(value) => value,
-        Err(error) => {
-            eprintln!("Blaze: local activation timestamp could not be read: {error}");
+        Err(_) => {
+            let _ = fs::remove_file(&path);
             return None;
         }
     };
     let Some(last_verified) = UNIX_EPOCH.checked_add(Duration::from_secs(verified_seconds)) else {
-        eprintln!("Blaze: local activation timestamp is outside the supported range");
+        let _ = fs::remove_file(&path);
         return None;
     };
 
     let stored_binding = fields[2];
     if stored_binding.len() != 64 || !stored_binding.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        eprintln!("Blaze: local activation data contains an invalid device binding");
+        let _ = fs::remove_file(&path);
         return None;
     }
 
     match current_license_binding(license_key) {
         Ok(expected_binding) if stored_binding == expected_binding => {}
         Ok(_) => {
-            eprintln!("Blaze: local activation belongs to a different device");
+            let _ = fs::remove_file(&path);
             return None;
         }
         Err(error) => {
@@ -1493,13 +1493,13 @@ struct LicenseEntitlement {
 
 #[derive(Debug)]
 enum LicenseVerificationError {
-    Temporary(String),
-    Rejected(String),
+    Temporary,
+    Rejected,
 }
 
 impl LicenseVerificationError {
     fn is_temporary(&self) -> bool {
-        matches!(self, Self::Temporary(_))
+        matches!(self, Self::Temporary)
     }
 }
 
@@ -2009,7 +2009,7 @@ impl BlazeApp {
                     }
                 }
                 Err(error) => {
-                    eprintln!("Blaze: licence verification failed: {error:?}");
+                    eprintln!("Blaze: licence verification failed ({})", if error.is_temporary() { "temporary failure" } else { "licence rejected" });
                     let activation_failed = self.license_activation_pending;
                     self.license_activation_pending = false;
 
