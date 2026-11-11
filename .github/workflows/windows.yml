@@ -26,6 +26,14 @@ jobs:
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Verify Cargo.lock is current
+        shell: pwsh
+        run: |
+          cargo metadata --locked --format-version 1 | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Cargo.lock is stale or does not match the workspace manifests."
+          }
+
       - name: Download LGPL libmpv development package
         shell: pwsh
         run: |
@@ -188,7 +196,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "The bundled FFprobe executable failed its version check." }
 
       - name: Build Blaze
-        run: cargo build --locked --release -p blaze-native
+        run: cargo build --release --locked -p blaze-native
 
       - name: Assemble Windows distribution
         shell: pwsh
