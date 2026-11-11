@@ -95,4 +95,4 @@ This is the working product roadmap. It lists unfinished work only; completed it
 cargo run -p blaze-native
 ```
 
-Development builds and testing are performed locally. Automated GitHub workflows are intentionally not used.
+Development builds and Linux testing are performed locally. The Windows x64 distribution is assembled by GitHub Actions with the application executable, MPV runtime, and bundled LGPL FFmpeg/FFprobe tools.
