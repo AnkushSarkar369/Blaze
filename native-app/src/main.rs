@@ -526,33 +526,39 @@ fn license_cache_is_valid(
     }
 }
 
-fn load_license_state() -> (Option<CachedLicense>, Option<String>) {
+fn load_license_state() -> Option<CachedLicense> {
     let Some(path) = license_state_file() else {
-        return (None, None);
+        return None;
     };
 
     let contents = match fs::read_to_string(&path) {
         Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return (None, None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
         Err(error) => {
-            return (None, Some(format!("Blaze could not read its saved licence state: {error}")));
+            eprintln!("Blaze: could not read local activation data: {error}");
+            return None;
         }
     };
 
     let fields: Vec<&str> = contents.lines().collect();
     if fields.len() != 7 || fields[6] != "blaze-device-v1" || fields[0] != "true" {
-        return (None, Some("Blaze's saved licence state is outdated or corrupted. Please activate again.".to_owned()));
+        eprintln!("Blaze: local activation data is invalid or incompatible");
+        return None;
     }
 
     let license_key = fields[1];
     if license_key.trim().is_empty() {
-        return (None, Some("Blaze's saved licence key is missing. Please activate again.".to_owned()));
+        eprintln!("Blaze: local activation data does not contain a licence key");
+        return None;
     }
 
     let plan = match fields[3] {
         "monthly" => LicensePlan::Monthly,
         "permanent" => LicensePlan::Permanent,
-        _ => return (None, Some("Blaze's saved licence plan is malformed. Please activate again.".to_owned())),
+        _ => {
+            eprintln!("Blaze: local activation data contains an unknown plan");
+            return None;
+        }
     };
 
     let valid_until = if fields[4].is_empty() {
@@ -566,34 +572,46 @@ fn load_license_state() -> (Option<CachedLicense>, Option<String>) {
     if (plan == LicensePlan::Monthly && invalid_monthly_end)
         || (plan == LicensePlan::Permanent && valid_until.is_some())
     {
-        return (None, Some("Blaze's saved subscription details are malformed. Please activate again.".to_owned()));
+        eprintln!("Blaze: local activation data contains invalid subscription details");
+        return None;
     }
 
     let verified_seconds = match fields[5].parse::<u64>() {
         Ok(value) => value,
-        Err(_) => return (None, Some("Blaze's saved verification timestamp is malformed. Please activate again.".to_owned())),
+        Err(error) => {
+            eprintln!("Blaze: local activation timestamp could not be read: {error}");
+            return None;
+        }
     };
     let Some(last_verified) = UNIX_EPOCH.checked_add(Duration::from_secs(verified_seconds)) else {
-        return (None, Some("Blaze's saved verification timestamp is invalid. Please activate again.".to_owned()));
+        eprintln!("Blaze: local activation timestamp is outside the supported range");
+        return None;
     };
 
     let stored_binding = fields[2];
     if stored_binding.len() != 64 || !stored_binding.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return (None, Some("Blaze's saved device verifier is malformed. Please activate again.".to_owned()));
+        eprintln!("Blaze: local activation data contains an invalid device binding");
+        return None;
     }
 
     match current_license_binding(license_key) {
         Ok(expected_binding) if stored_binding == expected_binding => {}
-        Ok(_) => return (None, Some("This licence activation belongs to a different device. Enter your key to activate this computer.".to_owned())),
-        Err(error) => return (None, Some(format!("Blaze could not verify this device's identity: {error}"))),
+        Ok(_) => {
+            eprintln!("Blaze: local activation belongs to a different device");
+            return None;
+        }
+        Err(error) => {
+            eprintln!("Blaze: could not verify the device for local activation: {error}");
+            return None;
+        }
     }
 
-    (Some(CachedLicense {
+    Some(CachedLicense {
         license_key: license_key.to_owned(),
         plan,
         valid_until,
         last_verified,
-    }), None)
+    })
 }
 
 fn persist_license_state(
@@ -1480,12 +1498,6 @@ enum LicenseVerificationError {
 }
 
 impl LicenseVerificationError {
-    fn message(&self) -> &str {
-        match self {
-            Self::Temporary(message) | Self::Rejected(message) => message,
-        }
-    }
-
     fn is_temporary(&self) -> bool {
         matches!(self, Self::Temporary(_))
     }
@@ -1553,7 +1565,6 @@ struct BlazeApp {
     show_help: bool,
     help_tab: HelpTab,
     pending_preview_fit: bool,
-    show_license_dialog: bool,
     license_key_input: String,
     license_notice: Option<String>,
     license_activated: bool,
@@ -1593,7 +1604,7 @@ impl BlazeApp {
         let (keyframe_tx, keyframe_rx) = mpsc::channel();
         let (export_tx, export_rx) = mpsc::channel();
         let (license_tx, license_rx) = mpsc::channel();
-        let (cached_license, license_state_notice) = load_license_state();
+        let cached_license = load_license_state();
         let license_activated = cached_license
             .as_ref()
             .is_some_and(|cached| cached.is_valid_at(SystemTime::now()));
@@ -1658,9 +1669,8 @@ impl BlazeApp {
             show_help: true,
             help_tab: HelpTab::Guide,
             pending_preview_fit: false,
-            show_license_dialog: license_state_notice.is_some(),
             license_key_input: String::new(),
-            license_notice: license_state_notice,
+            license_notice: None,
             license_activated,
             license_plan,
             license_valid_until,
@@ -1695,10 +1705,17 @@ impl BlazeApp {
                     keyframes.dedup_by(|a, b| (*a - *b).abs() < 0.000_001);
                     self.keyframes = keyframes;
                     if self.keyframes.is_empty() {
-                        self.keyframe_error = Some("No usable video keyframes were found.".to_string());
+                        self.keyframe_error = Some(
+                            "This video doesn't work with Blaze Mode. Try Precision Mode instead.".to_owned()
+                        );
                     }
                 }
-                Err(error) => self.keyframe_error = Some(error),
+                Err(error) => {
+                    eprintln!("Blaze: keyframe analysis failed: {error}");
+                    self.keyframe_error = Some(
+                        "Blaze couldn't prepare this video for Blaze Mode. Try another video or use Precision Mode.".to_owned()
+                    );
+                }
             }
             ctx.request_repaint();
         }
@@ -1942,15 +1959,17 @@ impl BlazeApp {
             return;
         }
         if let Err(error) = device_hid() {
-            self.license_notice = Some(format!("Blaze cannot bind this activation to the current device: {error}"));
-            self.show_license_dialog = true;
+            eprintln!("Blaze: could not verify this device for activation: {error}");
+            self.license_notice = Some(
+                "Blaze couldn't verify this computer. Please try again, or contact support.".to_owned()
+            );
             return;
         }
         self.license_verifying = true;
         self.license_activation_pending = true;
         self.pending_license_key = Some(key.clone());
         self.last_license_check = Some(Instant::now());
-        self.license_notice = Some("Checking your Blaze licence…".to_owned());
+        self.license_notice = Some("Checking your licence…".to_owned());
         let sender = self.license_tx.clone();
         let repaint = ctx.clone();
         std::thread::spawn(move || {
@@ -1990,25 +2009,24 @@ impl BlazeApp {
                     }
                 }
                 Err(error) => {
+                    eprintln!("Blaze: licence verification failed: {error:?}");
                     let activation_failed = self.license_activation_pending;
                     self.license_activation_pending = false;
 
                     if activation_failed {
                         self.pending_license_key = None;
                         self.license_activated = self.cached_license_is_valid();
-                        self.license_notice = Some(error.message().to_owned());
+                        self.license_notice = Some(if error.is_temporary() {
+                            "We couldn't verify your key right now. Check your internet connection and try again.".to_owned()
+                        } else {
+                            "That key couldn't be verified. Check that it was entered correctly and try again.".to_owned()
+                        });
                     } else if error.is_temporary() {
                         self.license_activated = self.cached_license_is_valid();
                         self.license_notice = Some(if self.license_activated {
-                            format!(
-                                "Gumroad is temporarily unavailable. Your last verified activation remains valid during the 24-hour grace period. {}",
-                                error.message()
-                            )
+                            "We couldn't refresh your licence just now. Your access is still active.".to_owned()
                         } else {
-                            format!(
-                                "Verification is unavailable and the 24-hour grace period has expired. Reconnect to Gumroad to restore exports. {}",
-                                error.message()
-                            )
+                            "Connect to the internet to verify your licence before exporting again.".to_owned()
                         });
                     } else {
                         // An explicit rejection overrides the grace period immediately.
@@ -2018,7 +2036,9 @@ impl BlazeApp {
                         self.last_successful_verification = None;
                         self.license_key = None;
                         clear_license_state();
-                        self.license_notice = Some(error.message().to_owned());
+                        self.license_notice = Some(
+                            "This licence is no longer active. Check your purchase details or contact support.".to_owned()
+                        );
                     }
                 }
             }
@@ -2042,14 +2062,13 @@ impl BlazeApp {
             let engine = MediaEngine::new([tools]);
             let result = export::export_blaze_video(&engine, &source, &output, duration, &ranges)
                 .map(|report| {
-                    let mut message = format!(
-                        "Blaze Export completed.\n{}\nDuration: {:.2}s",
+                    let message = format!(
+                        "Export complete.\n{}\nDuration: {:.2}s",
                         report.output_path.display(),
                         report.actual_duration
                     );
                     if let Some(warning) = report.warning {
-                        message.push_str("\n");
-                        message.push_str(&warning);
+                        eprintln!("Blaze: export completed with a warning: {warning}");
                     }
                     message
                 });
@@ -2076,7 +2095,7 @@ impl BlazeApp {
 
         std::thread::spawn(move || {
             let result = export::export_interchange(format, &source, &info, &ranges, &output)
-                .map(|_| format!("Timeline exported:\n{}", output.display()));
+                .map(|_| format!("Timeline export complete.\n{}", output.display()));
             let _ = sender.send((generation, result));
             repaint.request_repaint();
         });
@@ -2088,7 +2107,10 @@ impl BlazeApp {
             self.export_running = false;
             self.export_status = Some(match result {
                 Ok(message) => (true, message),
-                Err(error) => (false, error),
+                Err(error) => {
+                    eprintln!("Blaze: export failed: {error}");
+                    (false, "Blaze couldn't complete this export. Check the selected destination and available storage, then try again.".to_owned())
+                }
             });
         }
     }
@@ -2108,7 +2130,7 @@ impl eframe::App for BlazeApp {
         if self.license_activated && !self.cached_license_is_valid() {
             self.license_activated = false;
             self.license_notice = Some(
-                "The licence verification grace period has expired. Reconnect to Gumroad to restore exports.".to_owned()
+                "Connect to the internet to verify your licence before exporting again.".to_owned()
             );
         }
 
@@ -2785,17 +2807,17 @@ impl eframe::App for BlazeApp {
                             ui.add_space(5.0);
                             ui.horizontal(|ui| {
                                 ui.spinner();
-                                ui.small("Analysing GOP / keyframe structure…");
+                                ui.small("Preparing Blaze Mode…");
                             });
                         } else if let Some(error) = &self.keyframe_error {
                             ui.add_space(5.0);
                             ui.colored_label(
                                 egui::Color32::LIGHT_RED,
-                                format!("Keyframe analysis failed: {error}"),
+                                error,
                             );
                         } else if !self.keyframes.is_empty() {
                             ui.add_space(5.0);
-                            ui.small(format!("{} video keyframes available.", self.keyframes.len()));
+                            ui.small("Blaze Mode is ready.");
                         }
 
                         ui.add_space(18.0);
@@ -3270,7 +3292,7 @@ impl eframe::App for BlazeApp {
                         } else if self.keyframes_running {
                             Some("Waiting for keyframe analysis to finish.")
                         } else if self.keyframe_error.is_some() || self.keyframes.is_empty() {
-                            Some("Blaze Export requires usable video keyframes.")
+                            Some("This video isn't compatible with Blaze Export. Try another video or use Precision Mode.")
                         } else if self.edit_regions.is_empty() {
                             Some("Create at least one cut region before exporting.")
                         } else if !self.can_export() {
@@ -3384,7 +3406,7 @@ impl eframe::App for BlazeApp {
                     ToolTab::License => {
                         ui.heading("License");
                         ui.add_space(4.0);
-                        ui.label(egui::RichText::new("Check your activation status and manage access to Blaze.")
+                        ui.label(egui::RichText::new("Manage your Blaze licence here.")
                             .size(12.0).color(ui.visuals().weak_text_color()));
                         ui.add_space(16.0);
                         egui::Frame::new()
@@ -3415,13 +3437,11 @@ impl eframe::App for BlazeApp {
                                     let (plan_title, plan_description) = match self.license_plan {
                                         Some(LicensePlan::Monthly) => (
                                             "Blaze Monthly",
-                                            self.license_valid_until.as_deref()
-                                                .map(|date| format!("Access remains active through {date} UTC."))
-                                                .unwrap_or_else(|| "Your monthly subscription is active.".to_owned())
+                                            "Your Monthly licence is active.".to_owned()
                                         ),
                                         Some(LicensePlan::Permanent) => (
                                             "Blaze Permanent",
-                                            "Your permanent licence is active. No subscription expiry.".to_owned()
+                                            "Your Permanent licence is active. No recurring payments.".to_owned()
                                         ),
                                         None => ("Blaze Activated", "Your licence is active.".to_owned()),
                                     };
@@ -3440,14 +3460,14 @@ impl eframe::App for BlazeApp {
                                                 .color(egui::Color32::from_rgb(255, 132, 108)));
                                             ui.add_space(6.0);
                                             ui.label(egui::RichText::new(
-                                                "If you reinstall Blaze or switch to a different device or operating system, email us to request a license transfer."
+                                                "Need to move Blaze to another computer? Contact us and we'll help with the transfer."
                                             ).size(12.0).color(ui.visuals().weak_text_color()));
                                             ui.add_space(7.0);
                                             copy_support_email(ui);
                                         });
                                 } else {
-                                    ui.label(egui::RichText::new("Blaze is not activated").size(17.0).strong());
-                                    ui.label(egui::RichText::new("Activate a Monthly or Permanent licence to unlock every export format.")
+                                    ui.label(egui::RichText::new("Activate Blaze").size(17.0).strong());
+                                    ui.label(egui::RichText::new("A Blaze licence unlocks video and timeline exports.")
                                         .size(12.0).color(ui.visuals().weak_text_color()));
                                     ui.add_space(10.0);
                                     let get_key_clicked = ui.scope(|ui| {
@@ -3481,8 +3501,9 @@ impl eframe::App for BlazeApp {
                                         ) {
                                             Ok(()) => self.license_notice = None,
                                             Err(error) => {
+                                                eprintln!("Blaze: could not open the website: {error}");
                                                 self.license_notice = Some(
-                                                    format!("Couldn't open the website: {error}")
+                                                    "Couldn't open the Blaze website. Please try again.".to_owned()
                                                 );
                                             }
                                         }
@@ -3496,7 +3517,7 @@ impl eframe::App for BlazeApp {
                                 .size(12.0).color(ui.visuals().weak_text_color()));
                             ui.add_space(6.0);
                             ui.add(egui::TextEdit::singleline(&mut self.license_key_input)
-                                .hint_text("Paste your license key")
+                                .hint_text("Paste your license key here!")
                                 .desired_width(f32::INFINITY));
                             ui.add_space(8.0);
                             let activate_width = ui.available_width();
@@ -4162,9 +4183,9 @@ impl eframe::App for BlazeApp {
                                             help_card(ui, "Choose the right output", "Use Blaze Mode for keyframe-aligned stream-copy output, or an NLE interchange file to continue editing in a supported video editor.");
                                         }
                                         HelpTab::Activation => {
-                                            help_page_heading(ui, "Activation & license transfers", "Activate Blaze with your Gumroad license and keep access when moving devices.");
-                                            help_card(ui, "Activate Blaze", "Purchase Blaze to receive a license key. Open the License tab in the Tools panel, paste your key and select Activate Blaze.");
-                                            help_card(ui, "Move to another device", "If you reinstall Blaze, replace your computer or switch operating systems, contact us to request a license transfer. Include your purchase email and let us know which device or operating system you are moving to.");
+                                            help_page_heading(ui, "Activation & license transfers", "Activate Blaze with your licence key and keep access when moving devices.");
+                                            help_card(ui, "Activate Blaze", "After purchase, you’ll receive a licence key. Open the License tab in the Tools panel, paste your key and select Activate Blaze.");
+                                            help_card(ui, "Move to another device", "Need to move Blaze to another computer? Contact us with your purchase email and we’ll help with the transfer.");
                                              copy_support_email(ui);
                                         }
                                     }
@@ -4182,54 +4203,7 @@ impl eframe::App for BlazeApp {
                 });
         }
 
-        if self.show_license_dialog {
-            let mut close_license_dialog = false;
-            let mut activate_license_requested = false;
-            egui::Window::new("Activate Blaze")
-                .collapsible(false)
-                .resizable(false)
-                .default_width(390.0)
-                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-                .open(&mut self.show_license_dialog)
-                .show(ui.ctx(), |ui| {
-                    ui.label("Enter your license key to activate Blaze.");
-                    ui.add_space(8.0);
-                    ui.add(egui::TextEdit::singleline(&mut self.license_key_input)
-                        .hint_text("Paste your license key")
-                        .desired_width(f32::INFINITY));
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        if ui.add_enabled(
-                            !self.license_key_input.trim().is_empty()
-                                && !self.license_verifying
-                                && !self.license_activated,
-                            egui::Button::new(if self.license_verifying { "Checking…" } else { "Activate" })
-                                .min_size(egui::vec2(105.0, 32.0)),
-                        ).clicked() {
-                            activate_license_requested = true;
-                        }
-                        if ui.button("Cancel").clicked() {
-                            close_license_dialog = true;
-                        }
-                    });
-                    if let Some(message) = &self.license_notice {
-                        ui.add_space(6.0);
-                        ui.colored_label(egui::Color32::from_rgb(235, 183, 113), message);
-                    }
-                    ui.add_space(4.0);
-                    ui.label(egui::RichText::new("Your key is verified online with the Blaze licensing service.")
-                        .size(11.0).color(ui.visuals().weak_text_color()));
-                });
-            if activate_license_requested {
-                self.activate_license_key(ui.ctx());
-            }
-            if self.license_activated {
-                close_license_dialog = true;
-            }
-            if close_license_dialog {
-                self.show_license_dialog = false;
-            }
-        }
+
 
     }
 
