@@ -24,7 +24,8 @@ mod waveform;
 use waveform::Waveform;
 
 const APP_TITLE: &str = "Blaze — Ankush Sarkar";
-const FREE_EXPORT_LIMIT: u32 = 2;
+const LICENSE_GRACE_PERIOD: Duration = Duration::from_secs(24 * 60 * 60);
+const LICENSE_RECHECK_INTERVAL: Duration = Duration::from_secs(12 * 60 * 60);
 const GUMROAD_VERIFY_URL: &str = "https://api.gumroad.com/v2/licenses/verify";
 const GUMROAD_PRODUCTS: [(&str, LicensePlan); 2] = [
     ("Niyme89XCcFC44ShhEPPrQ==", LicensePlan::Monthly),
@@ -89,7 +90,7 @@ fn request_gumroad_purchase(
     license_key: &str,
     product_id: &str,
     increment_uses: bool,
-) -> Result<Option<serde_json::Value>, String> {
+) -> Result<Option<serde_json::Value>, LicenseVerificationError> {
     let response = client
         .post(GUMROAD_VERIFY_URL)
         .form(&[
@@ -98,28 +99,34 @@ fn request_gumroad_purchase(
             ("increment_uses_count", if increment_uses { "true" } else { "false" }),
         ])
         .send()
-        .map_err(|error| {
-            format!(
-                "Could not reach Gumroad. Check your internet connection and try again. ({error})"
-            )
-        })?;
+        .map_err(|error| LicenseVerificationError::Temporary(format!(
+            "Could not reach Gumroad. Check your internet connection and try again. ({error})"
+        )))?;
 
     let status = response.status();
     if status == reqwest::StatusCode::NOT_FOUND {
-        // Gumroad returns 404 when a key does not belong to the supplied product.
         return Ok(None);
     }
 
-    let body: serde_json::Value = response
-        .json()
-        .map_err(|error| format!("Gumroad returned an unreadable response: {error}"))?;
+    let body: serde_json::Value = response.json().map_err(|error| {
+        LicenseVerificationError::Temporary(format!(
+            "Gumroad returned an unreadable response: {error}"
+        ))
+    })?;
 
     if !status.is_success() {
         let message = body
             .get("message")
             .and_then(|value| value.as_str())
             .unwrap_or("Gumroad could not verify this licence.");
-        return Err(format!("Gumroad verification failed (HTTP {status}): {message}"));
+        let message = format!("Gumroad verification failed (HTTP {status}): {message}");
+        return Err(if status.is_server_error()
+            || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        {
+            LicenseVerificationError::Temporary(message)
+        } else {
+            LicenseVerificationError::Rejected(message)
+        });
     }
 
     if body.get("success").and_then(|value| value.as_bool()) != Some(true) {
@@ -129,7 +136,9 @@ fn request_gumroad_purchase(
     body.get("purchase")
         .cloned()
         .map(Some)
-        .ok_or_else(|| "Gumroad did not return purchase details.".to_owned())
+        .ok_or_else(|| LicenseVerificationError::Temporary(
+            "Gumroad did not return purchase details.".to_owned()
+        ))
 }
 
 fn parse_gumroad_timestamp(value: &str) -> Option<std::time::SystemTime> {
@@ -241,23 +250,33 @@ fn evaluate_gumroad_purchase(
     plan: LicensePlan,
 ) -> LicenseResult {
     if purchase.get("product_id").and_then(|value| value.as_str()) != Some(product_id) {
-        return Err("Gumroad returned a purchase for a different product.".to_owned());
+        return Err(LicenseVerificationError::Rejected(
+            "Gumroad returned a purchase for a different product.".to_owned()
+        ));
     }
     if purchase.get("refunded").and_then(|value| value.as_bool()) == Some(true) {
-        return Err("This purchase has been refunded.".to_owned());
+        return Err(LicenseVerificationError::Rejected(
+            "This purchase has been refunded.".to_owned()
+        ));
     }
     if purchase.get("chargebacked").and_then(|value| value.as_bool()) == Some(true) {
-        return Err("This purchase has been charged back.".to_owned());
+        return Err(LicenseVerificationError::Rejected(
+            "This purchase has been charged back.".to_owned()
+        ));
     }
     if purchase.get("disputed").and_then(|value| value.as_bool()) == Some(true)
         && purchase.get("dispute_won").and_then(|value| value.as_bool()) != Some(true)
     {
-        return Err("This purchase is currently disputed.".to_owned());
+        return Err(LicenseVerificationError::Rejected(
+            "This purchase is currently disputed.".to_owned()
+        ));
     }
 
     let valid_until = if plan == LicensePlan::Monthly {
         if purchase.get("recurrence").and_then(|value| value.as_str()) != Some("monthly") {
-            return Err("This key is not linked to a Blaze Monthly subscription.".to_owned());
+            return Err(LicenseVerificationError::Rejected(
+                "This key is not linked to a Blaze Monthly subscription.".to_owned()
+            ));
         }
 
         let mut next_end: Option<(std::time::SystemTime, String)> = None;
@@ -275,12 +294,18 @@ fn evaluate_gumroad_purchase(
             let timestamp = value
                 .as_str()
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| format!("Gumroad returned an invalid {field} timestamp."))?;
+                .ok_or_else(|| LicenseVerificationError::Temporary(
+                    format!("Gumroad returned an invalid {field} timestamp.")
+                ))?;
             let end = parse_gumroad_timestamp(timestamp)
-                .ok_or_else(|| format!("Gumroad returned an unreadable {field} timestamp."))?;
+                .ok_or_else(|| LicenseVerificationError::Temporary(
+                    format!("Gumroad returned an unreadable {field} timestamp.")
+                ))?;
 
             if end <= std::time::SystemTime::now() {
-                return Err("Your Blaze Monthly subscription period has ended.".to_owned());
+                return Err(LicenseVerificationError::Rejected(
+                    "Your Blaze Monthly subscription period has ended.".to_owned()
+                ));
             }
 
             let earlier_end = next_end
@@ -302,7 +327,9 @@ fn verify_gumroad_license(license_key: &str, increment_uses: bool) -> LicenseRes
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
-        .map_err(|error| format!("Could not prepare license verification: {error}"))?;
+        .map_err(|error| LicenseVerificationError::Temporary(
+            format!("Could not prepare licence verification: {error}")
+        ))?;
 
     // Monthly is checked first, followed by Permanent.
     for (product_id, plan) in GUMROAD_PRODUCTS {
@@ -310,19 +337,21 @@ fn verify_gumroad_license(license_key: &str, increment_uses: bool) -> LicenseRes
             continue;
         };
 
-        // A matched but revoked or expired purchase must not fall through.
         let entitlement = evaluate_gumroad_purchase(&purchase, product_id, plan)?;
         if !increment_uses {
             return Ok(entitlement);
         }
 
-        // Increment Uses only after a successful, uncounted entitlement check.
         let counted_purchase = request_gumroad_purchase(&client, license_key, product_id, true)?
-            .ok_or_else(|| "Gumroad could not confirm this licence activation.".to_owned())?;
+            .ok_or_else(|| LicenseVerificationError::Temporary(
+                "Gumroad could not confirm this licence activation.".to_owned()
+            ))?;
         return evaluate_gumroad_purchase(&counted_purchase, product_id, plan);
     }
 
-    Err("This key does not match an active Blaze Monthly or Permanent licence.".to_owned())
+    Err(LicenseVerificationError::Rejected(
+        "This key does not match an active Blaze Monthly or Permanent licence.".to_owned()
+    ))
 }
 
 
@@ -449,150 +478,135 @@ fn current_license_binding(license_key: &str) -> Result<String, String> {
     Ok(license_binding_for_hid(license_key, &device_hid()?))
 }
 
-// State format v2 stores the Gumroad key plus an opaque device-bound verifier.
-// Legacy gumroad-v1 activations require one reactivation to establish the binding.
-fn load_license_state() -> (u32, Option<String>, Option<String>) {
+// State v3 stores a device-bound entitlement and the last successful Gumroad
+// verification. A cached activation remains usable for at most 24 hours.
+#[derive(Clone)]
+struct CachedLicense {
+    license_key: String,
+    plan: LicensePlan,
+    valid_until: Option<String>,
+    last_verified: SystemTime,
+}
+
+impl CachedLicense {
+    fn is_valid_at(&self, now: SystemTime) -> bool {
+        license_cache_is_valid(
+            self.plan,
+            self.valid_until.as_deref(),
+            Some(self.last_verified),
+            now,
+        )
+    }
+}
+
+fn license_cache_is_valid(
+    plan: LicensePlan,
+    valid_until: Option<&str>,
+    last_verified: Option<SystemTime>,
+    now: SystemTime,
+) -> bool {
+    let Some(last_verified) = last_verified else {
+        return false;
+    };
+    let Ok(age) = now.duration_since(last_verified) else {
+        // A local clock earlier than the last verification fails closed.
+        return false;
+    };
+    if age > LICENSE_GRACE_PERIOD {
+        return false;
+    }
+
+    match plan {
+        LicensePlan::Monthly => valid_until
+            .and_then(parse_gumroad_timestamp)
+            .is_some_and(|expiry| now < expiry),
+        LicensePlan::Permanent => valid_until.is_none(),
+    }
+}
+
+fn load_license_state() -> (Option<CachedLicense>, Option<String>) {
     let Some(path) = license_state_file() else {
-        return (0, None, None);
+        return (None, None);
     };
 
     let contents = match fs::read_to_string(&path) {
         Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return (0, None, None);
-        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return (None, None),
         Err(error) => {
-            return (
-                0,
-                None,
-                Some(format!("Blaze could not read its saved licence state: {error}")),
-            );
+            return (None, Some(format!("Blaze could not read its saved licence state: {error}")));
         }
     };
 
     let fields: Vec<&str> = contents.lines().collect();
-    // Preserve a readable export counter even when a later write left the
-    // state file truncated. The warning below still requires reactivation.
-    let successful_exports = fields
-        .get(1)
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(0)
-        .min(FREE_EXPORT_LIMIT);
-
-    if fields.len() < 4 {
-        return (
-            successful_exports,
-            None,
-            Some("Blaze's saved licence state is incomplete or corrupted. Please activate again.".to_owned()),
-        );
+    if fields.len() != 7 || fields[6] != "blaze-device-v3" || fields[0] != "true" {
+        return (None, Some("Blaze's saved licence state is outdated or corrupted. Please activate again.".to_owned()));
     }
 
-    let _stored_activation = match fields[0].parse::<bool>() {
-        Ok(value) => value,
-        Err(_) => {
-            return (
-                successful_exports,
-                None,
-                Some("Blaze's saved licence state is malformed. Please activate again.".to_owned()),
-            );
-        }
+    let license_key = fields[1];
+    if license_key.trim().is_empty() {
+        return (None, Some("Blaze's saved licence key is missing. Please activate again.".to_owned()));
+    }
+
+    let plan = match fields[3] {
+        "monthly" => LicensePlan::Monthly,
+        "permanent" => LicensePlan::Permanent,
+        _ => return (None, Some("Blaze's saved licence plan is malformed. Please activate again.".to_owned())),
     };
-    // Entitlement is always revalidated with Gumroad; this flag is metadata only.
 
-    if fields[1].parse::<u32>().is_err() {
-        return (
-            0,
-            None,
-            Some("Blaze's saved export counter is malformed. Please activate again.".to_owned()),
-        );
+    let valid_until = if fields[4].is_empty() {
+        None
+    } else {
+        Some(fields[4].to_owned())
+    };
+    if (plan == LicensePlan::Monthly
+        && valid_until.as_deref().and_then(parse_gumroad_timestamp).is_none())
+        || (plan == LicensePlan::Permanent && valid_until.is_some())
+    {
+        return (None, Some("Blaze's saved subscription details are malformed. Please activate again.".to_owned()));
     }
 
-    let license_key = fields
-        .get(2)
-        .filter(|value| !value.is_empty())
-        .map(|value| (*value).to_owned());
+    let verified_seconds = match fields[5].parse::<u64>() {
+        Ok(value) => value,
+        Err(_) => return (None, Some("Blaze's saved verification timestamp is malformed. Please activate again.".to_owned())),
+    };
+    let Some(last_verified) = UNIX_EPOCH.checked_add(Duration::from_secs(verified_seconds)) else {
+        return (None, Some("Blaze's saved verification timestamp is invalid. Please activate again.".to_owned()));
+    };
 
-    match fields.last().copied() {
-        Some("blaze-device-v2") => {
-            if fields.len() != 5 {
-                return (
-                    successful_exports,
-                    None,
-                    Some("Blaze's device-bound licence state is incomplete or corrupted. Please activate again.".to_owned()),
-                );
-            }
-
-            let stored_binding = fields[3];
-            match (&license_key, stored_binding) {
-                (None, "") => (successful_exports, None, None),
-                (None, _) => (
-                    successful_exports,
-                    None,
-                    Some("Blaze's saved licence state is inconsistent. Please activate again.".to_owned()),
-                ),
-                (Some(_), value)
-                    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) =>
-                {
-                    (
-                        successful_exports,
-                        None,
-                        Some("Blaze's saved device verifier is malformed. Please activate again.".to_owned()),
-                    )
-                }
-                (Some(key), value) => match current_license_binding(key) {
-                    Ok(expected_binding) if value == expected_binding => {
-                        (successful_exports, Some(key.clone()), None)
-                    }
-                    Ok(_) => (
-                        successful_exports,
-                        None,
-                        Some("This licence activation belongs to a different device. Enter your key to activate this computer.".to_owned()),
-                    ),
-                    Err(error) => (
-                        successful_exports,
-                        None,
-                        Some(format!("Blaze could not verify this device's identity: {error}")),
-                    ),
-                },
-            }
-        }
-        Some("gumroad-v1") => {
-            if fields.len() != 4 {
-                return (
-                    successful_exports,
-                    None,
-                    Some("Blaze's legacy licence state is malformed. Please activate again.".to_owned()),
-                );
-            }
-            if license_key.is_some() {
-                (
-                    successful_exports,
-                    None,
-                    Some("Blaze now uses device-bound activation. Enter your licence key once to bind this installation.".to_owned()),
-                )
-            } else {
-                (successful_exports, None, None)
-            }
-        }
-        _ => (
-            successful_exports,
-            None,
-            Some("Blaze could not recognise its saved licence state. Please activate again.".to_owned()),
-        ),
+    let stored_binding = fields[2];
+    if stored_binding.len() != 64 || !stored_binding.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return (None, Some("Blaze's saved device verifier is malformed. Please activate again.".to_owned()));
     }
+
+    match current_license_binding(license_key) {
+        Ok(expected_binding) if stored_binding == expected_binding => {}
+        Ok(_) => return (None, Some("This licence activation belongs to a different device. Enter your key to activate this computer.".to_owned())),
+        Err(error) => return (None, Some(format!("Blaze could not verify this device's identity: {error}"))),
+    }
+
+    (Some(CachedLicense {
+        license_key: license_key.to_owned(),
+        plan,
+        valid_until,
+        last_verified,
+    }), None)
 }
 
-fn persist_license_state(activated: bool, successful_exports: u32, license_key: Option<&str>) {
+fn persist_license_state(
+    license_key: &str,
+    entitlement: &LicenseEntitlement,
+    last_verified: SystemTime,
+) {
     let Some(path) = license_state_file() else {
-        eprintln!("Blaze: could not locate the license state path.");
+        eprintln!("Blaze: could not locate the licence state path.");
         return;
     };
     let Some(parent) = path.parent() else {
-        eprintln!("Blaze: license state path has no parent directory.");
+        eprintln!("Blaze: licence state path has no parent directory.");
         return;
     };
     if let Err(error) = fs::create_dir_all(parent) {
-        eprintln!("Blaze: could not create license state directory: {error}");
+        eprintln!("Blaze: could not create licence state directory: {error}");
         return;
     }
 
@@ -600,28 +614,32 @@ fn persist_license_state(activated: bool, successful_exports: u32, license_key: 
     {
         use std::os::unix::fs::PermissionsExt;
         if let Err(error) = fs::set_permissions(parent, fs::Permissions::from_mode(0o700)) {
-            eprintln!("Blaze: could not secure license state directory permissions: {error}");
+            eprintln!("Blaze: could not secure licence state directory permissions: {error}");
             return;
         }
     }
 
-    let (key, binding) = match license_key {
-        Some(key) => match current_license_binding(key) {
-            Ok(binding) => (key, binding),
-            Err(error) => {
-                eprintln!("Blaze: could not bind licence to this device: {error}");
-                return;
-            }
-        },
-        None => ("", String::new()),
+    let binding = match current_license_binding(license_key) {
+        Ok(binding) => binding,
+        Err(error) => {
+            eprintln!("Blaze: could not bind licence to this device: {error}");
+            return;
+        }
     };
 
+    let plan = match entitlement.plan {
+        LicensePlan::Monthly => "monthly",
+        LicensePlan::Permanent => "permanent",
+    };
+    let valid_until = entitlement.valid_until.as_deref().unwrap_or("");
+    let verified_seconds = last_verified.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
     let contents = format!(
-        "{}\n{}\n{}\n{}\nblaze-device-v2\n",
-        activated,
-        successful_exports.min(FREE_EXPORT_LIMIT),
-        key,
-        binding
+        "true\n{}\n{}\n{}\n{}\n{}\nblaze-device-v3\n",
+        license_key,
+        binding,
+        plan,
+        valid_until,
+        verified_seconds
     );
 
     let same_contents = fs::read_to_string(&path)
@@ -638,8 +656,6 @@ fn persist_license_state(activated: bool, successful_exports: u32, license_key: 
     #[cfg(not(unix))]
     let permissions_are_private = true;
 
-    // Revalidation runs periodically. Avoid disk writes when state is unchanged,
-    // but replace older files whose permissions are too broad.
     if same_contents && permissions_are_private {
         return;
     }
@@ -667,9 +683,6 @@ fn persist_license_state(activated: bool, successful_exports: u32, license_key: 
         temporary_file.write_all(contents.as_bytes())?;
         temporary_file.sync_all()?;
         drop(temporary_file);
-
-        // The temporary file is in the same directory, so rename replaces the
-        // previous state atomically on supported local filesystems.
         fs::rename(&temporary_path, &path)?;
 
         #[cfg(unix)]
@@ -682,7 +695,17 @@ fn persist_license_state(activated: bool, successful_exports: u32, license_key: 
 
     if let Err(error) = write_result {
         let _ = fs::remove_file(&temporary_path);
-        eprintln!("Blaze: could not atomically save license state: {error}");
+        eprintln!("Blaze: could not atomically save licence state: {error}");
+    }
+}
+
+fn clear_license_state() {
+    if let Some(path) = license_state_file() {
+        if let Err(error) = fs::remove_file(path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("Blaze: could not clear rejected licence state: {error}");
+            }
+        }
     }
 }
 
@@ -1400,7 +1423,25 @@ struct LicenseEntitlement {
     valid_until: Option<String>,
 }
 
-type LicenseResult = Result<LicenseEntitlement, String>;
+#[derive(Debug)]
+enum LicenseVerificationError {
+    Temporary(String),
+    Rejected(String),
+}
+
+impl LicenseVerificationError {
+    fn message(&self) -> &str {
+        match self {
+            Self::Temporary(message) | Self::Rejected(message) => message,
+        }
+    }
+
+    fn is_temporary(&self) -> bool {
+        matches!(self, Self::Temporary(_))
+    }
+}
+
+type LicenseResult = Result<LicenseEntitlement, LicenseVerificationError>;
 enum WaveformMessage {
     Progress { generation: u64, fraction: f32 },
     Complete { generation: u64, result: Result<Vec<u8>, String> },
@@ -1440,7 +1481,7 @@ struct BlazeApp {
     license_key: Option<String>,
     pending_license_key: Option<String>,
     license_activation_pending: bool,
-    last_license_check: Instant,
+    last_license_check: Option<Instant>,
     export_status: Option<(bool, String)>,
     detection_level: usize,
     padding_level: usize,
@@ -1468,7 +1509,7 @@ struct BlazeApp {
     license_activated: bool,
     license_plan: Option<LicensePlan>,
     license_valid_until: Option<String>,
-    successful_exports: u32,
+    last_successful_verification: Option<SystemTime>,
 }
 
 fn nearest_keyframe(keyframes: &[f64], time: f64) -> Option<f64> {
@@ -1502,7 +1543,14 @@ impl BlazeApp {
         let (keyframe_tx, keyframe_rx) = mpsc::channel();
         let (export_tx, export_rx) = mpsc::channel();
         let (license_tx, license_rx) = mpsc::channel();
-        let (successful_exports, license_key, license_state_notice) = load_license_state();
+        let (cached_license, license_state_notice) = load_license_state();
+        let license_activated = cached_license
+            .as_ref()
+            .is_some_and(|cached| cached.is_valid_at(SystemTime::now()));
+        let license_key = cached_license.as_ref().map(|cached| cached.license_key.clone());
+        let license_plan = cached_license.as_ref().map(|cached| cached.plan);
+        let license_valid_until = cached_license.as_ref().and_then(|cached| cached.valid_until.clone());
+        let last_successful_verification = cached_license.as_ref().map(|cached| cached.last_verified);
 
         Ok(Self {
             playback,
@@ -1538,7 +1586,7 @@ impl BlazeApp {
             license_key,
             pending_license_key: None,
             license_activation_pending: false,
-            last_license_check: Instant::now() - Duration::from_secs(60),
+            last_license_check: None,
             export_status: None,
             detection_level: 2,
             padding_level: 1,
@@ -1563,10 +1611,10 @@ impl BlazeApp {
             show_license_dialog: license_state_notice.is_some(),
             license_key_input: String::new(),
             license_notice: license_state_notice,
-            license_activated: false,
-            license_plan: None,
-            license_valid_until: None,
-            successful_exports,
+            license_activated,
+            license_plan,
+            license_valid_until,
+            last_successful_verification,
         })
     }
 
@@ -1823,8 +1871,19 @@ impl BlazeApp {
         }
     }
 
+    fn cached_license_is_valid(&self) -> bool {
+        self.license_plan.is_some_and(|plan| {
+            license_cache_is_valid(
+                plan,
+                self.license_valid_until.as_deref(),
+                self.last_successful_verification,
+                SystemTime::now(),
+            )
+        })
+    }
+
     fn can_export(&self) -> bool {
-        self.license_activated || self.successful_exports < FREE_EXPORT_LIMIT
+        self.license_activated && self.cached_license_is_valid()
     }
 
     fn activate_license_key(&mut self, ctx: &egui::Context) {
@@ -1840,7 +1899,7 @@ impl BlazeApp {
         self.license_verifying = true;
         self.license_activation_pending = true;
         self.pending_license_key = Some(key.clone());
-        self.last_license_check = Instant::now();
+        self.last_license_check = Some(Instant::now());
         self.license_notice = Some("Checking your Blaze licence…".to_owned());
         let sender = self.license_tx.clone();
         let repaint = ctx.clone();
@@ -1856,9 +1915,12 @@ impl BlazeApp {
             self.license_verifying = false;
             match result {
                 Ok(entitlement) => {
+                    let verified_at = SystemTime::now();
                     self.license_activated = true;
                     self.license_plan = Some(entitlement.plan);
-                    self.license_valid_until = entitlement.valid_until;
+                    self.license_valid_until = entitlement.valid_until.clone();
+                    self.last_successful_verification = Some(verified_at);
+
                     if self.license_activation_pending {
                         if let Some(activated_key) = self.pending_license_key.take() {
                             self.license_key = Some(activated_key);
@@ -1868,25 +1930,46 @@ impl BlazeApp {
                             LicensePlan::Permanent => "Blaze Permanent is activated. Cut away!".to_owned(),
                         });
                         self.license_key_input.clear();
+                    } else {
+                        self.license_notice = None;
                     }
                     self.license_activation_pending = false;
-                    persist_license_state(self.license_activated, self.successful_exports, self.license_key.as_deref());
+
+                    if let Some(key) = self.license_key.as_deref() {
+                        persist_license_state(key, &entitlement, verified_at);
+                    }
                 }
-                Err(message) => {
-                    self.license_activated = false;
-                    self.license_plan = None;
-                    self.license_valid_until = None;
+                Err(error) => {
                     let activation_failed = self.license_activation_pending;
                     self.license_activation_pending = false;
+
                     if activation_failed {
-                        // A failed replacement attempt must not discard the last
-                        // successfully saved key. Only a successful activation
-                        // replaces the persisted licence.
                         self.pending_license_key = None;
+                        self.license_activated = self.cached_license_is_valid();
+                        self.license_notice = Some(error.message().to_owned());
+                    } else if error.is_temporary() {
+                        self.license_activated = self.cached_license_is_valid();
+                        self.license_notice = Some(if self.license_activated {
+                            format!(
+                                "Gumroad is temporarily unavailable. Your last verified activation remains valid during the 24-hour grace period. {}",
+                                error.message()
+                            )
+                        } else {
+                            format!(
+                                "Verification is unavailable and the 24-hour grace period has expired. Reconnect to Gumroad to restore exports. {}",
+                                error.message()
+                            )
+                        });
+                    } else {
+                        // An explicit rejection overrides the grace period immediately.
+                        self.license_activated = false;
+                        self.license_plan = None;
+                        self.license_valid_until = None;
+                        self.last_successful_verification = None;
+                        self.license_key = None;
+                        clear_license_state();
+                        self.license_notice = Some(error.message().to_owned());
                     }
-                    self.license_notice = Some(message);
-                    // No persistent state changed on verification failure. In
-                    // particular, do not overwrite an existing valid key.
                 }
             }
         }
@@ -1894,7 +1977,6 @@ impl BlazeApp {
 
     fn start_blaze_export(&mut self, output: PathBuf, ctx: &egui::Context) {
         if self.export_running || !self.can_export() { return; }
-        let license_key = self.license_key.clone();
         let (Some(source), Some(info)) = (self.selected_path.clone(), self.media_info.clone()) else { return; };
         let ranges: Vec<(f64, f64)> = self.edit_regions.iter().map(|r| (r.start, r.end)).collect();
         let duration = info.duration;
@@ -1906,17 +1988,9 @@ impl BlazeApp {
         let repaint = ctx.clone();
 
         std::thread::spawn(move || {
-            let result = if let Some(key) = license_key.as_deref() {
-                verify_gumroad_license(key, false).and_then(|_| {
-                    let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
-                    let engine = MediaEngine::new([tools]);
-                    export::export_blaze_video(&engine, &source, &output, duration, &ranges)
-                })
-            } else {
-                let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
-                let engine = MediaEngine::new([tools]);
-                export::export_blaze_video(&engine, &source, &output, duration, &ranges)
-            }
+            let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
+            let engine = MediaEngine::new([tools]);
+            let result = export::export_blaze_video(&engine, &source, &output, duration, &ranges)
                 .map(|report| {
                     let mut message = format!(
                         "Blaze Export completed.\n{}\nDuration: {:.2}s",
@@ -1941,7 +2015,6 @@ impl BlazeApp {
         ctx: &egui::Context,
     ) {
         if self.export_running || !self.can_export() { return; }
-        let license_key = self.license_key.clone();
         let (Some(source), Some(info)) = (self.selected_path.clone(), self.media_info.clone()) else { return; };
         let ranges: Vec<(f64, f64)> = self.edit_regions.iter().map(|r| (r.start, r.end)).collect();
         self.export_generation = self.export_generation.wrapping_add(1);
@@ -1952,13 +2025,8 @@ impl BlazeApp {
         let repaint = ctx.clone();
 
         std::thread::spawn(move || {
-            let result = if let Some(key) = license_key.as_deref() {
-                verify_gumroad_license(key, false).and_then(|_| {
-                    export::export_interchange(format, &source, &info, &ranges, &output)
-                })
-            } else {
-                export::export_interchange(format, &source, &info, &ranges, &output)
-            }.map(|_| format!("Timeline exported:\n{}", output.display()));
+            let result = export::export_interchange(format, &source, &info, &ranges, &output)
+                .map(|_| format!("Timeline exported:\n{}", output.display()));
             let _ = sender.send((generation, result));
             repaint.request_repaint();
         });
@@ -1969,14 +2037,7 @@ impl BlazeApp {
             if generation != self.export_generation { continue; }
             self.export_running = false;
             self.export_status = Some(match result {
-                Ok(message) => {
-                    if !self.license_activated {
-                        self.successful_exports =
-                            self.successful_exports.saturating_add(1).min(FREE_EXPORT_LIMIT);
-                        persist_license_state(self.license_activated, self.successful_exports, self.license_key.as_deref());
-                    }
-                    (true, message)
-                }
+                Ok(message) => (true, message),
                 Err(error) => (false, error),
             });
         }
@@ -1994,15 +2055,22 @@ impl eframe::App for BlazeApp {
         self.poll_license_verification();
         ctx.request_repaint_after(Duration::from_secs(60));
 
-        // Revalidate activated installations at startup and every 60 seconds.
+        if self.license_activated && !self.cached_license_is_valid() {
+            self.license_activated = false;
+            self.license_notice = Some(
+                "The licence verification grace period has expired. Reconnect to Gumroad to restore exports.".to_owned()
+            );
+        }
+
+        // Revalidate at launch and every 12 hours while Blaze remains open.
         if self.license_key.is_some()
             && !self.license_verifying
-            && self.last_license_check.elapsed() >= Duration::from_secs(60)
+            && self.last_license_check.map_or(true, |last| last.elapsed() >= LICENSE_RECHECK_INTERVAL)
         {
             let key = self.license_key.clone().unwrap_or_default();
             self.license_verifying = true;
             self.license_activation_pending = false;
-            self.last_license_check = Instant::now();
+            self.last_license_check = Some(Instant::now());
             let sender = self.license_tx.clone();
             let repaint = ctx.clone();
             std::thread::spawn(move || {
@@ -3156,7 +3224,7 @@ impl eframe::App for BlazeApp {
                         } else if self.edit_regions.is_empty() {
                             Some("Create at least one cut region before exporting.")
                         } else if !self.can_export() {
-                            Some("Free export limit reached. Activate Blaze to continue exporting.")
+                            Some("Activate Blaze to unlock exports.")
                         } else {
                             None
                         };
@@ -3246,7 +3314,7 @@ impl eframe::App for BlazeApp {
                         }
 
                         if !self.can_export() {
-                            ui.label(egui::RichText::new("Free export limit reached. Activate Blaze to continue exporting.")
+                            ui.label(egui::RichText::new("Exports are locked. Activate Blaze to enable video and timeline exports.")
                                 .small().color(egui::Color32::from_rgb(255, 132, 108)));
                         } else if !timestamp_available {
                             ui.label(egui::RichText::new("Import a video to enable timestamp exports.")
@@ -3287,7 +3355,7 @@ impl eframe::App for BlazeApp {
                                             };
                                             (label, egui::Color32::LIGHT_GREEN)
                                         } else {
-                                            ("FREE", ui.visuals().weak_text_color())
+                                            ("NOT ACTIVATED", ui.visuals().weak_text_color())
                                         };
                                         ui.label(egui::RichText::new(status).size(11.0).strong().color(color));
                                     });
@@ -3328,12 +3396,9 @@ impl eframe::App for BlazeApp {
                                             copy_support_email(ui);
                                         });
                                 } else {
-                                    ui.label(egui::RichText::new("Free version").size(17.0).strong());
-                                    let remaining = FREE_EXPORT_LIMIT.saturating_sub(self.successful_exports);
-                                    ui.label(egui::RichText::new(format!(
-                                        "{} of {} free exports remaining.",
-                                        remaining, FREE_EXPORT_LIMIT
-                                    )).size(12.0).color(ui.visuals().weak_text_color()));
+                                    ui.label(egui::RichText::new("Blaze is not activated").size(17.0).strong());
+                                    ui.label(egui::RichText::new("Activate a Monthly or Permanent licence to unlock every export format.")
+                                        .size(12.0).color(ui.visuals().weak_text_color()));
                                     ui.add_space(10.0);
                                     let get_key_clicked = ui.scope(|ui| {
                                         let widgets = &mut ui.style_mut().visuals.widgets;
