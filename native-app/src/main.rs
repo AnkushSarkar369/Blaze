@@ -1438,7 +1438,7 @@ fn mode_selection_card(
     response.on_hover_text(if enabled {
         format!("Select {title}")
     } else {
-        "Blaze Mode is unavailable until keyframe analysis completes.".to_owned()
+        "Blaze Mode is being prepared.".to_owned()
     })
 }
 
@@ -3272,7 +3272,7 @@ impl eframe::App for BlazeApp {
                             ui.add_space(6.0);
                             ui.horizontal(|ui| {
                                 ui.spinner();
-                                ui.small("Analysing audio. A rescan replaces existing regions.");
+                                ui.small("Looking for pauses in the audio… A new scan replaces the current suggestions.");
                             });
                         }
                     }
@@ -3290,7 +3290,7 @@ impl eframe::App for BlazeApp {
                         } else if self.active_mode != Some(EditingMode::Blaze) {
                             Some("Requires Blaze Mode. Switch to Blaze Mode to enable this export.")
                         } else if self.keyframes_running {
-                            Some("Waiting for keyframe analysis to finish.")
+                            Some("Preparing the video for Blaze Export…")
                         } else if self.keyframe_error.is_some() || self.keyframes.is_empty() {
                             Some("This video isn't compatible with Blaze Export. Try another video or use Precision Mode.")
                         } else if self.edit_regions.is_empty() {
@@ -3335,7 +3335,7 @@ impl eframe::App for BlazeApp {
                                 .min_size(egui::vec2(ui.available_width(), 38.0)),
                         );
                         ui.label(
-                            egui::RichText::new("Coming Soon — re-encoded export for Precise Mode.")
+                            egui::RichText::new("Precision Export is coming soon.")
                                 .small()
                                 .color(ui.visuals().weak_text_color()),
                         );
@@ -3343,9 +3343,9 @@ impl eframe::App for BlazeApp {
                         ui.add_space(22.0);
                         ui.separator();
                         ui.add_space(8.0);
-                        ui.strong("Timestamp Export");
+                        ui.strong("Timeline Export");
                         ui.label(
-                            egui::RichText::new("Export the current edit as an editable NLE timeline.")
+                            egui::RichText::new("Save your edit as a timeline you can continue in another video editor.")
                                 .small()
                                 .color(ui.visuals().weak_text_color()),
                         );
@@ -3389,7 +3389,7 @@ impl eframe::App for BlazeApp {
                             ui.label(egui::RichText::new("Exports are locked. Activate Blaze to enable video and timeline exports.")
                                 .small().color(egui::Color32::from_rgb(255, 132, 108)));
                         } else if !timestamp_available {
-                            ui.label(egui::RichText::new("Import a video to enable timestamp exports.")
+                            ui.label(egui::RichText::new("Import a video to enable Timeline Export.")
                                 .small().color(ui.visuals().weak_text_color()));
                         }
 
@@ -4130,32 +4130,32 @@ impl eframe::App for BlazeApp {
                                     match self.help_tab {
                                         HelpTab::Guide => {
                                             help_page_heading(ui, "Getting started", "The shortest path from an imported video to a reviewed edit.");
-                                            help_card(ui, "1. Import a video", "Choose Import video in the preview area. Blaze probes the media, opens the preview and builds waveform data for timeline navigation. Wait for waveform generation to finish before editing.");
-                                            help_card(ui, "2. Choose an editing mode", "Blaze Mode snaps cut boundaries to usable video keyframes and is designed for fast stream-copy exports. Precision Mode places boundaries at the current playback position without keyframe snapping.");
+                                            help_card(ui, "1. Import a video", "Choose Import video in the preview area. Blaze opens your video and prepares the timeline. The waveform appears when the timeline is ready.");
+                                            help_card(ui, "2. Choose an editing mode", "Blaze Mode is built for quick cuts. Precision Mode lets you place each cut exactly where you want it.");
                                             help_card(ui, "3. Mark and review cuts", "Move the playhead to a start point and press S. Move to the end point and press D. Review the marked regions on the waveform; drag either boundary to adjust it.");
-                                            help_card(ui, "4. Detect pauses automatically", "Open the silence detection controls, choose a detection level, minimum pause duration and padding, then select Detect Silence. Review the generated regions before exporting.");
-                                            help_card(ui, "5. Export your result", "Use Blaze Export for a fast stream-copy output when available, or export an editable timeline for a supported NLE. Precision video export is not available yet.");
+                                            help_card(ui, "4. Detect pauses automatically", "Choose Detect Silence to find long pauses automatically. Review the suggested cuts before exporting.");
+                                            help_card(ui, "5. Export your result", "Choose Blaze Export to create a finished video, or Timeline Export to continue editing in another video editor. Precision Export is coming soon.");
                                         }
                                         HelpTab::Blaze => {
-                                            help_page_heading(ui, "Blaze Mode", "Fast, keyframe-aligned editing for stream-copy workflows.");
-                                            help_card(ui, "How cuts work", "Blaze Mode moves each cut boundary to a nearby usable video keyframe. This keeps edits compatible with stream-copy export, which copies the encoded streams instead of re-encoding the video.");
+                                            help_page_heading(ui, "Blaze Mode", "Make quick cuts while keeping the original video quality.");
+                                            help_card(ui, "How cuts work", "Blaze Mode keeps edits quick by placing cuts at suitable points in the video. Your export retains the original video quality.");
                                             help_card(ui, "Create a region", "Move to the start and press S. Move to the end and press D. Pressing S again before D cancels the pending start. The completed region appears on the timeline.");
-                                            help_card(ui, "Refine boundaries", "Drag a region's start or end handle. In Blaze Mode, the boundary continues to snap to a valid keyframe. The available keyframes limit how exact a cut can be.");
-                                            help_card(ui, "Silence detection", "Detection Level controls how sensitive the scan is. Minimum Silence Duration filters out short pauses. Padding preserves audio around detected pauses. Expert Mode exposes the threshold, peak ceiling and separate before/after padding controls.");
-                                            help_card(ui, "Best for", "Fast editing when preserving the original encoded video and avoiding re-encoding matter more than frame-exact cut placement.");
+                                            help_card(ui, "Refine boundaries", "Drag either end of a region to adjust it. Blaze Mode keeps cuts aligned to suitable points in the video.");
+                                            help_card(ui, "Silence detection", "Use Detection Level, Minimum Silence Duration and Padding to control which pauses are marked and how much audio is kept around them. Expert Mode gives you finer control over the scan.");
+                                            help_card(ui, "Best for", "Quick edits when you want to keep the original video quality.");
                                         }
                                         HelpTab::Precision => {
                                             help_page_heading(ui, "Precision Mode", "Place edit boundaries at the current playback position.");
-                                            help_card(ui, "How cuts work", "Precision Mode uses the playhead's current position instead of snapping to keyframes. This allows finer placement, but a rendered export may need to re-encode portions of the video.");
-                                            help_card(ui, "Create and refine a region", "Move to the desired start and press S. Move to the desired end and press D. Drag either boundary handle to refine it; boundaries are not keyframe-snapped in this mode.");
-                                            help_card(ui, "Silence detection", "Use the same detection controls to find candidate pauses. Detection Level, Minimum Silence Duration and Padding determine which pauses are marked and how much surrounding audio is retained. Review the results before exporting.");
-                                            help_card(ui, "Export status", "Precision video export is currently marked Coming Soon. You can still work with precise edit regions and use the available timestamp/NLE interchange exports.");
+                                            help_card(ui, "How cuts work", "Precision Mode places cuts exactly at the playhead, allowing finer edits. Some exports may take longer to finish.");
+                                            help_card(ui, "Create and refine a region", "Move to the start and press S. Move to the end and press D. Drag either end of the region to adjust it.");
+                                            help_card(ui, "Silence detection", "Use Detect Silence to find pauses automatically. Adjust the detection level, minimum pause duration and padding, then review the suggested cuts before exporting.");
+                                            help_card(ui, "Export status", "Precision Export is coming soon. You can still save your edit as a timeline and continue in another video editor.");
                                         }
                                         HelpTab::Timeline => {
                                             help_page_heading(ui, "Timeline & navigation", "Navigate the waveform, inspect edits and control the workspace.");
                                             help_card(ui, "Seek and scrub", "Click the waveform lane or time ruler to seek. Drag either one to scrub through the video. The ruler adjusts its tick spacing to keep time labels readable as you zoom.");
                                             help_card(ui, "Zoom and pan", "Ctrl + scroll zooms around the pointer position. Ordinary mouse-wheel scrolling pans horizontally; horizontal trackpad scrolling is supported too. During playback, the timeline follows the playhead when it moves outside the visible range.");
-                                            help_card(ui, "Edit regions and playhead", "Each completed region has draggable start and end handles. Blaze Mode snaps moved handles to keyframes; Precision Mode does not. A pending S start marker can also be dragged before pressing D.");
+                                            help_card(ui, "Edit regions and playhead", "Drag the start or end of a cut to adjust it. Blaze Mode keeps cuts aligned to suitable points; Precision Mode follows your chosen position. You can also drag a pending start marker before pressing D.");
                                             help_card(ui, "Skip Cuts", "Toggle Skip Cuts in the transport controls to automatically jump over marked regions during playback. This changes playback navigation only; it does not delete or modify the regions.");
                                             help_card(ui, "Resize the workspace", "Drag the vertical divider between the preview and Tools panel to resize them. Drag the horizontal divider above the timeline to change its height. Double-click either divider to restore its default size.");
                                         }
@@ -4173,14 +4173,14 @@ impl eframe::App for BlazeApp {
                                             help_card(ui, "Double-click a divider", "Reset the preview/Tools split or timeline height.");
                                         }
                                         HelpTab::Export => {
-                                            help_page_heading(ui, "Export & interchange", "Choose between a rendered video and an editable timeline handoff.");
-                                            help_card(ui, "Blaze Export", "In Blaze Mode, export uses stream-copy operations. It preserves the original encoded video quality without re-encoding. A loaded source, usable keyframes and at least one completed edit region are required.");
-                                            help_card(ui, "NLE timeline interchange", "Export an editable timeline for Adobe Premiere Pro or DaVinci Resolve using FCP7 XML, Final Cut Pro using FCPXML 1.14, OpenTimelineIO using .otio, or CMX 3600 EDL. These files contain edit decisions and source-media references; they are not rendered videos.");
-                                            help_card(ui, "Current interchange model", "Blaze exports one source media file as a single video track with an optional linked audio track. The current model does not include effects, transitions, multiple source clips or multi-track edits. OpenTimelineIO is supported by current Premiere Pro and DaVinci Resolve releases.");
-                                            help_card(ui, "Precision Export", "A re-encoded video export for Precision Mode is not available yet and is shown as Coming Soon.");
+                                            help_page_heading(ui, "Export & continue editing", "Create a finished video or save an editable timeline for another editor.");
+                                            help_card(ui, "Blaze Export", "Create a finished video while keeping the original video quality. Choose Blaze Mode, import a video and mark at least one cut.");
+                                            help_card(ui, "Editable timeline", "Save your edit for Adobe Premiere Pro, DaVinci Resolve, Final Cut Pro or other compatible software. This saves your edit points rather than creating a finished video.");
+                                            help_card(ui, "What the timeline includes", "Timeline exports currently include one video track and an optional linked audio track. Effects, transitions, multiple source clips and multi-track edits are not included yet.");
+                                            help_card(ui, "Precision Export", "A finished video export from Precision Mode is coming soon.");
                                             help_section_label(ui, "BEFORE EXPORTING");
                                             help_card(ui, "Review the cut list", "Check every region on the timeline and confirm the start and end boundaries.");
-                                            help_card(ui, "Choose the right output", "Use Blaze Mode for keyframe-aligned stream-copy output, or an NLE interchange file to continue editing in a supported video editor.");
+                                            help_card(ui, "Choose the right output", "Choose Blaze Export to create a finished video, or Timeline Export to continue editing in another video editor.");
                                         }
                                         HelpTab::Activation => {
                                             help_page_heading(ui, "Activation & license transfers", "Activate Blaze with your licence key and keep access when moving devices.");
