@@ -67,7 +67,9 @@ impl MediaEngine {
         if let Ok(executable) = env::current_exe() {
             if let Some(directory) = executable.parent() {
                 candidates.push(directory.join("Bin").join(&filename));
+                candidates.push(directory.join("Bin").join("FFmpeg").join(&filename));
                 candidates.push(directory.join("BIN").join(&filename));
+                candidates.push(directory.join("BIN").join("FFmpeg").join(&filename));
             }
         }
 
