@@ -815,7 +815,7 @@ mod tests {
     #[test]
     fn file_urls_preserve_non_utf8_unix_path_bytes() {
         use std::os::unix::ffi::OsStringExt;
-        let path = PathBuf::from(std::ffi::OsString::from_vec(b"/tmp/a\\xff b.mp4".to_vec()));
+        let path = PathBuf::from(std::ffi::OsString::from_vec(b"/tmp/a\xff b.mp4".to_vec()));
         assert_eq!(file_url(&path), "file:///tmp/a%FF%20b.mp4");
     }
 
