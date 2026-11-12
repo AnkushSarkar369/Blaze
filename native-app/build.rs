@@ -46,7 +46,6 @@ fn library_in_directory(directory: &Path, names: &[&str]) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-#[cfg(target_os = "linux")]
 fn locate_linux_libmpv() -> Option<PathBuf> {
     if let Some(path) = explicit_library_file() {
         return Some(path);
@@ -84,7 +83,6 @@ fn locate_linux_libmpv() -> Option<PathBuf> {
     .find(|path| path.is_file())
 }
 
-#[cfg(target_os = "linux")]
 fn configure_linux_mpv() {
     let library = locate_linux_libmpv().unwrap_or_else(|| {
         panic!(
@@ -112,7 +110,6 @@ fn configure_linux_mpv() {
     println!("cargo:rustc-link-search=native={}", out_dir.display());
 }
 
-#[cfg(target_os = "macos")]
 fn locate_macos_libmpv() -> Option<PathBuf> {
     if let Some(path) = explicit_library_file() {
         return Some(path);
@@ -158,7 +155,6 @@ fn locate_macos_libmpv() -> Option<PathBuf> {
     })
 }
 
-#[cfg(target_os = "macos")]
 fn configure_macos_mpv() {
     let library = locate_macos_libmpv().unwrap_or_else(|| {
         panic!(
