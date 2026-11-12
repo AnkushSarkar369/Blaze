@@ -1756,7 +1756,7 @@ impl BlazeApp {
         let repaint = ctx.clone();
         std::thread::spawn(move || {
             let engine = MediaEngine::default();
-            let result = engine.detect_keyframes(&path.to_string_lossy());
+            let result = engine.detect_keyframes(&path);
             let _ = sender.send((generation, result));
             repaint.request_repaint();
         });
@@ -1826,7 +1826,7 @@ impl BlazeApp {
         let repaint = ctx.clone();
         std::thread::spawn(move || {
             let engine = MediaEngine::default();
-            let result = blaze_engine::silence::detect_silence(&engine, &path.to_string_lossy(), config);
+            let result = blaze_engine::silence::detect_silence(&engine, &path, config);
             let _ = tx.send((generation, result));
             repaint.request_repaint();
         });
@@ -1870,7 +1870,13 @@ impl BlazeApp {
     }
 
     fn open_video(&mut self, ctx: &egui::Context) {
-        let Some(path) = FileDialog::new().pick_file() else {
+        let Some(path) = FileDialog::new()
+            .add_filter(
+                "Video files",
+                &["mp4", "mov", "mkv", "avi", "webm", "mpeg", "mpg", "ts", "mts", "m2ts", "3gp", "wmv", "flv"],
+            )
+            .pick_file()
+        else {
             return;
         };
 
@@ -1910,7 +1916,7 @@ impl BlazeApp {
         std::thread::spawn(move || {
             let engine = MediaEngine::default();
             let result = engine
-                .probe_media(&path.to_string_lossy())
+                .probe_media(&path)
                 .map(|info| (path, info));
             let _ = sender.send((generation, result));
             repaint.request_repaint();
@@ -1936,7 +1942,7 @@ impl BlazeApp {
                         std::thread::spawn(move || {
                             let engine = MediaEngine::default();
                             let result = engine.generate_waveform_with_progress(
-                                &path.to_string_lossy(),
+                                &path,
                                 channels,
                                 duration,
                                 |fraction| {
