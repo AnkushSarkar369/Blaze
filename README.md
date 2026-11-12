@@ -81,6 +81,10 @@ The Export panel groups rendered video output and NLE timeline interchange.
 
 Timestamp interchange currently models one source media file with one linked video track and, when present, one linked audio track. Effects, transitions, multiple source clips, and multi-track timelines are outside the current edit model. The OTIO export follows the same scope and references the original media file; it does not bundle media.
 
+## Media import scope
+
+Blaze uses FFmpeg/MPV for media compatibility, but the file picker should expose a deliberate list of supported media file types rather than accepting every file. The planned video-container filter is: MP4, MOV, MKV, AVI, WebM, MPEG/MPG, TS, MTS/M2TS, 3GP, WMV, and FLV. These are container/file formats, not a promise that every codec or every stream inside them is supported. Actual compatibility depends on the demuxer, contained codecs, and the operation being performed. The list must be verified against the bundled FFmpeg/MPV build before being treated as a guaranteed support matrix.
+
 ## Roadmap / TODO
 
 This is the working product roadmap. It lists unfinished work only; completed items are removed.
@@ -90,10 +94,16 @@ This is the working product roadmap. It lists unfinished work only; completed it
 - [ ] Review and improve the overall application design.
 - [ ] Add standard right-click Cut, Copy, and Paste actions to editable text fields.
 - [ ] Add timeline right-click actions to set an "Add starting point" and an "Add ending point" (mouse-driven equivalents of the existing start/end-point workflow).
+- [ ] Add a deliberate media-import file-picker filter for supported video formats; keep the visible extension list aligned with the verified FFmpeg/MPV build.
 - [ ] Review responsive behaviour at the supported window sizes.
 - [ ] Revisit the application colour system and decide whether to adopt a true-black interface. (Deferred decision.)
 
-### 2. Bugs, reliability, and performance
+### 2. Audio
+
+- [ ] Add audio-focused editing capabilities, including a defined audio-track workflow and controls.
+- [ ] Define supported audio-only import formats and audio export requirements.
+
+### 3. Bugs, reliability, and performance
 
 - [ ] Triage the bug inventory and prioritise data-loss, export, playback, and editing defects.
 - [ ] Fix confirmed functional bugs.
@@ -105,13 +115,13 @@ This is the working product roadmap. It lists unfinished work only; completed it
 - [ ] Profile performance and resource use on the target low-spec hardware.
 - [ ] Run regression testing after significant changes and maintain a record of verified results.
 
-### 3. Mix
+### 4. Mix
 
 - [ ] Website integration.
 - [ ] Auto-Update Functionality
 - [ ] Use on a windows build & Github's mac
 
-### 4. Release readiness
+### 5. Release readiness
 
 - [ ] Linux
 - [ ] Windows
