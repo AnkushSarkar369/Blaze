@@ -156,6 +156,21 @@ Blaze/
 
 The Windows release build has no console window. Diagnostic output is written to `%APPDATA%\Blaze\blaze.log`.
 
-### Development tool folder
+### Development tool lookup
 
-Source builds look for `ffmpeg` and `ffprobe` in this order: `Bin` / `Bin/FFmpeg` beside the executable, then (only when running from Cargo's `target` folder) the repository-level `BIN` folder, then `~/bin`. The repository-level `BIN` folder is a gitignored, development-only drop-in location; it is not part of any release package.
+Blaze resolves `ffmpeg` and `ffprobe` in this order:
+
+1. `Bin` and `Bin/FFmpeg` beside the executable.
+2. On macOS app bundles, `Contents/Resources/Bin` and `Contents/Resources/Bin/FFmpeg`.
+3. When running from Cargo's `target` folder, the repository-level `BIN` and `BIN/FFmpeg` directories.
+4. Any explicitly configured extra tool directories.
+5. The system `PATH` (including Linux package-manager and Homebrew installations).
+6. `~/bin` as a development fallback.
+
+The repository-level `BIN` folder is gitignored and is not part of any release package. Windows release packages bundle FFmpeg/FFprobe and their shared DLLs under `Bin/FFmpeg`; Linux and macOS development builds may use system installations on `PATH`.
+
+### Platform validation status
+
+The Windows workflow assembles and validates the Windows ZIP and runs the staged shared-FFmpeg integration test. The cross-platform workflow builds the native application and runs workspace tests against system FFmpeg on Linux and Homebrew FFmpeg/libmpv on macOS. These are build and integration checks; they do not replace clean-machine GUI smoke tests.
+
+There is not yet a distributable macOS `.app` package, code-signing/notarization workflow, or a verified first-launch test on a clean Mac.
