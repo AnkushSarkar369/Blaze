@@ -184,8 +184,8 @@ jobs:
             (Join-Path $stage "Readme.txt"),
             (Join-Path $bin "FFmpeg-LICENSE.txt"),
             (Join-Path $bin "libmpv-2.dll"),
-            (Join-Path $bin "ffmpeg.exe"),
-            (Join-Path $bin "ffprobe.exe")
+            (Join-Path $ffmpegBin "ffmpeg.exe"),
+            (Join-Path $ffmpegBin "ffprobe.exe")
           )
           foreach ($file in $required) {
             if (-not (Test-Path $file)) { throw "Required release file is missing: $file" }
