@@ -7,7 +7,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::{MediaEngine, MediaInfo};
+use crate::{output_tracked, MediaEngine, MediaInfo};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -91,14 +91,59 @@ fn xml_escape(value: &str) -> String {
 fn file_url(path: &Path) -> String {
     let absolute = if path.is_absolute() { path.to_path_buf() }
         else { std::env::current_dir().unwrap_or_default().join(path) };
-    let raw = absolute.to_string_lossy();
-    let mut encoded = String::with_capacity(raw.len());
-    for byte in raw.as_bytes() {
+    file_url_from_str(&absolute.to_string_lossy(), cfg!(windows))
+}
+
+/// Builds a file:// URL from an absolute path string. On Windows, backslashes
+/// become forward slashes and extended-length prefixes (\\?\) are removed, so
+/// `C:\My Videos\a.mp4` becomes `file:///C:/My%20Videos/a.mp4` and a UNC path
+/// `\\server\share\a.mp4` becomes `file://server/share/a.mp4`. On other
+/// platforms a backslash is an ordinary file-name character and is encoded.
+fn file_url_from_str(raw: &str, windows: bool) -> String {
+    let normalised: String = if windows {
+        let trimmed = if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+            format!(r"\\{rest}")
+        } else if let Some(rest) = raw.strip_prefix(r"\\?\") {
+            rest.to_string()
+        } else {
+            raw.to_string()
+        };
+        trimmed.replace('\\', "/")
+    } else {
+        raw.to_string()
+    };
+
+    let mut encoded = String::with_capacity(normalised.len());
+    for byte in normalised.as_bytes() {
         if byte.is_ascii_alphanumeric() || b"/-_.~:".contains(byte) {
             encoded.push(*byte as char);
         } else { encoded.push_str(&format!("%{byte:02X}")); }
     }
-    if encoded.starts_with('/') { format!("file://{encoded}") } else { format!("file:///{encoded}") }
+    if windows && encoded.starts_with("//") {
+        // UNC share: the first path component is the host name.
+        format!("file:{encoded}")
+    } else if encoded.starts_with('/') {
+        format!("file://{encoded}")
+    } else {
+        format!("file:///{encoded}")
+    }
+}
+
+/// True when both paths refer to the same file, including different spellings
+/// (relative vs absolute, symlinks, and letter case or `\\?\` prefixes on Windows).
+/// The output file may not exist yet, so its folder is resolved instead.
+fn is_same_file(a: &Path, b: &Path) -> bool {
+    fn resolve(path: &Path) -> Option<PathBuf> {
+        if let Ok(resolved) = fs::canonicalize(path) { return Some(resolved); }
+        let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        Some(fs::canonicalize(parent).ok()?.join(path.file_name()?))
+    }
+    match (resolve(a), resolve(b)) {
+        (Some(a), Some(b)) => if cfg!(windows) {
+            a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+        } else { a == b },
+        _ => a == b,
+    }
 }
 
 fn reel_name(path: &Path) -> String {
@@ -162,7 +207,7 @@ fn make_workspace(parent: &Path, stem: &str) -> Result<Workspace, String> {
 }
 
 fn run(engine: &MediaEngine, args: &[&str], description: &str) -> Result<(), String> {
-    let output = engine.command("ffmpeg")?.args(args).output()
+    let output = output_tracked(engine.command("ffmpeg")?.args(args))
         .map_err(|error| format!("Could not start FFmpeg while {description}: {error}"))?;
     if !output.status.success() {
         return Err(format!("FFmpeg failed while {description}: {}",
@@ -173,10 +218,10 @@ fn run(engine: &MediaEngine, args: &[&str], description: &str) -> Result<(), Str
 
 fn probe_duration(engine: &MediaEngine, path: &Path) -> Result<f64, String> {
     let path_arg = path.to_string_lossy();
-    let output = engine.command("ffprobe")?.args([
+    let output = output_tracked(engine.command("ffprobe")?.args([
         "-v", "error", "-show_entries", "format=duration",
         "-of", "default=noprint_wrappers=1:nokey=1", path_arg.as_ref(),
-    ]).output().map_err(|error| format!("Could not start FFprobe: {error}"))?;
+    ])).map_err(|error| format!("Could not start FFprobe: {error}"))?;
     if !output.status.success() {
         return Err(format!("FFprobe could not verify the exported video: {}",
             String::from_utf8_lossy(&output.stderr).trim()));
@@ -193,7 +238,7 @@ pub fn export_blaze_video(
     if !source.is_file() { return Err("The source video no longer exists.".into()); }
     if !duration.is_finite() || duration <= 0.0 { return Err("The source video has an invalid duration.".into()); }
     if delete_ranges.is_empty() { return Err("There are no cut regions to export.".into()); }
-    if source == output { return Err("The output file cannot replace the source video.".into()); }
+    if is_same_file(source, output) { return Err("The output file cannot replace the source video.".into()); }
     let source_ext = source.extension().and_then(|s| s.to_str()).unwrap_or("mkv");
     let output_ext_check = output.extension().and_then(|s| s.to_str()).unwrap_or(source_ext);
     if !source_ext.eq_ignore_ascii_case(output_ext_check) {
@@ -206,9 +251,14 @@ pub fn export_blaze_video(
         return Err("The cut regions remove the entire video; there is nothing to export.".into());
     }
 
-    let source_parent = source.parent().unwrap_or_else(|| Path::new("."));
-    let stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
-    let workspace = make_workspace(source_parent, stem)?;
+    // Temporary clips live in the output folder (which the user chose and must
+    // be able to write to), so the source folder can be read-only and the final
+    // file is moved into place with a same-folder rename.
+    let output_parent = output.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(output_parent)
+        .map_err(|error| format!("Could not access the output folder: {error}"))?;
+    let stem = output.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
+    let workspace = make_workspace(output_parent, stem)?;
     let extension = source.extension().and_then(|s| s.to_str()).unwrap_or("mkv");
     let mut clips = Vec::with_capacity(segments.len());
 
@@ -255,18 +305,7 @@ pub fn export_blaze_video(
     ).sum::<f64>();
     let actual_duration = probe_duration(engine, &joined)?;
 
-    let output_parent = output.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(output_parent)
-        .map_err(|error| format!("Could not access the output folder: {error}"))?;
-    let output_stem = output.file_stem().and_then(|s| s.to_str()).unwrap_or("blaze");
-    let output_ext = output.extension().and_then(|s| s.to_str()).unwrap_or(extension);
-    let id = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let staging = output_parent.join(format!(".{output_stem}.partial_{}_{}.{}",
-        std::process::id(), id, output_ext));
-    fs::copy(&joined, &staging)
-        .map_err(|error| format!("Could not stage the finished video in the output folder: {error}"))?;
-    if let Err(error) = fs::rename(&staging, output) {
-        let _ = fs::remove_file(&staging);
+    if let Err(error) = fs::rename(&joined, output) {
         return Err(format!("Could not move the completed video into place: {error}"));
     }
 
@@ -278,11 +317,11 @@ pub fn export_blaze_video(
 
 fn frame_rate_for_stream_copy(engine: &MediaEngine, source: &Path) -> Result<FrameRate, String> {
     let source_arg = source.to_string_lossy();
-    let output = engine.command("ffprobe")?.args([
+    let output = output_tracked(engine.command("ffprobe")?.args([
         "-v", "error", "-select_streams", "v:0",
         "-show_entries", "stream=avg_frame_rate,r_frame_rate",
         "-of", "default=noprint_wrappers=1:nokey=1", source_arg.as_ref(),
-    ]).output().map_err(|error| format!("Could not read the source frame rate: {error}"))?;
+    ])).map_err(|error| format!("Could not read the source frame rate: {error}"))?;
     if !output.status.success() { return Err("FFprobe could not read the source frame rate.".into()); }
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let mut parts = line.trim().split('/');
@@ -643,5 +682,34 @@ mod tests {
     #[test]
     fn file_urls_escape_spaces_and_hashes() {
         assert_eq!(file_url(Path::new("/tmp/my video#1.mov")), "file:///tmp/my%20video%231.mov");
+    }
+
+    #[test]
+    fn windows_paths_become_valid_file_urls() {
+        assert_eq!(file_url_from_str(r"C:\Users\Ann\My Videos\clip#1.mp4", true),
+            "file:///C:/Users/Ann/My%20Videos/clip%231.mp4");
+        assert_eq!(file_url_from_str(r"\\?\C:\Users\Ann\clip.mp4", true),
+            "file:///C:/Users/Ann/clip.mp4");
+        assert_eq!(file_url_from_str(r"\\server\share\a b.mp4", true),
+            "file://server/share/a%20b.mp4");
+        assert_eq!(file_url_from_str(r"\\?\UNC\server\share\a.mp4", true),
+            "file://server/share/a.mp4");
+    }
+
+    #[test]
+    fn backslash_is_encoded_on_non_windows_paths() {
+        assert_eq!(file_url_from_str("/tmp/a\\b.mp4", false), "file:///tmp/a%5Cb.mp4");
+    }
+
+    #[test]
+    fn same_file_detection_sees_equivalent_spellings() {
+        let dir = std::env::temp_dir().join(format!("blaze-same-file-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("clip.mp4");
+        fs::write(&source, b"x").unwrap();
+        let indirect = dir.join(".").join("clip.mp4");
+        assert!(is_same_file(&source, &indirect));
+        assert!(!is_same_file(&source, &dir.join("clip_Blaze.mp4")));
+        let _ = fs::remove_dir_all(&dir);
     }
 }

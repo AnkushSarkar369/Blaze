@@ -26,28 +26,15 @@ jobs:
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Resolve and verify Cargo dependencies
+      - name: Verify Cargo.lock is up to date
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-
-          # The Windows-only winres build dependency was added after the
-          # committed lockfile was generated. Resolve the workspace first so
-          # Cargo can update Cargo.lock, then require all subsequent build
-          # steps to use that resolved lockfile without further changes.
-          cargo metadata --format-version 1 --no-deps | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            throw "Cargo metadata validation failed."
-          }
-
-          cargo metadata --format-version 1 | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            throw "Cargo could not resolve the workspace dependencies."
-          }
-
+          # The committed Cargo.lock must already contain every dependency,
+          # including the Windows-only winres build dependency.
           cargo metadata --locked --format-version 1 | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            throw "Cargo.lock was not stable after dependency resolution."
+            throw "Cargo.lock is out of date. Run cargo metadata locally and commit it."
           }
 
       - name: Download LGPL MPV runtime and development package
@@ -153,9 +140,11 @@ jobs:
           Copy-Item "target\release\blaze-native.exe" (Join-Path $stage "Blaze.exe")
           if (-not (Test-Path (Join-Path $stage "Blaze.exe"))) { throw "Blaze.exe was not produced." }
 
-          # Keep each tool beside its runtime DLLs so Windows can resolve imports.
-          Get-ChildItem -Path $env:MPV_LIBRARY_DIR -Filter "*.dll" -File | Copy-Item -Destination $bin -Force
-          if (-not (Test-Path (Join-Path $bin "libmpv-2.dll"))) { throw "Bin is missing libmpv-2.dll." }
+          # Blaze.exe imports libmpv-2.dll at load time, and Windows resolves that
+          # import from the executable's own folder (not from Bin). Keep the mpv
+          # runtime DLLs beside Blaze.exe. FFmpeg stays isolated in Bin\FFmpeg.
+          Get-ChildItem -Path $env:MPV_LIBRARY_DIR -Filter "*.dll" -File | Copy-Item -Destination $stage -Force
+          if (-not (Test-Path (Join-Path $stage "libmpv-2.dll"))) { throw "Package root is missing libmpv-2.dll beside Blaze.exe." }
 
           Copy-Item (Join-Path $env:FFMPEG_BIN_DIR "ffmpeg.exe") (Join-Path $ffmpegBin "ffmpeg.exe")
           Copy-Item (Join-Path $env:FFMPEG_BIN_DIR "ffprobe.exe") (Join-Path $ffmpegBin "ffprobe.exe")
@@ -168,8 +157,10 @@ jobs:
           Blaze for Windows x64
 
           Extract the Blaze folder and run Blaze.exe.
-          Keep the Bin folder intact. It contains the MPV runtime DLLs and the
-          FFmpeg subfolder used for media analysis, playback preparation, and exports.
+          Keep libmpv-2.dll beside Blaze.exe. Do not move it into Bin; Blaze.exe
+          cannot start without it.
+          Keep the Bin folder intact. Its FFmpeg subfolder holds ffmpeg.exe, ffprobe.exe
+          and their runtime DLLs, used for media analysis and exports.
           The Blaze logo is embedded in Blaze.exe.
 
           FFmpeg is an LGPL shared build from BtbN/FFmpeg-Builds.
@@ -183,7 +174,7 @@ jobs:
             (Join-Path $stage "Blaze.exe"),
             (Join-Path $stage "Readme.txt"),
             (Join-Path $bin "FFmpeg-LICENSE.txt"),
-            (Join-Path $bin "libmpv-2.dll"),
+            (Join-Path $stage "libmpv-2.dll"),
             (Join-Path $ffmpegBin "ffmpeg.exe"),
             (Join-Path $ffmpegBin "ffprobe.exe")
           )
@@ -191,7 +182,7 @@ jobs:
             if (-not (Test-Path $file)) { throw "Required release file is missing: $file" }
             if ((Get-Item $file).Length -eq 0) { throw "Release file is empty: $file" }
           }
-          if (@(Get-ChildItem -Path $bin -Filter "*.dll" -File).Count -lt 1) { throw "MPV runtime DLLs were not staged." }
+          if (@(Get-ChildItem -Path $stage -Filter "*.dll" -File).Count -lt 1) { throw "MPV runtime DLLs were not staged." }
 
           & (Join-Path $ffmpegBin "ffmpeg.exe") -version
           if ($LASTEXITCODE -ne 0) { throw "Staged FFmpeg failed its version check." }

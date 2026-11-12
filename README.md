@@ -135,4 +135,27 @@ This is the working product roadmap. It lists unfinished work only; completed it
 cargo run -p blaze-native
 ```
 
-Development builds and Linux testing are performed locally. The Windows x64 GitHub Actions job publishes a single downloadable artifact, `Blaze-V1-Windows.zip`. Its root contains `Blaze.exe` and `Readme.txt`; `Bin` contains the MPV runtime DLLs, `FFmpeg-LICENSE.txt`, and an `FFmpeg` subfolder with FFmpeg/FFprobe and their shared DLLs. The Blaze application icon is embedded in the Windows executable.
+Development builds and Linux testing are performed locally. The Windows x64 GitHub Actions job publishes a single downloadable artifact, `Blaze-V1-Windows.zip`. The Blaze application icon is embedded in the Windows executable.
+
+### Windows package structure
+
+```text
+Blaze/
+├── Blaze.exe
+├── libmpv-2.dll          <- must stay beside Blaze.exe
+├── Readme.txt
+└── Bin/
+    ├── FFmpeg-LICENSE.txt
+    └── FFmpeg/
+        ├── ffmpeg.exe
+        ├── ffprobe.exe
+        └── (FFmpeg shared runtime DLLs)
+```
+
+`libmpv-2.dll` (and any other mpv runtime DLL shipped with it) **must remain beside `Blaze.exe`. Do not move it into `Bin`.** `Blaze.exe` imports it at load time and Windows resolves that import from the executable's own folder, so without it Blaze does not start. FFmpeg stays isolated in `Bin\FFmpeg`, with its DLLs next to `ffmpeg.exe` and `ffprobe.exe`; Blaze finds those relative to the executable.
+
+The Windows release build has no console window. Diagnostic output is written to `%APPDATA%\Blaze\blaze.log`.
+
+### Development tool folder
+
+Source builds look for `ffmpeg` and `ffprobe` in this order: `Bin` / `Bin/FFmpeg` beside the executable, then (only when running from Cargo's `target` folder) the repository-level `BIN` folder, then `~/bin`. The repository-level `BIN` folder is a gitignored, development-only drop-in location; it is not part of any release package.

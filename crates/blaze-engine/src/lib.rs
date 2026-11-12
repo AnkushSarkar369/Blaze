@@ -15,8 +15,10 @@ use serde_json::Value;
 use std::{
     env,
     io::Read,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, Output, Stdio},
+    sync::Mutex,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -32,20 +34,116 @@ pub struct MediaInfo {
     pub has_audio: bool,
 }
 
+/// PIDs of FFmpeg/FFprobe processes started through this crate that have not
+/// finished yet, so the application can stop them when it closes.
+static RUNNING_TOOLS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+fn register_tool(id: u32) {
+    if let Ok(mut running) = RUNNING_TOOLS.lock() {
+        running.push(id);
+    }
+}
+
+fn unregister_tool(id: u32) {
+    if let Ok(mut running) = RUNNING_TOOLS.lock() {
+        running.retain(|running_id| *running_id != id);
+    }
+}
+
+/// A spawned media tool that unregisters itself when dropped.
+pub(crate) struct TrackedChild {
+    child: Child,
+    id: u32,
+}
+
+impl Deref for TrackedChild {
+    type Target = Child;
+    fn deref(&self) -> &Child {
+        &self.child
+    }
+}
+
+impl DerefMut for TrackedChild {
+    fn deref_mut(&mut self) -> &mut Child {
+        &mut self.child
+    }
+}
+
+impl Drop for TrackedChild {
+    fn drop(&mut self) {
+        unregister_tool(self.id);
+    }
+}
+
+/// Spawns a tool and records it so `terminate_running_tools` can stop it.
+pub(crate) fn spawn_tracked(command: &mut Command) -> std::io::Result<TrackedChild> {
+    let child = command.spawn()?;
+    let id = child.id();
+    register_tool(id);
+    Ok(TrackedChild { child, id })
+}
+
+/// Like `Command::output`, but the process is tracked while it runs.
+pub(crate) fn output_tracked(command: &mut Command) -> std::io::Result<Output> {
+    let child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let id = child.id();
+    register_tool(id);
+    let result = child.wait_with_output();
+    unregister_tool(id);
+    result
+}
+
+/// Stops every FFmpeg/FFprobe process that is still running. Intended to be
+/// called when the application closes so no orphaned tools keep working.
+pub fn terminate_running_tools() {
+    let ids: Vec<u32> = match RUNNING_TOOLS.lock() {
+        Ok(mut running) => std::mem::take(&mut *running),
+        Err(_) => return,
+    };
+    for id in ids {
+        let mut kill = if cfg!(windows) {
+            let mut command = Command::new("taskkill");
+            command.args(["/PID", &id.to_string(), "/T", "/F"]);
+            command
+        } else {
+            let mut command = Command::new("kill");
+            command.args(["-KILL", &id.to_string()]);
+            command
+        };
+        kill.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        hide_console_window(&mut kill);
+        let _ = kill.status();
+    }
+}
+
+/// Prevents a console window from flashing when a GUI process starts a
+/// console program on Windows. No effect on other platforms.
+fn hide_console_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    let _ = command;
+}
+
 /// Locates and runs FFmpeg/FFprobe without depending on an application
-/// framework. Application-specific resource directories are supplied by the
-/// caller; the conventional executable and per-user locations are retained.
+/// framework. Tools are found next to the executable (`Bin`, `Bin/FFmpeg`),
+/// in caller-supplied directories, or in `~/bin` for development.
 #[derive(Debug, Clone, Default)]
 pub struct MediaEngine {
     extra_tool_dirs: Vec<PathBuf>,
 }
 
 impl MediaEngine {
-    /// Creates an engine with optional tool directories between the bundled
-    /// executable directory and the per-user ~/bin fallback.
-    ///
-    /// The caller should pass resource and development BIN directories in
-    /// their desired precedence order.
+    /// Creates an engine with optional extra tool directories searched after
+    /// the executable-relative locations and before the per-user ~/bin fallback.
     pub fn new(extra_tool_dirs: impl IntoIterator<Item = PathBuf>) -> Self {
         Self {
             extra_tool_dirs: extra_tool_dirs.into_iter().collect(),
@@ -70,6 +168,18 @@ impl MediaEngine {
                 candidates.push(directory.join("Bin").join("FFmpeg").join(&filename));
                 candidates.push(directory.join("BIN").join(&filename));
                 candidates.push(directory.join("BIN").join("FFmpeg").join(&filename));
+
+                // Development only: when running from Cargo's target/<profile>
+                // folder, use the repository-level BIN folder. Packaged builds
+                // never live in a folder called "target", so they skip this.
+                if let Some(target) = directory.parent() {
+                    if target.file_name().is_some_and(|name| name == "target") {
+                        if let Some(root) = target.parent() {
+                            candidates.push(root.join("BIN").join(&filename));
+                            candidates.push(root.join("BIN").join("FFmpeg").join(&filename));
+                        }
+                    }
+                }
             }
         }
 
@@ -138,6 +248,8 @@ impl MediaEngine {
             }
         }
 
+        hide_console_window(&mut command);
+
         Ok(command)
     }
 
@@ -146,10 +258,7 @@ impl MediaEngine {
         tool: &str,
         args: &[&str],
     ) -> Result<std::process::Output, String> {
-        let output = self
-            .command(tool)?
-            .args(args)
-            .output()
+        let output = output_tracked(self.command(tool)?.args(args))
             .map_err(|error| format!("Could not start {tool}: {error}"))?;
 
         if !output.status.success() {
@@ -270,7 +379,7 @@ impl MediaEngine {
             0
         };
 
-        let mut child = self
+        let mut child = spawn_tracked(self
             .command("ffmpeg")?
             .args([
                 "-hide_banner",
@@ -291,8 +400,7 @@ impl MediaEngine {
                 "pipe:1",
             ])
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
+            .stderr(Stdio::null()))
             .map_err(|error| format!("Could not start FFmpeg: {error}"))?;
 
         let mut stdout = child
