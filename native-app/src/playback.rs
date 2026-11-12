@@ -182,9 +182,9 @@ impl Playback {
     }
 
     pub fn load(&self, path: &Path) -> Result<(), String> {
-        let path = path.to_string_lossy();
+        let path = blaze_engine::export::file_url(path);
         self.mpv
-            .command(&["loadfile", path.as_ref(), "replace"])
+            .command(&["loadfile", &path, "replace"])
             .map_err(|error| format!("MPV could not open this file: {error}"))?;
         // Loading a source must never start playback implicitly.
         self.mpv
