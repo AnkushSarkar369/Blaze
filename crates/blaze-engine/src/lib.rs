@@ -175,6 +175,13 @@ impl MediaEngine {
         }
     }
 
+    fn find_on_path(tool: &str, search_path: &std::ffi::OsStr) -> Option<PathBuf> {
+        let filename = Self::binary_filename(tool);
+        env::split_paths(search_path)
+            .map(|directory| directory.join(&filename))
+            .find(|candidate| candidate.is_file())
+    }
+
     fn resolve_tool(&self, tool: &str) -> Result<PathBuf, String> {
         let filename = Self::binary_filename(tool);
         let mut candidates = Vec::new();
@@ -217,7 +224,9 @@ impl MediaEngine {
         // Respect system package managers (Linux distributions and Homebrew)
         // after application-bundled and explicitly configured locations.
         if let Some(search_path) = env::var_os("PATH") {
-            candidates.extend(env::split_paths(&search_path).map(|directory| directory.join(&filename)));
+            if let Some(found) = Self::find_on_path(tool, &search_path) {
+                candidates.push(found);
+            }
         }
 
         let home = env::var_os("HOME")
@@ -580,6 +589,33 @@ fn parse_rate(value: Option<&Value>) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_lookup_honours_search_path_on_each_platform() {
+        static NEXT_TEMP: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(0);
+        let id = NEXT_TEMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let directory = env::temp_dir().join(format!(
+            "blaze-path-test-{}-{id}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let filename = MediaEngine::binary_filename("ffmpeg");
+        let executable = directory.join(filename);
+        std::fs::write(&executable, b"test").unwrap();
+
+        let search_path = env::join_paths([&directory]).unwrap();
+        assert_eq!(
+            MediaEngine::find_on_path("ffmpeg", &search_path),
+            Some(executable.clone())
+        );
+        assert_eq!(
+            MediaEngine::find_on_path("ffprobe", &search_path),
+            None
+        );
+
+        let _ = std::fs::remove_dir_all(directory);
+    }
 
     #[test]
     fn frame_rate_parser_handles_normal_and_invalid_rates() {
