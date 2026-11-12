@@ -1,3 +1,5 @@
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 use std::{
     fs::{self, OpenOptions},
     io::Write,
@@ -81,6 +83,44 @@ fn apply_blaze_theme(ctx: &egui::Context) {
     });
 }
 
+/// Appends `.extension` unless the path already ends with it, so exports are
+/// saved with the right extension even if the save dialog did not add one.
+fn with_required_extension(path: PathBuf, extension: &str) -> PathBuf {
+    let already_correct = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case(extension));
+    if already_correct {
+        return path;
+    }
+    let mut name = path.into_os_string();
+    name.push(".");
+    name.push(extension);
+    PathBuf::from(name)
+}
+
+/// GTK save dialogs do not append a selected filter extension. When Blaze
+/// appends it afterwards, the resulting path may differ from the path the
+/// user confirmed in the dialog. Ask before replacing that adjusted target.
+fn confirm_extension_adjusted_output(path: PathBuf, extension: &str) -> Option<PathBuf> {
+    let output = with_required_extension(path.clone(), extension);
+    if output != path && output.exists() {
+        let result = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title("Replace existing file?")
+            .set_description(format!(
+                "{} already exists. Replace it?",
+                output.display()
+            ))
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show();
+        if result != rfd::MessageDialogResult::Yes {
+            return None;
+        }
+    }
+    Some(output)
+}
+
 fn open_external_url(url: &str) -> Result<(), String> {
     open::that(url).map_err(|error| format!("Could not open the browser: {error}"))
 }
@@ -106,29 +146,39 @@ fn request_gumroad_purchase(
 
     let status = response.status();
     if status == reqwest::StatusCode::NOT_FOUND {
-        return Ok(None);
+        // Gumroad answers an unknown key with HTTP 404 and a JSON body that says
+        // success=false. A 404 without that body (proxy, CDN, captive portal) says
+        // nothing about the key, so it must not count as an invalid key.
+        let explicit_invalid = response
+            .json::<serde_json::Value>()
+            .ok()
+            .and_then(|body| body.get("success").and_then(|value| value.as_bool()))
+            == Some(false);
+        if explicit_invalid {
+            return Ok(None);
+        }
+        eprintln!("Blaze: licence service returned an unexpected HTTP 404 response");
+        return Err(LicenseVerificationError::Temporary);
+    }
+
+    if !status.is_success() {
+        // Rate limits, proxy errors, outages and unexpected 4xx responses are
+        // temporary verification failures, never a verdict on the licence key.
+        let message = response
+            .json::<serde_json::Value>()
+            .ok()
+            .and_then(|body| body.get("message").and_then(|value| value.as_str()).map(str::to_owned))
+            .unwrap_or_default();
+        let message = if license_key.is_empty() { message } else { message.replace(license_key, "[key]") };
+        let message: String = message.chars().take(160).collect();
+        eprintln!("Blaze: licence verification returned HTTP {status}: {message}");
+        return Err(LicenseVerificationError::Temporary);
     }
 
     let body: serde_json::Value = response.json().map_err(|error| {
         eprintln!("Blaze: licence service returned an unreadable response: {error}");
         LicenseVerificationError::Temporary
     })?;
-
-    if !status.is_success() {
-        let message = body
-            .get("message")
-            .and_then(|value| value.as_str())
-            .unwrap_or("No additional details were provided.");
-        eprintln!("Blaze: licence verification returned HTTP {status}: {message}");
-        return Err(if status.is_server_error()
-            || status == reqwest::StatusCode::TOO_MANY_REQUESTS
-            || status == reqwest::StatusCode::REQUEST_TIMEOUT
-        {
-            LicenseVerificationError::Temporary
-        } else {
-            LicenseVerificationError::Rejected
-        });
-    }
 
     if body.get("success").and_then(|value| value.as_bool()) != Some(true) {
         return Ok(None);
@@ -375,7 +425,11 @@ const LICENSE_BINDING_SALT: &[u8] = b"blaze-local-device-binding-v1";
 
 #[cfg(target_os = "windows")]
 fn machine_identifier() -> Result<String, String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
     let output = std::process::Command::new("reg.exe")
+        .creation_flags(CREATE_NO_WINDOW)
         .args([
             "query",
             r"HKLM\SOFTWARE\Microsoft\Cryptography",
@@ -793,6 +847,18 @@ mod license_binding_tests {
             Some(now + Duration::from_secs(1)),
             now
         ));
+    }
+}
+
+#[cfg(test)]
+mod export_extension_tests {
+    use super::*;
+
+    #[test]
+    fn extension_is_added_only_when_missing() {
+        assert_eq!(with_required_extension(PathBuf::from("a/out"), "mp4"), PathBuf::from("a/out.mp4"));
+        assert_eq!(with_required_extension(PathBuf::from("a/out.MP4"), "mp4"), PathBuf::from("a/out.MP4"));
+        assert_eq!(with_required_extension(PathBuf::from("a/my.video"), "mkv"), PathBuf::from("a/my.video.mkv"));
     }
 }
 
@@ -1537,6 +1603,7 @@ struct BlazeApp {
     export_rx: Receiver<ExportResult>,
     export_generation: u64,
     export_running: bool,
+    export_thread: Option<std::thread::JoinHandle<()>>,
     license_tx: Sender<LicenseResult>,
     license_rx: Receiver<LicenseResult>,
     license_verifying: bool,
@@ -1641,6 +1708,7 @@ impl BlazeApp {
             export_rx,
             export_generation: 0,
             export_running: false,
+            export_thread: None,
             license_tx,
             license_rx,
             license_verifying: false,
@@ -1687,11 +1755,7 @@ impl BlazeApp {
         let sender = self.keyframe_tx.clone();
         let repaint = ctx.clone();
         std::thread::spawn(move || {
-            let tools = std::env::current_exe()
-                .ok()
-                .and_then(|path| path.parent().map(|directory| directory.join("Bin")))
-                .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN"));
-            let engine = MediaEngine::new([tools]);
+            let engine = MediaEngine::default();
             let result = engine.detect_keyframes(&path.to_string_lossy());
             let _ = sender.send((generation, result));
             repaint.request_repaint();
@@ -1761,8 +1825,7 @@ impl BlazeApp {
         let tx = self.silence_tx.clone();
         let repaint = ctx.clone();
         std::thread::spawn(move || {
-            let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
-            let engine = MediaEngine::new([tools]);
+            let engine = MediaEngine::default();
             let result = blaze_engine::silence::detect_silence(&engine, &path.to_string_lossy(), config);
             let _ = tx.send((generation, result));
             repaint.request_repaint();
@@ -1845,8 +1908,7 @@ impl BlazeApp {
         let sender = self.probe_tx.clone();
         let repaint = ctx.clone();
         std::thread::spawn(move || {
-            let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
-            let engine = MediaEngine::new([tools]);
+            let engine = MediaEngine::default();
             let result = engine
                 .probe_media(&path.to_string_lossy())
                 .map(|info| (path, info));
@@ -1872,8 +1934,7 @@ impl BlazeApp {
                         let sender = self.waveform_tx.clone();
                         let repaint = ctx.clone();
                         std::thread::spawn(move || {
-                            let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
-                            let engine = MediaEngine::new([tools]);
+                            let engine = MediaEngine::default();
                             let result = engine.generate_waveform_with_progress(
                                 &path.to_string_lossy(),
                                 channels,
@@ -2060,9 +2121,8 @@ impl BlazeApp {
         let sender = self.export_tx.clone();
         let repaint = ctx.clone();
 
-        std::thread::spawn(move || {
-            let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
-            let engine = MediaEngine::new([tools]);
+        self.export_thread = Some(std::thread::spawn(move || {
+            let engine = MediaEngine::default();
             let result = export::export_blaze_video(&engine, &source, &output, duration, &ranges)
                 .map(|report| {
                     let message = format!(
@@ -2077,7 +2137,7 @@ impl BlazeApp {
                 });
             let _ = sender.send((generation, result));
             repaint.request_repaint();
-        });
+        }));
     }
 
     fn start_interchange_export(
@@ -2096,12 +2156,12 @@ impl BlazeApp {
         let sender = self.export_tx.clone();
         let repaint = ctx.clone();
 
-        std::thread::spawn(move || {
+        self.export_thread = Some(std::thread::spawn(move || {
             let result = export::export_interchange(format, &source, &info, &ranges, &output)
                 .map(|_| format!("Timeline export complete.\n{}", output.display()));
             let _ = sender.send((generation, result));
             repaint.request_repaint();
-        });
+        }));
     }
 
     fn poll_exports(&mut self) {
@@ -3326,7 +3386,9 @@ impl eframe::App for BlazeApp {
                                     .set_file_name(&filename)
                                     .save_file()
                                 {
-                                    self.start_blaze_export(output, ui.ctx());
+                                    if let Some(output) = confirm_extension_adjusted_output(output, &extension) {
+                                        self.start_blaze_export(output, ui.ctx());
+                                    }
                                 }
                             }
                         }
@@ -3382,7 +3444,9 @@ impl eframe::App for BlazeApp {
                                         .set_file_name(&filename)
                                         .save_file();
                                     if let Some(output) = output {
-                                        self.start_interchange_export(format, output, ui.ctx());
+                                        if let Some(output) = confirm_extension_adjusted_output(output, extension) {
+                                            self.start_interchange_export(format, output, ui.ctx());
+                                        }
                                     }
                                 }
                             }
@@ -4211,6 +4275,15 @@ impl eframe::App for BlazeApp {
     }
 
     fn on_exit(&mut self, gl: Option<&glow::Context>) {
+        // Stop any FFmpeg/FFprobe process that is still running, then give an
+        // export thread a moment to remove its temporary folder.
+        blaze_engine::terminate_running_tools();
+        if let Some(handle) = self.export_thread.take() {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while !handle.is_finished() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+        }
         self.playback.shutdown(gl);
     }
 }
@@ -4341,7 +4414,51 @@ fn format_time_millis(seconds: f64) -> String {
     }
 }
 
+/// Windows release builds have no console, so standard error is redirected to
+/// %APPDATA%\Blaze\blaze.log (cleared once it passes 1 MiB). Run
+/// Blaze with a debug build, or read this file, to diagnose problems.
+#[cfg(all(windows, not(debug_assertions)))]
+fn redirect_stderr_to_log_file() {
+    use std::os::windows::io::AsRawHandle;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn SetStdHandle(std_handle: u32, handle: *mut std::ffi::c_void) -> i32;
+    }
+    const STD_ERROR_HANDLE: u32 = -12_i32 as u32;
+    const MAX_LOG_BYTES: u64 = 1_048_576;
+
+    let Some(directory) = license_state_file()
+        .and_then(|path| path.parent().map(|parent| parent.to_path_buf()))
+    else {
+        return;
+    };
+    if fs::create_dir_all(&directory).is_err() {
+        return;
+    }
+    let path = directory.join("blaze.log");
+    let oversized = fs::metadata(&path).map(|metadata| metadata.len() > MAX_LOG_BYTES).unwrap_or(false);
+    let mut options = OpenOptions::new();
+    if oversized {
+        options.write(true).create(true).truncate(true);
+    } else {
+        options.append(true).create(true);
+    }
+    if let Ok(file) = options.open(&path) {
+        let handle = file.as_raw_handle();
+        // The file is leaked on purpose so the handle stays valid for the whole run.
+        unsafe {
+            SetStdHandle(STD_ERROR_HANDLE, handle as *mut std::ffi::c_void);
+        }
+        std::mem::forget(file);
+    }
+}
+
 fn main() -> eframe::Result {
+    #[cfg(all(windows, not(debug_assertions)))]
+    redirect_stderr_to_log_file();
+    eprintln!("Blaze {} starting", env!("CARGO_PKG_VERSION"));
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(APP_TITLE)
@@ -4351,12 +4468,21 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
 
-    eframe::run_native(
+    let result = eframe::run_native(
         APP_TITLE,
         options,
         Box::new(|cc| {
             let app = BlazeApp::new(cc)?;
             Ok(Box::new(app))
         }),
-    )
+    );
+    if let Err(error) = &result {
+        eprintln!("Blaze: startup failed: {error}");
+        rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Error)
+            .set_title("Blaze")
+            .set_description(format!("Blaze could not start.\n\n{error}"))
+            .show();
+    }
+    result
 }

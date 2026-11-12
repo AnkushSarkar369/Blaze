@@ -12,12 +12,7 @@ fn main() {
     println!("cargo:rerun-if-changed=assets/blaze.ico");
 
     if env::var("CARGO_CFG_TARGET_OS").ok().as_deref() == Some("windows") {
-        let mut resource = winres::WindowsResource::new();
-        resource.set_icon("assets/blaze.ico");
-        resource.set("ProductName", "Blaze");
-        resource.set("FileDescription", "Blaze Video Editor");
-        resource.set("OriginalFilename", "Blaze.exe");
-        resource.compile().expect("Failed to embed the Blaze Windows application icon");
+        embed_windows_resources();
         return;
     }
 
@@ -50,6 +45,21 @@ fn main() {
         }
     }
 }
+
+// winres is a Windows-only build dependency, so it is only referenced when the
+// build script itself is compiled on Windows (the release is built natively there).
+#[cfg(windows)]
+fn embed_windows_resources() {
+    let mut resource = winres::WindowsResource::new();
+    resource.set_icon("assets/blaze.ico");
+    resource.set("ProductName", "Blaze");
+    resource.set("FileDescription", "Blaze Video Editor");
+    resource.set("OriginalFilename", "Blaze.exe");
+    resource.compile().expect("Failed to embed the Blaze Windows application icon");
+}
+
+#[cfg(not(windows))]
+fn embed_windows_resources() {}
 
 #[cfg(target_os = "linux")]
 fn locate_libmpv() -> Option<PathBuf> {

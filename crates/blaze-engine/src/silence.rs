@@ -160,13 +160,13 @@ pub fn detect_silence(
     config: SilenceDetectionConfig,
 ) -> Result<Vec<SilenceInterval>, String> {
     let rate = SAMPLE_RATE.to_string();
-    let mut child = engine.command("ffmpeg")?
+    let mut child = crate::spawn_tracked(engine.command("ffmpeg")?
         .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-i", path,
             "-map", "0:a:0", "-vn", "-ac", "1", "-ar", rate.as_str(),
             "-f", "s16le", "pipe:1"])
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn().map_err(|error| format!("Could not start FFmpeg: {error}"))?;
+        .stderr(std::process::Stdio::null()))
+        .map_err(|error| format!("Could not start FFmpeg: {error}"))?;
     let mut stdout = child.stdout.take().ok_or_else(|| "Could not read decoded audio.".to_string())?;
     let mut bytes = Vec::new();
     stdout.read_to_end(&mut bytes).map_err(|error| {
