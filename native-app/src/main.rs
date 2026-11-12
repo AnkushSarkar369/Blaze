@@ -406,13 +406,22 @@ fn verify_gumroad_license(license_key: &str, increment_uses: bool) -> LicenseRes
 
 fn license_state_file() -> Option<PathBuf> {
     let config_dir = if cfg!(target_os = "windows") {
-        std::env::var_os("APPDATA").map(PathBuf::from)
+        std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("USERPROFILE")
+                    .map(|home| PathBuf::from(home).join("AppData").join("Roaming"))
+            })
     } else if cfg!(target_os = "macos") {
         std::env::var_os("HOME")
-            .map(|home| PathBuf::from(home).join("Library/Application Support"))
+            .map(|home| PathBuf::from(home).join("Library").join("Application Support"))
     } else {
+        // XDG_CONFIG_HOME must be absolute. An invalid relative value is
+        // ignored in favour of HOME/.config, as required by the XDG base-dir
+        // convention.
         std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
             .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
     }?;
 
