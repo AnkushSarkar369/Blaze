@@ -157,8 +157,8 @@ jobs:
           Blaze for Windows x64
 
           Extract the Blaze folder and run Blaze.exe.
-          Keep libmpv-2.dll beside Blaze.exe. Do not move it into Bin; Blaze.exe
-          cannot start without it.
+          Keep libmpv-2.dll and the other MPV runtime DLLs beside Blaze.exe.
+          Do not move any of them into Bin; Blaze.exe needs the MPV runtime to start.
           Keep the Bin folder intact. Its FFmpeg subfolder holds ffmpeg.exe, ffprobe.exe
           and their runtime DLLs, used for media analysis and exports.
           The Blaze logo is embedded in Blaze.exe.
