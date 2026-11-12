@@ -6,9 +6,19 @@ use std::{
 
 fn main() {
     println!("cargo:rerun-if-env-changed=BLAZE_LIBMPV_PATH");
+    println!("cargo:rerun-if-changed=assets/blaze.ico");
+
+    if env::var("CARGO_CFG_TARGET_OS").ok().as_deref() == Some("windows") {
+        let mut resource = winres::WindowsResource::new();
+        resource.set_icon("assets/blaze.ico");
+        resource.set("ProductName", "Blaze");
+        resource.set("FileDescription", "Blaze Video Editor");
+        resource.set("OriginalFilename", "Blaze.exe");
+        resource.compile().expect("Failed to embed the Blaze Windows application icon");
+        return;
+    }
 
     if env::var("CARGO_CFG_TARGET_OS").ok().as_deref() != Some("linux") {
-        println!("cargo:warning=Blaze's current libmpv linker shim is configured for Linux.");
         return;
     }
 

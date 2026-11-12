@@ -1687,7 +1687,10 @@ impl BlazeApp {
         let sender = self.keyframe_tx.clone();
         let repaint = ctx.clone();
         std::thread::spawn(move || {
-            let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN");
+            let tools = std::env::current_exe()
+                .ok()
+                .and_then(|path| path.parent().map(|directory| directory.join("Bin")))
+                .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../BIN"));
             let engine = MediaEngine::new([tools]);
             let result = engine.detect_keyframes(&path.to_string_lossy());
             let _ = sender.send((generation, result));

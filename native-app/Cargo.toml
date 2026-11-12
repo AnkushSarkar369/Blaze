@@ -16,3 +16,6 @@ sha2 = "0.10"
 egui_glow = "=0.37.0"
 glow = "=0.17.0"
 rsmpv = { version = "=0.2.1", features = ["render"] }
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"

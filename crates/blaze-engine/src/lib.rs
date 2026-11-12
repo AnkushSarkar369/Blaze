@@ -66,6 +66,7 @@ impl MediaEngine {
 
         if let Ok(executable) = env::current_exe() {
             if let Some(directory) = executable.parent() {
+                candidates.push(directory.join("Bin").join(&filename));
                 candidates.push(directory.join("BIN").join(&filename));
             }
         }
@@ -87,7 +88,7 @@ impl MediaEngine {
             .find(|candidate| candidate.is_file())
             .ok_or_else(|| {
                 format!(
-                    "Could not find {filename}. Put the media tools in ~/bin for development, or in the application's BIN folder."
+                    "Could not find {filename}. Put the media tools in ~/bin for development, or in the application's Bin folder."
                 )
             })
     }

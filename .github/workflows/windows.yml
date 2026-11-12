@@ -1,4 +1,4 @@
-name: Windows Build
+name: Windows Release
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   build-windows:
-    name: Build Windows x64
+    name: Build Windows x64 ZIP
     runs-on: windows-latest
 
     steps:
@@ -34,187 +34,107 @@ jobs:
             throw "Cargo.lock is stale or does not match the workspace manifests."
           }
 
-      - name: Download LGPL libmpv development package
+      - name: Download LGPL MPV runtime and development package
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-
-          $release = Invoke-RestMethod `
-            -Headers @{ "User-Agent" = "Blaze-Windows-CI" } `
-            -Uri "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest"
-
-          $asset = $release.assets |
-            Where-Object { $_.name -match '^mpv-dev-lgpl-x86_64-.*\.7z$' } |
-            Select-Object -First 1
-
-          if (-not $asset) {
-            throw "No x86_64 LGPL MPV development archive was found in the latest zhongfly/mpv-winbuild release."
-          }
+          $release = Invoke-RestMethod -Headers @{ "User-Agent" = "Blaze-Windows-CI" } -Uri "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest"
+          $asset = $release.assets | Where-Object { $_.name -match '^mpv-dev-lgpl-x86_64-.*\.7z$' } | Select-Object -First 1
+          if (-not $asset) { throw "No x86_64 LGPL MPV development archive was found." }
 
           $archive = Join-Path $env:RUNNER_TEMP "mpv-dev-lgpl.7z"
           $extract = Join-Path $env:RUNNER_TEMP "mpv-dev-lgpl"
           New-Item -ItemType Directory -Force -Path $extract | Out-Null
-
           Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archive
 
           $sevenZip = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
-          if (-not (Test-Path $sevenZip)) {
-            choco install 7zip --yes --no-progress
-          }
-          if (-not (Test-Path $sevenZip)) {
-            throw "7-Zip was not found after installation."
-          }
-
+          if (-not (Test-Path $sevenZip)) { choco install 7zip --yes --no-progress }
+          if (-not (Test-Path $sevenZip)) { throw "7-Zip was not found." }
           & $sevenZip x $archive "-o$extract" -y | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            throw "Could not extract the MPV development archive."
-          }
+          if ($LASTEXITCODE -ne 0) { throw "Could not extract the MPV archive." }
 
-          $mpvDll = Get-ChildItem -Path $extract -Filter "libmpv-2.dll" -File -Recurse |
-            Select-Object -First 1
-          if (-not $mpvDll) {
-            throw "The MPV archive did not contain libmpv-2.dll."
-          }
+          $mpvDll = Get-ChildItem -Path $extract -Filter "libmpv-2.dll" -File -Recurse | Select-Object -First 1
+          if (-not $mpvDll) { throw "The MPV archive did not contain libmpv-2.dll." }
 
-          # Locate the Visual Studio installation that actually contains the x64 C++ tools.
-          # Do not assume a VS year/edition path: the windows-latest image can change it.
           $programFilesX86 = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)
           $vswhere = Join-Path $programFilesX86 "Microsoft Visual Studio\Installer\vswhere.exe"
           if (-not (Test-Path $vswhere)) {
             $vswhereCommand = Get-Command "vswhere.exe" -ErrorAction SilentlyContinue
-            if ($vswhereCommand) {
-              $vswhere = $vswhereCommand.Source
-            }
+            if ($vswhereCommand) { $vswhere = $vswhereCommand.Source }
           }
-          if (-not (Test-Path $vswhere)) {
-            throw "vswhere.exe was not found. The Windows runner does not expose Visual Studio discovery."
-          }
-
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe was not found." }
           $vsRoot = & $vswhere -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($vsRoot | Select-Object -First 1))) {
-            throw "vswhere could not find a Visual Studio installation with the x64 MSVC C++ tools."
+            throw "Could not find the Visual Studio x64 MSVC C++ tools."
           }
           $vsRoot = ($vsRoot | Select-Object -First 1).Trim()
-
           $msvcRoot = Join-Path $vsRoot "VC\Tools\MSVC"
-          if (-not (Test-Path $msvcRoot)) {
-            throw "The Visual Studio installation has no MSVC tool directory: $msvcRoot"
-          }
+          $msvcToolDir = Get-ChildItem -Path $msvcRoot -Directory | Sort-Object Name -Descending | ForEach-Object {
+            $candidate = Join-Path $_.FullName "bin\Hostx64\x64"
+            if ((Test-Path (Join-Path $candidate "lib.exe")) -and (Test-Path (Join-Path $candidate "dumpbin.exe"))) { $candidate }
+          } | Select-Object -First 1
+          if (-not $msvcToolDir) { throw "Could not locate both lib.exe and dumpbin.exe." }
 
-          # Find lib.exe and dumpbin.exe in the same x64 host/target tool directory.
-          $msvcToolDir = Get-ChildItem -Path $msvcRoot -Directory |
-            Sort-Object Name -Descending |
-            ForEach-Object {
-              $candidate = Join-Path $_.FullName "bin\Hostx64\x64"
-              if ((Test-Path (Join-Path $candidate "lib.exe")) -and
-                  (Test-Path (Join-Path $candidate "dumpbin.exe"))) {
-                $candidate
-              }
-            } |
-            Select-Object -First 1
-
-          if (-not $msvcToolDir) {
-            throw "Could not find both lib.exe and dumpbin.exe under $msvcRoot\*\bin\Hostx64\x64."
-          }
-
-          $libExe = Join-Path $msvcToolDir "lib.exe"
-          $dumpbin = Join-Path $msvcToolDir "dumpbin.exe"
-          Write-Host "Using Visual Studio: $vsRoot"
-          Write-Host "Using MSVC tools: $msvcToolDir"
-
-          # Generate an MSVC import library from the MPV DLL's actual export table.
-          $dumpbinOutput = & $dumpbin /nologo /exports $mpvDll.FullName 2>&1
-          $dumpbinExitCode = $LASTEXITCODE
-          if ($dumpbinExitCode -ne 0) {
-            throw "dumpbin failed to inspect libmpv-2.dll: $($dumpbinOutput -join [Environment]::NewLine)"
-          }
-
-          $exports = @(
-            $dumpbinOutput |
-              ForEach-Object {
-                if ($_ -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)\s*$') {
-                  $Matches[1]
-                }
-              } |
-              Sort-Object -Unique
-          )
-          if ($exports.Count -eq 0) {
-            throw "dumpbin found no named exports in libmpv-2.dll. Output: $($dumpbinOutput -join [Environment]::NewLine)"
-          }
+          $dumpbinOutput = & (Join-Path $msvcToolDir "dumpbin.exe") /nologo /exports $mpvDll.FullName 2>&1
+          if ($LASTEXITCODE -ne 0) { throw "dumpbin failed to inspect libmpv-2.dll." }
+          $exports = @($dumpbinOutput | ForEach-Object {
+            if ($_ -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)\s*$') { $Matches[1] }
+          } | Sort-Object -Unique)
+          if ($exports.Count -eq 0) { throw "No named exports found in libmpv-2.dll." }
 
           $definitionFile = Join-Path $mpvDll.Directory.FullName "libmpv-2.def"
-          @("LIBRARY libmpv-2.dll", "EXPORTS") + $exports |
-            Set-Content -Path $definitionFile -Encoding ascii
-
+          @("LIBRARY libmpv-2.dll", "EXPORTS") + $exports | Set-Content -Path $definitionFile -Encoding ascii
           $importLibrary = Join-Path $mpvDll.Directory.FullName "mpv.lib"
-          $libOutput = & $libExe "/nologo" "/def:$definitionFile" "/name:libmpv-2.dll" "/out:$importLibrary" "/MACHINE:X64" 2>&1
-          $libExitCode = $LASTEXITCODE
-          if ($libExitCode -ne 0 -or -not (Test-Path $importLibrary)) {
-            throw "MSVC lib.exe failed to generate mpv.lib (exit $libExitCode): $($libOutput -join [Environment]::NewLine)"
+          $libOutput = & (Join-Path $msvcToolDir "lib.exe") "/nologo" "/def:$definitionFile" "/name:libmpv-2.dll" "/out:$importLibrary" "/MACHINE:X64" 2>&1
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $importLibrary)) {
+            throw "MSVC lib.exe could not generate mpv.lib: $($libOutput -join [Environment]::NewLine)"
           }
 
-          Write-Host "MPV exports discovered: $($exports.Count)"
-
-          "MPV_LIBRARY_DIR=$($mpvDll.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "MPV_DLL_DIR=$($mpvDll.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-          Write-Host "Using MPV DLL: $($mpvDll.FullName)"
-          Write-Host "Generated MSVC import library: $importLibrary"
+          "MPV_LIBRARY_DIR=$($mpvDll.Directory.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "MPV runtime directory: $($mpvDll.Directory.FullName)"
 
       - name: Download LGPL FFmpeg static build
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-
-          # BtbN publishes a static LGPL Windows x64 build. Static binaries avoid
-          # shipping a second set of FFmpeg runtime DLLs alongside ffmpeg.exe.
           $archive = Join-Path $env:RUNNER_TEMP "ffmpeg-win64-lgpl.zip"
           $extract = Join-Path $env:RUNNER_TEMP "ffmpeg-win64-lgpl"
           New-Item -ItemType Directory -Force -Path $extract | Out-Null
-
           $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip"
           Invoke-WebRequest -Uri $url -OutFile $archive
           Expand-Archive -Path $archive -DestinationPath $extract -Force
 
           $ffmpeg = Get-ChildItem -Path $extract -Filter "ffmpeg.exe" -File -Recurse | Select-Object -First 1
           $ffprobe = Get-ChildItem -Path $extract -Filter "ffprobe.exe" -File -Recurse | Select-Object -First 1
-          if (-not $ffmpeg -or -not $ffprobe) {
-            throw "The downloaded FFmpeg archive did not contain both ffmpeg.exe and ffprobe.exe."
-          }
-
           $license = Get-ChildItem -Path $extract -Filter "LICENSE.txt" -File -Recurse | Select-Object -First 1
-          if (-not $license) {
-            throw "The FFmpeg archive did not contain its license notice."
+          if (-not $ffmpeg -or -not $ffprobe -or -not $license) {
+            throw "FFmpeg archive is missing ffmpeg.exe, ffprobe.exe, or LICENSE.txt."
           }
-
-          "FFMPEG_BIN_DIR=$($ffmpeg.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "FFMPEG_LICENSE_FILE=$($license.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
+          "FFMPEG_BIN_DIR=$($ffmpeg.Directory.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "FFMPEG_LICENSE_FILE=$($license.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           & $ffmpeg.FullName -version
-          if ($LASTEXITCODE -ne 0) { throw "The bundled FFmpeg executable failed its version check." }
+          if ($LASTEXITCODE -ne 0) { throw "Downloaded FFmpeg failed its version check." }
           & $ffprobe.FullName -version
-          if ($LASTEXITCODE -ne 0) { throw "The bundled FFprobe executable failed its version check." }
+          if ($LASTEXITCODE -ne 0) { throw "Downloaded FFprobe failed its version check." }
 
       - name: Build Blaze
         run: cargo build --release --locked -p blaze-native
 
-      - name: Assemble Windows distribution
+      - name: Assemble and validate Windows ZIP
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-
-          $stage = Join-Path $env:GITHUB_WORKSPACE "dist\Blaze-Windows-x64"
+          $stage = Join-Path $env:GITHUB_WORKSPACE "dist\Blaze"
           $bin = Join-Path $stage "Bin"
+          if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
           New-Item -ItemType Directory -Force -Path $bin | Out-Null
 
           Copy-Item "target\release\blaze-native.exe" (Join-Path $stage "Blaze.exe")
+          if (-not (Test-Path (Join-Path $stage "Blaze.exe"))) { throw "Blaze.exe was not produced." }
 
-          # Windows loads statically imported DLLs from the executable directory
-          # before the application can configure any custom search path. Keep
-          # libmpv beside Blaze.exe; FFmpeg tools live in Bin and are discovered
-          # by blaze-engine from the adjacent BIN directory.
-          Get-ChildItem -Path $env:MPV_DLL_DIR -Filter "*.dll" -File |
-            Copy-Item -Destination $stage -Force
+          # Copy the full MPV runtime package because libmpv has transitive DLL dependencies.
+          Get-ChildItem -Path $env:MPV_LIBRARY_DIR -Filter "*.dll" -File | Copy-Item -Destination $bin -Force
+          if (-not (Test-Path (Join-Path $bin "libmpv-2.dll"))) { throw "Bin is missing libmpv-2.dll." }
 
           Copy-Item (Join-Path $env:FFMPEG_BIN_DIR "ffmpeg.exe") (Join-Path $bin "ffmpeg.exe")
           Copy-Item (Join-Path $env:FFMPEG_BIN_DIR "ffprobe.exe") (Join-Path $bin "ffprobe.exe")
@@ -223,43 +143,55 @@ jobs:
           @"
           Blaze for Windows x64
 
-          Extract the complete folder and run Blaze.exe.
-          Do not separate Blaze.exe from the DLL files beside it or remove the Bin folder.
-
-          Bundled media tools:
-          - Bin\ffmpeg.exe
-          - Bin\ffprobe.exe
-
-          libmpv-2.dll is kept beside Blaze.exe because Windows must locate this
-          linked runtime DLL before the application starts. FFmpeg and FFprobe are
-          discovered automatically from the adjacent Bin folder.
+          Extract the Blaze folder and run Blaze.exe.
+          Keep the Bin folder intact. It contains the MPV runtime DLLs and the
+          FFmpeg/FFprobe executables used for media analysis, playback preparation,
+          and exports. The Blaze logo is embedded in Blaze.exe.
 
           FFmpeg is an LGPL static build from BtbN/FFmpeg-Builds.
           See FFmpeg-LICENSE.txt for the included license notice.
           Build source: https://github.com/BtbN/FFmpeg-Builds
-          "@ | Set-Content -Path (Join-Path $stage "README.txt") -Encoding utf8
+          "@ | Set-Content -Path (Join-Path $stage "Readme.txt") -Encoding utf8
 
           $required = @(
             (Join-Path $stage "Blaze.exe"),
-            (Join-Path $stage "libmpv-2.dll"),
+            (Join-Path $stage "Readme.txt"),
+            (Join-Path $stage "FFmpeg-LICENSE.txt"),
+            (Join-Path $bin "libmpv-2.dll"),
             (Join-Path $bin "ffmpeg.exe"),
-            (Join-Path $bin "ffprobe.exe"),
-            (Join-Path $stage "FFmpeg-LICENSE.txt")
+            (Join-Path $bin "ffprobe.exe")
           )
           foreach ($file in $required) {
-            if (-not (Test-Path $file)) { throw "Required distribution file is missing: $file" }
+            if (-not (Test-Path $file)) { throw "Required release file is missing: $file" }
+            if ((Get-Item $file).Length -eq 0) { throw "Release file is empty: $file" }
           }
+          if (@(Get-ChildItem -Path $bin -Filter "*.dll" -File).Count -lt 1) { throw "MPV runtime DLLs were not staged." }
 
-          # Verify the exact staged executables, not just the downloaded originals.
           & (Join-Path $bin "ffmpeg.exe") -version
           if ($LASTEXITCODE -ne 0) { throw "Staged FFmpeg failed its version check." }
           & (Join-Path $bin "ffprobe.exe") -version
           if ($LASTEXITCODE -ne 0) { throw "Staged FFprobe failed its version check." }
 
-      - name: Upload Windows distribution
+          Compress-Archive -Path (Join-Path $stage "*") -DestinationPath (Join-Path $env:GITHUB_WORKSPACE "dist\windows.zip") -CompressionLevel Optimal -Force
+          $zip = Join-Path $env:GITHUB_WORKSPACE "dist\windows.zip"
+          if (-not (Test-Path $zip) -or (Get-Item $zip).Length -eq 0) { throw "windows.zip was not created." }
+
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $entries = @($archive.Entries | ForEach-Object { $_.FullName })
+            $mustHave = @("Blaze.exe", "Readme.txt", "Bin/ffmpeg.exe", "Bin/ffprobe.exe", "Bin/libmpv-2.dll", "FFmpeg-LICENSE.txt")
+            foreach ($entry in $mustHave) {
+              if ($entries -notcontains $entry) { throw "ZIP is missing $entry." }
+            }
+          } finally { $archive.Dispose() }
+
+          Write-Host "Windows ZIP created: $zip"
+          Get-ChildItem $stage -Recurse -File | Select-Object FullName,Length | Format-Table -AutoSize
+
+      - name: Upload Windows ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: Blaze-Windows-x64
-          path: dist/Blaze-Windows-x64/
+          name: windows
+          path: dist/windows.zip
           if-no-files-found: error
           retention-days: 14
