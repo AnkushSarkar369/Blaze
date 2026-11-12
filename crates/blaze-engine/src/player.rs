@@ -77,7 +77,7 @@ pub fn video_args(path: &Path, start: f64, fps: f64, max_frames: u32) -> Vec<OsS
             .iter()
             .map(OsString::from),
     );
-    args.push(filter);
+    args.push(filter.into());
     if max_frames > 0 {
         args.push("-frames:v".into());
         args.push(max_frames.to_string().into());
