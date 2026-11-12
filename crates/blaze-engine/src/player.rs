@@ -17,8 +17,12 @@
 //! index alone is a timestamp.
 
 use crate::frames::FrameSplitter;
-use std::io::Read;
-use std::sync::{Condvar, Mutex};
+use std::{
+    ffi::OsString,
+    io::Read,
+    path::Path,
+    sync::{Condvar, Mutex},
+};
 
 pub const END_MARKER: u32 = 0xFFFF_FFFF;
 pub const ERROR_MARKER: u32 = 0xFFFF_FFFE;
@@ -45,7 +49,7 @@ pub fn encode_marker(marker: u32, text: &str) -> Vec<u8> {
 
 /// Arguments for an FFmpeg run that streams preview frames from `start`.
 /// `max_frames == 0` means "until the end of the file".
-pub fn video_args(path: &str, start: f64, fps: f64, max_frames: u32) -> Vec<String> {
+pub fn video_args(path: &Path, start: f64, fps: f64, max_frames: u32) -> Vec<OsString> {
     let fps = if fps.is_finite() { fps.clamp(1.0, 60.0) } else { 30.0 };
     let start = if start.is_finite() { start.max(0.0) } else { 0.0 };
     let filter = format!(
@@ -55,7 +59,7 @@ pub fn video_args(path: &str, start: f64, fps: f64, max_frames: u32) -> Vec<Stri
          format=yuvj420p"
     );
 
-    let mut args: Vec<String> = [
+    let mut args: Vec<OsString> = [
         "-hide_banner",
         "-nostdin",
         "-loglevel",
@@ -63,23 +67,25 @@ pub fn video_args(path: &str, start: f64, fps: f64, max_frames: u32) -> Vec<Stri
         "-ss",
     ]
     .iter()
-    .map(|value| value.to_string())
+    .map(OsString::from)
     .collect();
-    args.push(format!("{start:.3}"));
-    args.extend(["-i".to_string(), path.to_string()]);
+    args.push(format!("{start:.3}").into());
+    args.push("-i".into());
+    args.push(path.as_os_str().to_os_string());
     args.extend(
         ["-map", "0:v:0", "-an", "-sn", "-dn", "-vf"]
             .iter()
-            .map(|value| value.to_string()),
+            .map(OsString::from),
     );
     args.push(filter);
     if max_frames > 0 {
-        args.extend(["-frames:v".to_string(), max_frames.to_string()]);
+        args.push("-frames:v".into());
+        args.push(max_frames.to_string().into());
     }
     args.extend(
         ["-c:v", "mjpeg", "-q:v", "4", "-f", "image2pipe", "pipe:1"]
             .iter()
-            .map(|value| value.to_string()),
+            .map(OsString::from),
     );
     args
 }
@@ -264,18 +270,18 @@ mod tests {
 
     #[test]
     fn args_are_well_formed() {
-        let args = video_args("/tmp/a b.mp4", 12.3456, 29.97, 1);
+        let args = video_args(Path::new("/tmp/a b.mp4"), 12.3456, 29.97, 1);
         let position = |needle: &str| args.iter().position(|arg| arg == needle).unwrap();
         assert_eq!(args[position("-ss") + 1], "12.346");
         assert_eq!(args[position("-i") + 1], "/tmp/a b.mp4");
         assert_eq!(args[position("-frames:v") + 1], "1");
-        assert!(args[position("-vf") + 1].starts_with("fps=fps=29.970000:start_time=0,"));
+        assert!(args[position("-vf") + 1].to_string_lossy().starts_with("fps=fps=29.970000:start_time=0,"));
         assert_eq!(args.last().unwrap(), "pipe:1");
 
-        let unlimited = video_args("x.mp4", -4.0, f64::NAN, 0);
-        assert!(!unlimited.contains(&"-frames:v".to_string()));
+        let unlimited = video_args(Path::new("x.mp4"), -4.0, f64::NAN, 0);
+        assert!(!unlimited.iter().any(|arg| arg == "-frames:v"));
         assert_eq!(unlimited[unlimited.iter().position(|a| a == "-ss").unwrap() + 1], "0.000");
-        assert!(unlimited.iter().any(|a| a.starts_with("fps=fps=30.000000")));
+        assert!(unlimited.iter().any(|arg| arg.to_string_lossy().starts_with("fps=fps=30.000000")));
     }
 
     #[test]
