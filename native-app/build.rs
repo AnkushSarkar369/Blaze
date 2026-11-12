@@ -22,6 +22,7 @@ fn main() {
         return;
     }
 
+    #[cfg(unix)]
     let library = locate_libmpv().unwrap_or_else(|| {
         panic!(
             "libmpv runtime library was not found. Install it with your system package manager (Fedora: sudo dnf install mpv-libs)."
