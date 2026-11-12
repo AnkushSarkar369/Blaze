@@ -70,7 +70,9 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
     let ffprobe_dir = ffprobe.parent().expect("ffprobe has a parent directory");
 
     let temp = TestDir::new();
-    let media = temp.0.join("sample.mkv");
+    let media_dir = temp.0.join("media with spaces ü");
+    fs::create_dir_all(&media_dir).expect("create media directory");
+    let media = media_dir.join("sample input ü.mkv");
 
     // Use FFmpeg's built-in lavfi sources and MPEG-4/PCM codecs to avoid
     // relying on optional H.264 encoders in the test runner.
@@ -124,6 +126,14 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
     assert!(keyframes.len() >= 4, "keyframes: {keyframes:?}");
     assert!(keyframes[0].abs() < 0.1);
 
+    let silence = blaze_engine::silence::detect_silence(
+        &engine,
+        &media,
+        blaze_engine::silence::SilenceDetectionConfig::default(),
+    )
+    .expect("detect silence");
+    assert!(silence.is_empty(), "continuous test tone should not contain silence: {silence:?}");
+
     let mut waveform_progress = Vec::new();
     let waveform = engine
         .generate_waveform_with_progress(&media, 2, info.duration, |progress| {
@@ -148,9 +158,9 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
     // Exercise the real stream-copy export with its workspace in the output
     // directory. Seed an existing destination so the test also verifies the
     // final rename replaces a previously confirmed output file.
-    let export_dir = temp.0.join("exports");
+    let export_dir = temp.0.join("exports with spaces");
     fs::create_dir_all(&export_dir).expect("create export directory");
-    let export_path = export_dir.join("cut.mkv");
+    let export_path = export_dir.join("cut output ü.mkv");
     fs::write(&export_path, b"previous export").expect("seed existing export");
     let report = blaze_engine::export::export_blaze_video(
         &engine,
@@ -168,6 +178,41 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
             .expect("list export directory")
             .all(|entry| !entry.unwrap().file_name().to_string_lossy().contains("_blaze_export_")),
         "temporary export workspace should be removed"
+    );
+
+    let timeline_path = export_dir.join("timeline #% ü.otio");
+    blaze_engine::export::export_interchange(
+        blaze_engine::export::InterchangeFormat::OpenTimelineIo,
+        &media,
+        &info,
+        &[(0.4, 0.8)],
+        &timeline_path,
+    )
+    .expect("export OpenTimelineIO timeline");
+    let timeline = fs::read_to_string(&timeline_path).expect("read timeline");
+    let timeline_json: serde_json::Value =
+        serde_json::from_str(&timeline).expect("parse timeline JSON");
+    let video_track = &timeline_json["tracks"]["children"][0];
+    let source_url = video_track["children"][0]["media_references"]["DEFAULT_MEDIA"]["target_url"]
+        .as_str()
+        .expect("timeline source URL");
+    assert!(source_url.contains("%C3%BC"), "source URL must percent-encode UTF-8: {source_url}");
+
+    let original_metadata = fs::metadata(&media).expect("source metadata before overwrite");
+    assert!(
+        blaze_engine::export::export_interchange(
+            blaze_engine::export::InterchangeFormat::OpenTimelineIo,
+            &media,
+            &info,
+            &[(0.4, 0.8)],
+            &media,
+        )
+        .is_err(),
+        "interchange export must not overwrite source media"
+    );
+    assert_eq!(
+        fs::metadata(&media).expect("source metadata after overwrite attempt").len(),
+        original_metadata.len()
     );
 
     let mut command = engine
