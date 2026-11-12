@@ -5,7 +5,7 @@ use blaze_engine::{
 use std::{
     env,
     fs,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Command, Stdio},
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -70,8 +70,9 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
     let ffprobe_dir = ffprobe.parent().expect("ffprobe has a parent directory");
 
     let temp = TestDir::new();
-    let media = temp.0.join("sample.mkv");
-    let media_arg = media.to_str().expect("temporary media path is UTF-8");
+    let media_dir = temp.0.join("media with spaces ü");
+    fs::create_dir_all(&media_dir).expect("create media directory");
+    let media = media_dir.join("sample input ü.mkv");
 
     // Use FFmpeg's built-in lavfi sources and MPEG-4/PCM codecs to avoid
     // relying on optional H.264 encoders in the test runner.
@@ -98,8 +99,8 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
             "-c:a",
             "pcm_s16le",
             "-shortest",
-            media_arg,
         ])
+        .arg(&media)
         .output()
         .expect("run FFmpeg to create integration media");
     assert!(
@@ -113,7 +114,7 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
         ffprobe_dir.to_path_buf(),
     ]);
 
-    let info = engine.probe_media(media_arg).expect("probe media");
+    let info = engine.probe_media(&media).expect("probe media");
     assert!((info.duration - 2.0).abs() < 0.15, "duration: {}", info.duration);
     assert_eq!(info.width, Some(160));
     assert_eq!(info.height, Some(90));
@@ -121,13 +122,21 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
     assert!(info.has_audio);
     assert_eq!(info.audio_codec.as_deref(), Some("pcm_s16le"));
 
-    let keyframes = engine.detect_keyframes(media_arg).expect("detect keyframes");
+    let keyframes = engine.detect_keyframes(&media).expect("detect keyframes");
     assert!(keyframes.len() >= 4, "keyframes: {keyframes:?}");
     assert!(keyframes[0].abs() < 0.1);
 
+    let silence = blaze_engine::silence::detect_silence(
+        &engine,
+        &media,
+        blaze_engine::silence::SilenceDetectionConfig::default(),
+    )
+    .expect("detect silence");
+    assert!(silence.is_empty(), "continuous test tone should not contain silence: {silence:?}");
+
     let mut waveform_progress = Vec::new();
     let waveform = engine
-        .generate_waveform_with_progress(media_arg, 2, info.duration, |progress| {
+        .generate_waveform_with_progress(&media, 2, info.duration, |progress| {
             waveform_progress.push(progress);
         })
         .expect("generate waveform");
@@ -140,7 +149,7 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
     assert!(read_u32(&waveform, 12) > 300);
 
     let playback_path = engine
-        .prepare_audio(&temp.0, 1, media_arg)
+        .prepare_audio(&temp.0, 1, &media)
         .expect("prepare playback audio");
     let playback = fs::read(&playback_path).expect("read prepared WAV");
     assert!(playback.starts_with(b"RIFF"));
@@ -149,9 +158,9 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
     // Exercise the real stream-copy export with its workspace in the output
     // directory. Seed an existing destination so the test also verifies the
     // final rename replaces a previously confirmed output file.
-    let export_dir = temp.0.join("exports");
+    let export_dir = temp.0.join("exports with spaces");
     fs::create_dir_all(&export_dir).expect("create export directory");
-    let export_path = export_dir.join("cut.mkv");
+    let export_path = export_dir.join("cut output ü.mkv");
     fs::write(&export_path, b"previous export").expect("seed existing export");
     let report = blaze_engine::export::export_blaze_video(
         &engine,
@@ -171,8 +180,43 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
         "temporary export workspace should be removed"
     );
 
+    let timeline_path = export_dir.join("timeline #% ü.otio");
+    blaze_engine::export::export_interchange(
+        blaze_engine::export::InterchangeFormat::OpenTimelineIo,
+        &media,
+        &info,
+        &[(0.4, 0.8)],
+        &timeline_path,
+    )
+    .expect("export OpenTimelineIO timeline");
+    let timeline = fs::read_to_string(&timeline_path).expect("read timeline");
+    let timeline_json: serde_json::Value =
+        serde_json::from_str(&timeline).expect("parse timeline JSON");
+    let video_track = &timeline_json["tracks"]["children"][0];
+    let source_url = video_track["children"][0]["media_references"]["DEFAULT_MEDIA"]["target_url"]
+        .as_str()
+        .expect("timeline source URL");
+    assert!(source_url.contains("%C3%BC"), "source URL must percent-encode UTF-8: {source_url}");
+
+    let original_metadata = fs::metadata(&media).expect("source metadata before overwrite");
+    assert!(
+        blaze_engine::export::export_interchange(
+            blaze_engine::export::InterchangeFormat::OpenTimelineIo,
+            &media,
+            &info,
+            &[(0.4, 0.8)],
+            &media,
+        )
+        .is_err(),
+        "interchange export must not overwrite source media"
+    );
+    assert_eq!(
+        fs::metadata(&media).expect("source metadata after overwrite attempt").len(),
+        original_metadata.len()
+    );
+
     let mut command = engine
-        .preview_command(media_arg, 0.0, 25.0, 3)
+        .preview_command(&media, 0.0, 25.0, 3)
         .expect("build preview command");
     command.stdout(Stdio::piped()).stderr(Stdio::null());
     let mut child = command.spawn().expect("start preview FFmpeg");
@@ -196,5 +240,5 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
 
     // The method accepts a path object rather than assuming UTF-8 for the
     // scratch directory itself.
-    assert!(Path::new(&playback_path).exists());
+    assert!(playback_path.exists());
 }

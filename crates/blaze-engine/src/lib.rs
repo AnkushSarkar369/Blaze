@@ -71,7 +71,25 @@ impl DerefMut for TrackedChild {
 
 impl Drop for TrackedChild {
     fn drop(&mut self) {
+        // A worker can exit early while FFmpeg is still running (for example,
+        // after a pipe read error). Never unregister a live child and leave it
+        // orphaned when the UI closes.
+        match self.child.try_wait() {
+            Ok(Some(_)) => {}
+            _ => {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+            }
+        }
         unregister_tool(self.id);
+    }
+}
+
+struct ToolRegistration(u32);
+
+impl Drop for ToolRegistration {
+    fn drop(&mut self) {
+        unregister_tool(self.0);
     }
 }
 
@@ -92,9 +110,8 @@ pub(crate) fn output_tracked(command: &mut Command) -> std::io::Result<Output> {
         .spawn()?;
     let id = child.id();
     register_tool(id);
-    let result = child.wait_with_output();
-    unregister_tool(id);
-    result
+    let _registration = ToolRegistration(id);
+    child.wait_with_output()
 }
 
 /// Stops every FFmpeg/FFprobe process that is still running. Intended to be
@@ -158,6 +175,13 @@ impl MediaEngine {
         }
     }
 
+    fn find_on_path(tool: &str, search_path: &std::ffi::OsStr) -> Option<PathBuf> {
+        let filename = Self::binary_filename(tool);
+        env::split_paths(search_path)
+            .map(|directory| directory.join(&filename))
+            .find(|candidate| candidate.is_file())
+    }
+
     fn resolve_tool(&self, tool: &str) -> Result<PathBuf, String> {
         let filename = Self::binary_filename(tool);
         let mut candidates = Vec::new();
@@ -168,6 +192,16 @@ impl MediaEngine {
                 candidates.push(directory.join("Bin").join("FFmpeg").join(&filename));
                 candidates.push(directory.join("BIN").join(&filename));
                 candidates.push(directory.join("BIN").join("FFmpeg").join(&filename));
+
+                // Standard macOS app bundles place non-executable support files
+                // under Contents/Resources. Accept that layout as well as the
+                // executable-adjacent Bin layout used by development packages.
+                if cfg!(target_os = "macos") {
+                    if let Some(contents) = directory.parent().filter(|path| path.file_name().is_some_and(|name| name == "Contents")) {
+                        candidates.push(contents.join("Resources").join("Bin").join(&filename));
+                        candidates.push(contents.join("Resources").join("Bin").join("FFmpeg").join(&filename));
+                    }
+                }
 
                 // Development only: when running from Cargo's target/<profile>
                 // folder, use the repository-level BIN folder. Packaged builds
@@ -186,6 +220,24 @@ impl MediaEngine {
         for directory in &self.extra_tool_dirs {
             candidates.push(directory.join(&filename));
         }
+
+        // Respect system package managers (Linux distributions and Homebrew)
+        // after application-bundled and explicitly configured locations.
+        if let Some(search_path) = env::var_os("PATH") {
+            if let Some(found) = Self::find_on_path(tool, &search_path) {
+                candidates.push(found);
+            }
+        }
+
+        // GUI applications launched from Finder do not necessarily inherit
+        // the interactive shell's Homebrew PATH. Probe both standard prefixes
+        // explicitly so a normal Homebrew install still works in a .app launch.
+        #[cfg(target_os = "macos")]
+        candidates.extend(
+            ["/opt/homebrew/bin", "/usr/local/bin"]
+                .into_iter()
+                .map(|directory| PathBuf::from(directory).join(&filename)),
+        );
 
         let home = env::var_os("HOME")
             .or_else(|| env::var_os("USERPROFILE"))
@@ -216,6 +268,9 @@ impl MediaEngine {
         {
             let directory = executable.parent().unwrap_or_else(|| Path::new("."));
             let mut library_paths = vec![directory.to_path_buf(), directory.join("lib")];
+            if let Some(prefix) = directory.parent() {
+                library_paths.push(prefix.join("lib"));
+            }
             if let Some(existing) = env::var_os("LD_LIBRARY_PATH") {
                 library_paths.extend(env::split_paths(&existing));
             }
@@ -228,6 +283,9 @@ impl MediaEngine {
         {
             let directory = executable.parent().unwrap_or_else(|| Path::new("."));
             let mut library_paths = vec![directory.to_path_buf(), directory.join("lib")];
+            if let Some(prefix) = directory.parent() {
+                library_paths.push(prefix.join("lib"));
+            }
             if let Some(existing) = env::var_os("DYLD_LIBRARY_PATH") {
                 library_paths.extend(env::split_paths(&existing));
             }
@@ -253,12 +311,14 @@ impl MediaEngine {
         Ok(command)
     }
 
-    fn run_tool(
+
+    fn run_tool_with_path(
         &self,
         tool: &str,
         args: &[&str],
+        path: &Path,
     ) -> Result<std::process::Output, String> {
-        let output = output_tracked(self.command(tool)?.args(args))
+        let output = output_tracked(self.command(tool)?.args(args).arg(path))
             .map_err(|error| format!("Could not start {tool}: {error}"))?;
 
         if !output.status.success() {
@@ -271,8 +331,8 @@ impl MediaEngine {
         Ok(output)
     }
 
-    pub fn probe_media(&self, path: &str) -> Result<MediaInfo, String> {
-        let output = self.run_tool(
+    pub fn probe_media(&self, path: &Path) -> Result<MediaInfo, String> {
+        let output = self.run_tool_with_path(
             "ffprobe",
             &[
                 "-v",
@@ -281,8 +341,8 @@ impl MediaEngine {
                 "format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,duration,channels,sample_rate",
                 "-of",
                 "json",
-                path,
             ],
+            path,
         )?;
 
         let document: Value = serde_json::from_slice(&output.stdout)
@@ -331,8 +391,8 @@ impl MediaEngine {
         })
     }
 
-    pub fn detect_keyframes(&self, path: &str) -> Result<Vec<f64>, String> {
-        let output = self.run_tool(
+    pub fn detect_keyframes(&self, path: &Path) -> Result<Vec<f64>, String> {
+        let output = self.run_tool_with_path(
             "ffprobe",
             &[
                 "-v",
@@ -345,8 +405,8 @@ impl MediaEngine {
                 "frame=best_effort_timestamp_time",
                 "-of",
                 "csv=p=0",
-                path,
             ],
+            path,
         )?;
 
         let timestamps = String::from_utf8_lossy(&output.stdout)
@@ -362,7 +422,7 @@ impl MediaEngine {
     /// Generates waveform peaks while reporting decoded-audio progress from 0.0 to 1.0.
     pub fn generate_waveform_with_progress(
         &self,
-        path: &str,
+        path: &Path,
         channels: usize,
         duration_seconds: f64,
         mut on_progress: impl FnMut(f32),
@@ -379,15 +439,11 @@ impl MediaEngine {
             0
         };
 
-        let mut child = spawn_tracked(self
-            .command("ffmpeg")?
+        let mut command = self.command("ffmpeg")?;
+        command
+            .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-i"])
+            .arg(path)
             .args([
-                "-hide_banner",
-                "-nostdin",
-                "-loglevel",
-                "error",
-                "-i",
-                path,
                 "-map",
                 "0:a:0",
                 "-vn",
@@ -398,9 +454,9 @@ impl MediaEngine {
                 "-f",
                 "s16le",
                 "pipe:1",
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null()))
+            ]);
+
+        let mut child = spawn_tracked(command.stdout(Stdio::piped()).stderr(Stdio::null()))
             .map_err(|error| format!("Could not start FFmpeg: {error}"))?;
 
         let mut stdout = child
@@ -462,8 +518,8 @@ impl MediaEngine {
         &self,
         dir: &Path,
         number: u32,
-        path: &str,
-    ) -> Result<String, String> {
+        path: &Path,
+    ) -> Result<PathBuf, String> {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let name = entry.file_name();
@@ -475,47 +531,32 @@ impl MediaEngine {
         }
 
         let output = dir.join(format!("playback-{number}.wav"));
-        let output_arg = output
-            .to_str()
-            .ok_or_else(|| "The temporary folder path is not valid UTF-8.".to_string())?;
+        let mut command = self.command("ffmpeg")?;
+        command
+            .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-i"])
+            .arg(path)
+            .args(["-map", "0:a:0", "-vn", "-ac", "2", "-ar", "48000", "-c:a", "pcm_s16le"])
+            .arg(&output);
 
-        let result = self.run_tool(
-            "ffmpeg",
-            &[
-                "-hide_banner",
-                "-nostdin",
-                "-loglevel",
-                "error",
-                "-y",
-                "-i",
-                path,
-                "-map",
-                "0:a:0",
-                "-vn",
-                "-ac",
-                "2",
-                "-ar",
-                "48000",
-                "-c:a",
-                "pcm_s16le",
-                output_arg,
-            ],
-        );
+        let result = output_tracked(&mut command)
+            .map_err(|error| format!("Could not start FFmpeg: {error}"))?;
 
-        match result {
-            Ok(_) => Ok(output_arg.to_string()),
-            Err(error) => {
-                let _ = std::fs::remove_file(&output);
-                Err(error)
-            }
+        if !result.status.success() {
+            let _ = std::fs::remove_file(&output);
+            return Err(format!(
+                "FFmpeg could not prepare playback audio: {}",
+                String::from_utf8_lossy(&result.stderr).trim()
+            ));
         }
+
+        Ok(output)
     }
 
     /// Builds the existing MJPEG preview command. The caller controls
     /// stdin/stdout/stderr and process lifetime.
     pub fn preview_command(
         &self,
-        path: &str,
+        path: &Path,
         start: f64,
         fps: f64,
         max_frames: u32,
@@ -541,6 +582,33 @@ fn parse_rate(value: Option<&Value>) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_lookup_honours_search_path_on_each_platform() {
+        static NEXT_TEMP: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(0);
+        let id = NEXT_TEMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let directory = env::temp_dir().join(format!(
+            "blaze-path-test-{}-{id}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let filename = MediaEngine::binary_filename("ffmpeg");
+        let executable = directory.join(filename);
+        std::fs::write(&executable, b"test").unwrap();
+
+        let search_path = env::join_paths([&directory]).unwrap();
+        assert_eq!(
+            MediaEngine::find_on_path("ffmpeg", &search_path),
+            Some(executable.clone())
+        );
+        assert_eq!(
+            MediaEngine::find_on_path("ffprobe", &search_path),
+            None
+        );
+
+        let _ = std::fs::remove_dir_all(directory);
+    }
 
     #[test]
     fn frame_rate_parser_handles_normal_and_invalid_rates() {

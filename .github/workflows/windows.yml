@@ -3,13 +3,17 @@ name: Windows Release
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
+      - "audit/**"
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
       - "crates/**"
       - "native-app/**"
       - ".github/workflows/windows.yml"
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -39,9 +43,17 @@ jobs:
 
       - name: Download LGPL MPV runtime and development package
         shell: pwsh
+        env:
+          # Authenticated requests avoid the shared, unauthenticated Actions-runner API quota.
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = "Stop"
-          $release = Invoke-RestMethod -Headers @{ "User-Agent" = "Blaze-Windows-CI" } -Uri "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest"
+          $headers = @{
+            "Accept" = "application/vnd.github+json"
+            "User-Agent" = "Blaze-Windows-CI"
+            "Authorization" = "Bearer $env:GH_TOKEN"
+          }
+          $release = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest"
           $asset = $release.assets | Where-Object { $_.name -match '^mpv-dev-lgpl-x86_64-.*\.7z$' } | Select-Object -First 1
           if (-not $asset) { throw "No x86_64 LGPL MPV development archive was found." }
 

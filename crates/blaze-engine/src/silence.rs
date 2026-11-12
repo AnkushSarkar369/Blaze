@@ -156,14 +156,17 @@ pub fn detect_silence_pcm(
 /// Decode the first audio stream to mono 24 kHz PCM and run silence analysis.
 pub fn detect_silence(
     engine: &crate::MediaEngine,
-    path: &str,
+    path: &std::path::Path,
     config: SilenceDetectionConfig,
 ) -> Result<Vec<SilenceInterval>, String> {
     let rate = SAMPLE_RATE.to_string();
-    let mut child = crate::spawn_tracked(engine.command("ffmpeg")?
-        .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-i", path,
-            "-map", "0:a:0", "-vn", "-ac", "1", "-ar", rate.as_str(),
-            "-f", "s16le", "pipe:1"])
+    let mut command = engine.command("ffmpeg")?;
+    command
+        .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-i"])
+        .arg(path)
+        .args(["-map", "0:a:0", "-vn", "-ac", "1", "-ar", rate.as_str(),
+            "-f", "s16le", "pipe:1"]);
+    let mut child = crate::spawn_tracked(command
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null()))
         .map_err(|error| format!("Could not start FFmpeg: {error}"))?;

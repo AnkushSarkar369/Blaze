@@ -2,10 +2,14 @@
 //! Cut regions are DELETE ranges; exporters build the complementary KEEP ranges.
 
 use std::{
-    fs,
+    fs::{self, OpenOptions},
+    io::Write,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
+
+#[cfg(unix)]
+use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
 
 use crate::{output_tracked, MediaEngine, MediaInfo};
 
@@ -88,10 +92,38 @@ fn xml_escape(value: &str) -> String {
         .replace('"', "&quot;").replace('\'', "&apos;")
 }
 
-fn file_url(path: &Path) -> String {
+/// Convert a filesystem path into a percent-encoded file URL for NLE interchange
+/// and libmpv. On Unix, encode the original path bytes rather than a lossy UTF-8
+/// conversion so non-UTF-8 filenames remain addressable.
+pub fn file_url(path: &Path) -> String {
     let absolute = if path.is_absolute() { path.to_path_buf() }
         else { std::env::current_dir().unwrap_or_default().join(path) };
-    file_url_from_str(&absolute.to_string_lossy(), cfg!(windows))
+
+    #[cfg(unix)]
+    {
+        file_url_from_bytes(absolute.as_os_str().as_bytes())
+    }
+    #[cfg(not(unix))]
+    {
+        file_url_from_str(&absolute.to_string_lossy(), cfg!(windows))
+    }
+}
+
+#[cfg(unix)]
+fn file_url_from_bytes(raw: &[u8]) -> String {
+    let mut encoded = String::with_capacity(raw.len());
+    for byte in raw {
+        if byte.is_ascii_alphanumeric() || b"/-_.~:".contains(byte) {
+            encoded.push(*byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    if encoded.starts_with('/') {
+        format!("file://{encoded}")
+    } else {
+        format!("file:///{encoded}")
+    }
 }
 
 /// Builds a file:// URL from an absolute path string. On Windows, backslashes
@@ -99,6 +131,7 @@ fn file_url(path: &Path) -> String {
 /// `C:\My Videos\a.mp4` becomes `file:///C:/My%20Videos/a.mp4` and a UNC path
 /// `\\server\share\a.mp4` becomes `file://server/share/a.mp4`. On other
 /// platforms a backslash is an ordinary file-name character and is encoded.
+#[cfg(any(not(unix), test))]
 fn file_url_from_str(raw: &str, windows: bool) -> String {
     let normalised: String = if windows {
         let trimmed = if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
@@ -133,6 +166,19 @@ fn file_url_from_str(raw: &str, windows: bool) -> String {
 /// (relative vs absolute, symlinks, and letter case or `\\?\` prefixes on Windows).
 /// The output file may not exist yet, so its folder is resolved instead.
 fn is_same_file(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+
+    if let (Ok(a_meta), Ok(b_meta)) = (fs::metadata(a), fs::metadata(b)) {
+        #[cfg(unix)]
+        {
+            if a_meta.dev() == b_meta.dev() && a_meta.ino() == b_meta.ino() {
+                return true;
+            }
+        }
+    }
+
     fn resolve(path: &Path) -> Option<PathBuf> {
         if let Ok(resolved) = fs::canonicalize(path) { return Some(resolved); }
         let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
@@ -142,7 +188,7 @@ fn is_same_file(a: &Path, b: &Path) -> bool {
         (Some(a), Some(b)) => if cfg!(windows) {
             a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
         } else { a == b },
-        _ => a == b,
+        _ => false,
     }
 }
 
@@ -206,8 +252,8 @@ fn make_workspace(parent: &Path, stem: &str) -> Result<Workspace, String> {
     Err("Could not allocate a unique export workspace.".into())
 }
 
-fn run(engine: &MediaEngine, args: &[&str], description: &str) -> Result<(), String> {
-    let output = output_tracked(engine.command("ffmpeg")?.args(args))
+fn run(command: &mut std::process::Command, description: &str) -> Result<(), String> {
+    let output = output_tracked(command)
         .map_err(|error| format!("Could not start FFmpeg while {description}: {error}"))?;
     if !output.status.success() {
         return Err(format!("FFmpeg failed while {description}: {}",
@@ -217,11 +263,13 @@ fn run(engine: &MediaEngine, args: &[&str], description: &str) -> Result<(), Str
 }
 
 fn probe_duration(engine: &MediaEngine, path: &Path) -> Result<f64, String> {
-    let path_arg = path.to_string_lossy();
-    let output = output_tracked(engine.command("ffprobe")?.args([
-        "-v", "error", "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1", path_arg.as_ref(),
-    ])).map_err(|error| format!("Could not start FFprobe: {error}"))?;
+    let mut command = engine.command("ffprobe")?;
+    command
+        .args(["-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1"])
+        .arg(path);
+    let output = output_tracked(&mut command)
+        .map_err(|error| format!("Could not start FFprobe: {error}"))?;
     if !output.status.success() {
         return Err(format!("FFprobe could not verify the exported video: {}",
             String::from_utf8_lossy(&output.stderr).trim()));
@@ -266,16 +314,19 @@ pub fn export_blaze_video(
         let clip = workspace.0.join(format!("clip_{:04}.{extension}", index + 1));
         let start = segment.source_in as f64 * rate.denominator as f64 / rate.numerator as f64;
         let length = segment.duration() as f64 * rate.denominator as f64 / rate.numerator as f64;
-        let source_arg = source.to_string_lossy();
-        let clip_arg = clip.to_string_lossy();
         let start_arg = format!("{start:.9}");
         let length_arg = format!("{length:.9}");
-        run(engine, &[
-            "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
-            "-ss", &start_arg, "-i", source_arg.as_ref(), "-t", &length_arg,
-            "-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero",
-            clip_arg.as_ref(),
-        ], &format!("extracting kept segment {}", index + 1))?;
+        let mut command = engine.command("ffmpeg")?;
+        command
+            .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-ss"])
+            .arg(&start_arg)
+            .arg("-i")
+            .arg(source)
+            .arg("-t")
+            .arg(&length_arg)
+            .args(["-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero"])
+            .arg(&clip);
+        run(&mut command, &format!("extracting kept segment {}", index + 1))?;
         if !clip.is_file() || fs::metadata(&clip).map(|m| m.len()).unwrap_or(0) == 0 {
             return Err(format!("FFmpeg produced an empty temporary clip for segment {}.", index + 1));
         }
@@ -285,20 +336,25 @@ pub fn export_blaze_video(
     let manifest = workspace.0.join("concat.txt");
     let mut manifest_text = String::new();
     for clip in &clips {
-        let path = clip.to_string_lossy().replace('\\', "/").replace('\'', "'\\''");
-        manifest_text.push_str(&format!("file '{path}'\n"));
+        // The concat manifest lives beside these generated ASCII filenames.
+        // Relative references avoid encoding the user's output-folder path in
+        // FFmpeg's UTF-8 manifest syntax.
+        let name = clip.file_name().expect("generated clip has a filename").to_string_lossy()
+            .replace('\'', "'\\''");
+        manifest_text.push_str(&format!("file '{name}'\n"));
     }
     fs::write(&manifest, manifest_text)
         .map_err(|error| format!("Could not write the temporary concat manifest: {error}"))?;
 
     let joined = workspace.0.join(format!("joined.{extension}"));
-    let manifest_arg = manifest.to_string_lossy();
-    let joined_arg = joined.to_string_lossy();
-    run(engine, &[
-        "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
-        "-f", "concat", "-safe", "0", "-i", manifest_arg.as_ref(),
-        "-map", "0", "-c", "copy", joined_arg.as_ref(),
-    ], "concatenating the kept segments")?;
+    let mut command = engine.command("ffmpeg")?;
+    command
+        .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-y",
+            "-f", "concat", "-safe", "0", "-i"])
+        .arg(&manifest)
+        .args(["-map", "0", "-c", "copy"])
+        .arg(&joined);
+    run(&mut command, "concatenating the kept segments")?;
 
     let expected_duration = segments.iter().map(|segment|
         segment.duration() as f64 * rate.denominator as f64 / rate.numerator as f64
@@ -316,12 +372,14 @@ pub fn export_blaze_video(
 }
 
 fn frame_rate_for_stream_copy(engine: &MediaEngine, source: &Path) -> Result<FrameRate, String> {
-    let source_arg = source.to_string_lossy();
-    let output = output_tracked(engine.command("ffprobe")?.args([
-        "-v", "error", "-select_streams", "v:0",
-        "-show_entries", "stream=avg_frame_rate,r_frame_rate",
-        "-of", "default=noprint_wrappers=1:nokey=1", source_arg.as_ref(),
-    ])).map_err(|error| format!("Could not read the source frame rate: {error}"))?;
+    let mut command = engine.command("ffprobe")?;
+    command
+        .args(["-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=avg_frame_rate,r_frame_rate",
+            "-of", "default=noprint_wrappers=1:nokey=1"])
+        .arg(source);
+    let output = output_tracked(&mut command)
+        .map_err(|error| format!("Could not read the source frame rate: {error}"))?;
     if !output.status.success() { return Err("FFprobe could not read the source frame rate.".into()); }
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let mut parts = line.trim().split('/');
@@ -334,12 +392,84 @@ fn frame_rate_for_stream_copy(engine: &MediaEngine, source: &Path) -> Result<Fra
     Err("The source frame rate could not be determined for stream-copy export.".into())
 }
 
+#[cfg(windows)]
+fn replace_file_atomically(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::{os::windows::ffi::OsStrExt, ptr};
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination: Vec<u16> = destination.as_os_str().encode_wide().chain(Some(0)).collect();
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_file_atomically(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::rename(source, destination)
+}
+
+fn atomic_write(output: &Path, contents: &str) -> Result<(), String> {
+    let parent = output.parent().filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("Could not access the timeline output folder: {error}"))?;
+
+    let file_name = output.file_name().unwrap_or_else(|| std::ffi::OsStr::new("timeline"));
+    for _ in 0..100 {
+        let id = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let mut temporary_name = file_name.to_os_string();
+        temporary_name.push(format!(".blaze_tmp_{}_{}", std::process::id(), id));
+        let temporary = parent.join(temporary_name);
+
+        let mut file = match OpenOptions::new().write(true).create_new(true).open(&temporary) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("Could not create a temporary timeline file: {error}")),
+        };
+
+        let write_result = (|| -> std::io::Result<()> {
+            file.write_all(contents.as_bytes())?;
+            file.sync_all()?;
+            drop(file);
+            replace_file_atomically(&temporary, output)?;
+            #[cfg(unix)]
+            if let Ok(directory) = OpenOptions::new().read(true).open(parent) {
+                let _ = directory.sync_all();
+            }
+            Ok(())
+        })();
+
+        if let Err(error) = write_result {
+            let _ = fs::remove_file(&temporary);
+            return Err(format!("Could not write the timeline file: {error}"));
+        }
+        return Ok(());
+    }
+
+    Err("Could not allocate a temporary timeline file.".into())
+}
+
 /// Exports the single-source, single-track edit as a timeline interchange file.
 pub fn export_interchange(
     format: InterchangeFormat, source: &Path, info: &MediaInfo,
     delete_ranges: &[(f64, f64)], output: &Path,
 ) -> Result<(), String> {
     if !source.is_file() { return Err("The source video no longer exists.".into()); }
+    if is_same_file(source, output) {
+        return Err("The timeline file cannot replace the source video.".into());
+    }
     let rate = frame_rate(info.fps.ok_or_else(|| "The source frame rate could not be determined.".to_string())?)?;
     let segments = keep_segments(delete_ranges, info.duration, rate);
     if segments.is_empty() { return Err("The edit removes the entire source; no timeline can be exported.".into()); }
@@ -350,7 +480,7 @@ pub fn export_interchange(
         InterchangeFormat::DavinciResolve | InterchangeFormat::PremiereXml =>
             build_fcp7_xml(source, info, rate, &segments)?,
     };
-    fs::write(output, contents).map_err(|error| format!("Could not write the timeline file: {error}"))
+    atomic_write(output, &contents)
 }
 
 fn build_edl(source: &Path, info: &MediaInfo, rate: FrameRate, segments: &[Segment]) -> String {
@@ -694,6 +824,28 @@ mod tests {
             "file://server/share/a%20b.mp4");
         assert_eq!(file_url_from_str(r"\\?\UNC\server\share\a.mp4", true),
             "file://server/share/a.mp4");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_urls_preserve_non_utf8_unix_path_bytes() {
+        use std::os::unix::ffi::OsStringExt;
+        let path = PathBuf::from(std::ffi::OsString::from_vec(b"/tmp/a\xff b.mp4".to_vec()));
+        assert_eq!(file_url(&path), "file:///tmp/a%FF%20b.mp4");
+    }
+
+    #[test]
+    fn atomic_timeline_write_replaces_existing_destination() {
+        let dir = std::env::temp_dir().join(format!("blaze-atomic-write-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let output = dir.join("timeline.xml");
+        fs::write(&output, "old contents").unwrap();
+        atomic_write(&output, "new contents").unwrap();
+        assert_eq!(fs::read_to_string(&output).unwrap(), "new contents");
+        assert!(fs::read_dir(&dir).unwrap().all(|entry| {
+            !entry.unwrap().file_name().to_string_lossy().contains(".blaze_tmp_")
+        }));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

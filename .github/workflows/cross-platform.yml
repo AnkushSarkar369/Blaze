@@ -1,0 +1,82 @@
+name: Cross-platform checks
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - "audit/**"
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "crates/**"
+      - "native-app/**"
+      - ".github/workflows/**"
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux build and FFmpeg integration
+    runs-on: ubuntu-latest
+    env:
+      BLAZE_REQUIRE_FFMPEG_INTEGRATION: "1"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ffmpeg \
+            libmpv-dev \
+            pkg-config \
+            libasound2-dev \
+            libudev-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run workspace tests with real FFmpeg
+        run: cargo test --locked --workspace
+
+      - name: Build release application
+        run: cargo build --locked --release -p blaze-native
+
+  macos:
+    name: macOS build and FFmpeg integration
+    runs-on: macos-latest
+    env:
+      BLAZE_REQUIRE_FFMPEG_INTEGRATION: "1"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install MPV and FFmpeg
+        run: |
+          brew install mpv ffmpeg
+          echo "MPV_LIBRARY_DIR=$(brew --prefix mpv)/lib" >> "$GITHUB_ENV"
+          echo "DYLD_LIBRARY_PATH=$(brew --prefix mpv)/lib:$(brew --prefix ffmpeg)/lib:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run workspace tests with real FFmpeg
+        run: cargo test --locked --workspace
+
+      - name: Build release application
+        run: cargo build --locked --release -p blaze-native

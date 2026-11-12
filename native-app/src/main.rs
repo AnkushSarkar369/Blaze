@@ -406,13 +406,22 @@ fn verify_gumroad_license(license_key: &str, increment_uses: bool) -> LicenseRes
 
 fn license_state_file() -> Option<PathBuf> {
     let config_dir = if cfg!(target_os = "windows") {
-        std::env::var_os("APPDATA").map(PathBuf::from)
+        std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("USERPROFILE")
+                    .map(|home| PathBuf::from(home).join("AppData").join("Roaming"))
+            })
     } else if cfg!(target_os = "macos") {
         std::env::var_os("HOME")
-            .map(|home| PathBuf::from(home).join("Library/Application Support"))
+            .map(|home| PathBuf::from(home).join("Library").join("Application Support"))
     } else {
+        // XDG_CONFIG_HOME must be absolute. An invalid relative value is
+        // ignored in favour of HOME/.config, as required by the XDG base-dir
+        // convention.
         std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
             .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
     }?;
 
@@ -1756,7 +1765,7 @@ impl BlazeApp {
         let repaint = ctx.clone();
         std::thread::spawn(move || {
             let engine = MediaEngine::default();
-            let result = engine.detect_keyframes(&path.to_string_lossy());
+            let result = engine.detect_keyframes(&path);
             let _ = sender.send((generation, result));
             repaint.request_repaint();
         });
@@ -1826,7 +1835,7 @@ impl BlazeApp {
         let repaint = ctx.clone();
         std::thread::spawn(move || {
             let engine = MediaEngine::default();
-            let result = blaze_engine::silence::detect_silence(&engine, &path.to_string_lossy(), config);
+            let result = blaze_engine::silence::detect_silence(&engine, &path, config);
             let _ = tx.send((generation, result));
             repaint.request_repaint();
         });
@@ -1870,7 +1879,13 @@ impl BlazeApp {
     }
 
     fn open_video(&mut self, ctx: &egui::Context) {
-        let Some(path) = FileDialog::new().pick_file() else {
+        let Some(path) = FileDialog::new()
+            .add_filter(
+                "Video files",
+                &["mp4", "mov", "mkv", "avi", "webm", "mpeg", "mpg", "ts", "mts", "m2ts", "3gp", "wmv", "flv"],
+            )
+            .pick_file()
+        else {
             return;
         };
 
@@ -1910,7 +1925,7 @@ impl BlazeApp {
         std::thread::spawn(move || {
             let engine = MediaEngine::default();
             let result = engine
-                .probe_media(&path.to_string_lossy())
+                .probe_media(&path)
                 .map(|info| (path, info));
             let _ = sender.send((generation, result));
             repaint.request_repaint();
@@ -1936,7 +1951,7 @@ impl BlazeApp {
                         std::thread::spawn(move || {
                             let engine = MediaEngine::default();
                             let result = engine.generate_waveform_with_progress(
-                                &path.to_string_lossy(),
+                                &path,
                                 channels,
                                 duration,
                                 |fraction| {
