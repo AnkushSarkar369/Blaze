@@ -176,20 +176,6 @@ fn is_same_file(a: &Path, b: &Path) -> bool {
                 return true;
             }
         }
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::MetadataExt;
-            if let (Some(a_volume), Some(b_volume), Some(a_index), Some(b_index)) = (
-                a_meta.volume_serial_number(),
-                b_meta.volume_serial_number(),
-                a_meta.file_index(),
-                b_meta.file_index(),
-            ) {
-                if a_volume == b_volume && a_index == b_index {
-                    return true;
-                }
-            }
-        }
     }
 
     fn resolve(path: &Path) -> Option<PathBuf> {
