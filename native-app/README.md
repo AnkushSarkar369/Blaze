@@ -20,7 +20,7 @@ On Linux, the application links against the `libmpv.so.2` runtime library. On Fe
 sudo dnf install mpv-libs
 ```
 
-On Windows, the release package keeps `libmpv-2.dll` beside `Blaze.exe`; do not move it into `Bin`, because the executable imports it at load time and Windows only searches the executable's folder. FFmpeg and its DLLs live in `Bin\FFmpeg`. See the root README for the full package layout.
+On Windows, keep `libmpv-2.dll` and the other MPV runtime DLLs beside `Blaze.exe`; do not move any of them into `Bin`, because the executable imports the MPV runtime at load time and Windows resolves those DLLs beside the executable. FFmpeg and its DLLs live in `Bin\FFmpeg`. See the root README for the full package layout.
 
 The Linux build script locates the installed runtime library and creates a linker-name symlink inside Cargo's build directory. It does not modify system files.
 
