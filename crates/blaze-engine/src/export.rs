@@ -131,6 +131,7 @@ fn file_url_from_bytes(raw: &[u8]) -> String {
 /// `C:\My Videos\a.mp4` becomes `file:///C:/My%20Videos/a.mp4` and a UNC path
 /// `\\server\share\a.mp4` becomes `file://server/share/a.mp4`. On other
 /// platforms a backslash is an ordinary file-name character and is encoded.
+#[cfg(any(not(unix), test))]
 fn file_url_from_str(raw: &str, windows: bool) -> String {
     let normalised: String = if windows {
         let trimmed = if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {

@@ -311,23 +311,6 @@ impl MediaEngine {
         Ok(command)
     }
 
-    fn run_tool(
-        &self,
-        tool: &str,
-        args: &[&str],
-    ) -> Result<std::process::Output, String> {
-        let output = output_tracked(self.command(tool)?.args(args))
-            .map_err(|error| format!("Could not start {tool}: {error}"))?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "{tool} failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
-        }
-
-        Ok(output)
-    }
 
     fn run_tool_with_path(
         &self,

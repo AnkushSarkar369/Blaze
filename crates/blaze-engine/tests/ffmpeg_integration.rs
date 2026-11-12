@@ -5,7 +5,7 @@ use blaze_engine::{
 use std::{
     env,
     fs,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Command, Stdio},
     sync::atomic::{AtomicU64, Ordering},
 };
