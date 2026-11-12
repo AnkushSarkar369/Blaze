@@ -135,4 +135,4 @@ This is the working product roadmap. It lists unfinished work only; completed it
 cargo run -p blaze-native
 ```
 
-Development builds and Linux testing are performed locally. The Windows x64 GitHub Actions job produces `windows.zip` with `Blaze.exe`, `Readme.txt`, the `Bin` folder (MPV runtime DLLs, FFmpeg, and FFprobe), and the FFmpeg licence notice. The Blaze application icon is embedded in the Windows executable.
+Development builds and Linux testing are performed locally. The Windows x64 GitHub Actions job publishes a single downloadable artifact, `Blaze-V1-Windows.zip`. Its root contains `Blaze.exe` and `Readme.txt`; `Bin` contains the MPV runtime DLLs, FFmpeg, FFprobe, and `FFmpeg-LICENSE.txt`. The Blaze application icon is embedded in the Windows executable.
