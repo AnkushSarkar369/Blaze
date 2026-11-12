@@ -229,6 +229,16 @@ impl MediaEngine {
             }
         }
 
+        // GUI applications launched from Finder do not necessarily inherit
+        // the interactive shell's Homebrew PATH. Probe both standard prefixes
+        // explicitly so a normal Homebrew install still works in a .app launch.
+        #[cfg(target_os = "macos")]
+        candidates.extend(
+            ["/opt/homebrew/bin", "/usr/local/bin"]
+                .into_iter()
+                .map(|directory| PathBuf::from(directory).join(&filename)),
+        );
+
         let home = env::var_os("HOME")
             .or_else(|| env::var_os("USERPROFILE"))
             .map(PathBuf::from);
