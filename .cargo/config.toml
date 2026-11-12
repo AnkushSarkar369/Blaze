@@ -1,4 +1,5 @@
 [env]
 # rsmpv-sys has hand-written FFI declarations and does not need mpv headers.
-# Skip pkg-config; native-app/build.rs supplies a linker alias for libmpv.so.2.
+# Skip pkg-config on all targets. native-app/build.rs locates the platform's
+# libmpv runtime and supplies the corresponding linker alias/search directory.
 MPV_NO_PKG_CONFIG = "1"
