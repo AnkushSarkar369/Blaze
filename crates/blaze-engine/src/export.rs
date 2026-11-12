@@ -391,6 +391,34 @@ fn frame_rate_for_stream_copy(engine: &MediaEngine, source: &Path) -> Result<Fra
     Err("The source frame rate could not be determined for stream-copy export.".into())
 }
 
+#[cfg(windows)]
+fn replace_file_atomically(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::{os::windows::ffi::OsStrExt, ptr};
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination: Vec<u16> = destination.as_os_str().encode_wide().chain(Some(0)).collect();
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_file_atomically(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::rename(source, destination)
+}
+
 fn atomic_write(output: &Path, contents: &str) -> Result<(), String> {
     let parent = output.parent().filter(|path| !path.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
@@ -414,7 +442,7 @@ fn atomic_write(output: &Path, contents: &str) -> Result<(), String> {
             file.write_all(contents.as_bytes())?;
             file.sync_all()?;
             drop(file);
-            fs::rename(&temporary, output)?;
+            replace_file_atomically(&temporary, output)?;
             #[cfg(unix)]
             if let Ok(directory) = OpenOptions::new().read(true).open(parent) {
                 let _ = directory.sync_all();
