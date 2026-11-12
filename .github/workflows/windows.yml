@@ -26,12 +26,28 @@ jobs:
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Verify Cargo.lock is current
+      - name: Resolve and verify Cargo dependencies
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+
+          # The Windows-only winres build dependency was added after the
+          # committed lockfile was generated. Resolve the workspace first so
+          # Cargo can update Cargo.lock, then require all subsequent build
+          # steps to use that resolved lockfile without further changes.
+          cargo metadata --format-version 1 --no-deps | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Cargo metadata validation failed."
+          }
+
+          cargo metadata --format-version 1 | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Cargo could not resolve the workspace dependencies."
+          }
+
           cargo metadata --locked --format-version 1 | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            throw "Cargo.lock is stale or does not match the workspace manifests."
+            throw "Cargo.lock was not stable after dependency resolution."
           }
 
       - name: Download LGPL MPV runtime and development package
