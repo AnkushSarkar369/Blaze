@@ -71,7 +71,6 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
 
     let temp = TestDir::new();
     let media = temp.0.join("sample.mkv");
-    let media_arg = media.to_str().expect("temporary media path is UTF-8");
 
     // Use FFmpeg's built-in lavfi sources and MPEG-4/PCM codecs to avoid
     // relying on optional H.264 encoders in the test runner.
@@ -98,8 +97,8 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
             "-c:a",
             "pcm_s16le",
             "-shortest",
-            media_arg,
         ])
+        .arg(&media)
         .output()
         .expect("run FFmpeg to create integration media");
     assert!(
@@ -113,7 +112,7 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
         ffprobe_dir.to_path_buf(),
     ]);
 
-    let info = engine.probe_media(media_arg).expect("probe media");
+    let info = engine.probe_media(&media).expect("probe media");
     assert!((info.duration - 2.0).abs() < 0.15, "duration: {}", info.duration);
     assert_eq!(info.width, Some(160));
     assert_eq!(info.height, Some(90));
@@ -121,13 +120,13 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
     assert!(info.has_audio);
     assert_eq!(info.audio_codec.as_deref(), Some("pcm_s16le"));
 
-    let keyframes = engine.detect_keyframes(media_arg).expect("detect keyframes");
+    let keyframes = engine.detect_keyframes(&media).expect("detect keyframes");
     assert!(keyframes.len() >= 4, "keyframes: {keyframes:?}");
     assert!(keyframes[0].abs() < 0.1);
 
     let mut waveform_progress = Vec::new();
     let waveform = engine
-        .generate_waveform_with_progress(media_arg, 2, info.duration, |progress| {
+        .generate_waveform_with_progress(&media, 2, info.duration, |progress| {
             waveform_progress.push(progress);
         })
         .expect("generate waveform");
@@ -140,7 +139,7 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
     assert!(read_u32(&waveform, 12) > 300);
 
     let playback_path = engine
-        .prepare_audio(&temp.0, 1, media_arg)
+        .prepare_audio(&temp.0, 1, &media)
         .expect("prepare playback audio");
     let playback = fs::read(&playback_path).expect("read prepared WAV");
     assert!(playback.starts_with(b"RIFF"));
@@ -172,7 +171,7 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
     );
 
     let mut command = engine
-        .preview_command(media_arg, 0.0, 25.0, 3)
+        .preview_command(&media, 0.0, 25.0, 3)
         .expect("build preview command");
     command.stdout(Stdio::piped()).stderr(Stdio::null());
     let mut child = command.spawn().expect("start preview FFmpeg");
@@ -196,5 +195,5 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
 
     // The method accepts a path object rather than assuming UTF-8 for the
     // scratch directory itself.
-    assert!(Path::new(&playback_path).exists());
+    assert!(playback_path.exists());
 }
