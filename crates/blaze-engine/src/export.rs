@@ -418,8 +418,13 @@ fn atomic_write(output: &Path, contents: &str) -> Result<(), String> {
         temporary_name.push(format!(".blaze_tmp_{}_{}", std::process::id(), id));
         let temporary = parent.join(temporary_name);
 
+        let mut file = match OpenOptions::new().write(true).create_new(true).open(&temporary) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("Could not create a temporary timeline file: {error}")),
+        };
+
         let write_result = (|| -> std::io::Result<()> {
-            let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary)?;
             file.write_all(contents.as_bytes())?;
             file.sync_all()?;
             drop(file);
@@ -431,14 +436,11 @@ fn atomic_write(output: &Path, contents: &str) -> Result<(), String> {
             Ok(())
         })();
 
-        match write_result {
-            Ok(()) => return Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && !temporary.exists() => continue,
-            Err(error) => {
-                let _ = fs::remove_file(&temporary);
-                return Err(format!("Could not write the timeline file: {error}"));
-            }
+        if let Err(error) = write_result {
+            let _ = fs::remove_file(&temporary);
+            return Err(format!("Could not write the timeline file: {error}"));
         }
+        return Ok(());
     }
 
     Err("Could not allocate a temporary timeline file.".into())
@@ -450,6 +452,9 @@ pub fn export_interchange(
     delete_ranges: &[(f64, f64)], output: &Path,
 ) -> Result<(), String> {
     if !source.is_file() { return Err("The source video no longer exists.".into()); }
+    if is_same_file(source, output) {
+        return Err("The timeline file cannot replace the source video.".into());
+    }
     let rate = frame_rate(info.fps.ok_or_else(|| "The source frame rate could not be determined.".to_string())?)?;
     let segments = keep_segments(delete_ranges, info.duration, rate);
     if segments.is_empty() { return Err("The edit removes the entire source; no timeline can be exported.".into()); }
@@ -804,6 +809,28 @@ mod tests {
             "file://server/share/a%20b.mp4");
         assert_eq!(file_url_from_str(r"\\?\UNC\server\share\a.mp4", true),
             "file://server/share/a.mp4");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_urls_preserve_non_utf8_unix_path_bytes() {
+        use std::os::unix::ffi::OsStringExt;
+        let path = PathBuf::from(std::ffi::OsString::from_vec(b"/tmp/a\\xff b.mp4".to_vec()));
+        assert_eq!(file_url(&path), "file:///tmp/a%FF%20b.mp4");
+    }
+
+    #[test]
+    fn atomic_timeline_write_replaces_existing_destination() {
+        let dir = std::env::temp_dir().join(format!("blaze-atomic-write-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let output = dir.join("timeline.xml");
+        fs::write(&output, "old contents").unwrap();
+        atomic_write(&output, "new contents").unwrap();
+        assert_eq!(fs::read_to_string(&output).unwrap(), "new contents");
+        assert!(fs::read_dir(&dir).unwrap().all(|entry| {
+            !entry.unwrap().file_name().to_string_lossy().contains(".blaze_tmp_")
+        }));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
