@@ -22,33 +22,35 @@ fn main() {
         return;
     }
 
-    #[cfg(unix)]
-    let library = locate_libmpv().unwrap_or_else(|| {
-        panic!(
-            "libmpv runtime library was not found. Install it with your system package manager (Fedora: sudo dnf install mpv-libs)."
-        )
-    });
+    #[cfg(target_os = "linux")]
+    {
+        let library = locate_libmpv().unwrap_or_else(|| {
+            panic!(
+                "libmpv runtime library was not found. Install it with your system package manager (Fedora: sudo dnf install mpv-libs)."
+            )
+        });
 
-    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is not set"));
-    let linker_name = out_dir.join("libmpv.so");
+        let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is not set"));
+        let linker_name = out_dir.join("libmpv.so");
 
-    if linker_name.exists() {
-        fs::remove_file(&linker_name)
-            .unwrap_or_else(|error| panic!("Could not replace {}: {error}", linker_name.display()));
+        if linker_name.exists() {
+            fs::remove_file(&linker_name)
+                .unwrap_or_else(|error| panic!("Could not replace {}: {error}", linker_name.display()));
+        }
+
+        std::os::unix::fs::symlink(&library, &linker_name).unwrap_or_else(|error| {
+            panic!(
+                "Could not create libmpv linker symlink {} -> {}: {error}",
+                linker_name.display(),
+                library.display()
+            )
+        });
+
+        println!("cargo:rustc-link-search=native={}", out_dir.display());
     }
-
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(&library, &linker_name).unwrap_or_else(|error| {
-        panic!(
-            "Could not create libmpv linker symlink {} -> {}: {error}",
-            linker_name.display(),
-            library.display()
-        )
-    });
-
-    println!("cargo:rustc-link-search=native={}", out_dir.display());
 }
 
+#[cfg(target_os = "linux")]
 fn locate_libmpv() -> Option<PathBuf> {
     if let Some(path) = env::var_os("BLAZE_LIBMPV_PATH") {
         let path = PathBuf::from(path);
