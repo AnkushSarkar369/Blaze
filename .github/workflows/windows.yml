@@ -154,7 +154,7 @@ jobs:
 
           Copy-Item (Join-Path $env:FFMPEG_BIN_DIR "ffmpeg.exe") (Join-Path $bin "ffmpeg.exe")
           Copy-Item (Join-Path $env:FFMPEG_BIN_DIR "ffprobe.exe") (Join-Path $bin "ffprobe.exe")
-          Copy-Item $env:FFMPEG_LICENSE_FILE (Join-Path $stage "FFmpeg-LICENSE.txt")
+          Copy-Item $env:FFMPEG_LICENSE_FILE (Join-Path $bin "FFmpeg-LICENSE.txt")
 
           @"
           Blaze for Windows x64
@@ -165,14 +165,14 @@ jobs:
           and exports. The Blaze logo is embedded in Blaze.exe.
 
           FFmpeg is an LGPL static build from BtbN/FFmpeg-Builds.
-          See FFmpeg-LICENSE.txt for the included license notice.
+          See Bin\FFmpeg-LICENSE.txt for the included license notice.
           Build source: https://github.com/BtbN/FFmpeg-Builds
           "@ | Set-Content -Path (Join-Path $stage "Readme.txt") -Encoding utf8
 
           $required = @(
             (Join-Path $stage "Blaze.exe"),
             (Join-Path $stage "Readme.txt"),
-            (Join-Path $stage "FFmpeg-LICENSE.txt"),
+            (Join-Path $bin "FFmpeg-LICENSE.txt"),
             (Join-Path $bin "libmpv-2.dll"),
             (Join-Path $bin "ffmpeg.exe"),
             (Join-Path $bin "ffprobe.exe")
@@ -188,26 +188,13 @@ jobs:
           & (Join-Path $bin "ffprobe.exe") -version
           if ($LASTEXITCODE -ne 0) { throw "Staged FFprobe failed its version check." }
 
-          Compress-Archive -Path (Join-Path $stage "*") -DestinationPath (Join-Path $env:GITHUB_WORKSPACE "dist\windows.zip") -CompressionLevel Optimal -Force
-          $zip = Join-Path $env:GITHUB_WORKSPACE "dist\windows.zip"
-          if (-not (Test-Path $zip) -or (Get-Item $zip).Length -eq 0) { throw "windows.zip was not created." }
-
-          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
-          try {
-            $entries = @($archive.Entries | ForEach-Object { $_.FullName })
-            $mustHave = @("Blaze.exe", "Readme.txt", "Bin/ffmpeg.exe", "Bin/ffprobe.exe", "Bin/libmpv-2.dll", "FFmpeg-LICENSE.txt")
-            foreach ($entry in $mustHave) {
-              if ($entries -notcontains $entry) { throw "ZIP is missing $entry." }
-            }
-          } finally { $archive.Dispose() }
-
-          Write-Host "Windows ZIP created: $zip"
+          Write-Host "Windows release directory staged for artifact upload."
           Get-ChildItem $stage -Recurse -File | Select-Object FullName,Length | Format-Table -AutoSize
 
       - name: Upload Windows ZIP
         uses: actions/upload-artifact@v6
         with:
-          name: windows
-          path: dist/windows.zip
+          name: Blaze-V1-Windows
+          path: dist/Blaze/
           if-no-files-found: error
           retention-days: 14
