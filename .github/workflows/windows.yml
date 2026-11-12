@@ -146,8 +146,9 @@ jobs:
           $ErrorActionPreference = "Stop"
           $stage = Join-Path $env:GITHUB_WORKSPACE "dist\Blaze"
           $bin = Join-Path $stage "Bin"
+          $ffmpegBin = Join-Path $bin "FFmpeg"
           if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
-          New-Item -ItemType Directory -Force -Path $bin | Out-Null
+          New-Item -ItemType Directory -Force -Path $bin,$ffmpegBin | Out-Null
 
           Copy-Item "target\release\blaze-native.exe" (Join-Path $stage "Blaze.exe")
           if (-not (Test-Path (Join-Path $stage "Blaze.exe"))) { throw "Blaze.exe was not produced." }
@@ -156,11 +157,11 @@ jobs:
           Get-ChildItem -Path $env:MPV_LIBRARY_DIR -Filter "*.dll" -File | Copy-Item -Destination $bin -Force
           if (-not (Test-Path (Join-Path $bin "libmpv-2.dll"))) { throw "Bin is missing libmpv-2.dll." }
 
-          Copy-Item (Join-Path $env:FFMPEG_BIN_DIR "ffmpeg.exe") (Join-Path $bin "ffmpeg.exe")
-          Copy-Item (Join-Path $env:FFMPEG_BIN_DIR "ffprobe.exe") (Join-Path $bin "ffprobe.exe")
+          Copy-Item (Join-Path $env:FFMPEG_BIN_DIR "ffmpeg.exe") (Join-Path $ffmpegBin "ffmpeg.exe")
+          Copy-Item (Join-Path $env:FFMPEG_BIN_DIR "ffprobe.exe") (Join-Path $ffmpegBin "ffprobe.exe")
           $ffmpegDlls = @(Get-ChildItem -Path $env:FFMPEG_BIN_DIR -Filter "*.dll" -File)
           if ($ffmpegDlls.Count -eq 0) { throw "No FFmpeg shared runtime DLLs were found." }
-          $ffmpegDlls | Copy-Item -Destination $bin -Force
+          $ffmpegDlls | Copy-Item -Destination $ffmpegBin -Force
           Copy-Item $env:FFMPEG_LICENSE_FILE (Join-Path $bin "FFmpeg-LICENSE.txt")
 
           @"
@@ -168,12 +169,13 @@ jobs:
 
           Extract the Blaze folder and run Blaze.exe.
           Keep the Bin folder intact. It contains the MPV runtime DLLs and the
-          FFmpeg/FFprobe executables used for media analysis, playback preparation,
-          and exports. The Blaze logo is embedded in Blaze.exe.
+          FFmpeg subfolder used for media analysis, playback preparation, and exports.
+          The Blaze logo is embedded in Blaze.exe.
 
           FFmpeg is an LGPL shared build from BtbN/FFmpeg-Builds.
-          Its runtime DLLs are included in Bin alongside ffmpeg.exe and ffprobe.exe.
-          See Bin\FFmpeg-LICENSE.txt for the included license notice.
+          Its executables and runtime DLLs are kept together in Bin\FFmpeg to avoid
+          conflicts with MPV runtime libraries. See Bin\FFmpeg-LICENSE.txt for the
+          included license notice.
           Build source: https://github.com/BtbN/FFmpeg-Builds
           "@ | Set-Content -Path (Join-Path $stage "Readme.txt") -Encoding utf8
 
@@ -191,16 +193,16 @@ jobs:
           }
           if (@(Get-ChildItem -Path $bin -Filter "*.dll" -File).Count -lt 1) { throw "MPV runtime DLLs were not staged." }
 
-          & (Join-Path $bin "ffmpeg.exe") -version
+          & (Join-Path $ffmpegBin "ffmpeg.exe") -version
           if ($LASTEXITCODE -ne 0) { throw "Staged FFmpeg failed its version check." }
-          & (Join-Path $bin "ffprobe.exe") -version
+          & (Join-Path $ffmpegBin "ffprobe.exe") -version
           if ($LASTEXITCODE -ne 0) { throw "Staged FFprobe failed its version check." }
 
           # Exercise Blaze's real FFmpeg integration against the staged shared build:
           # generate a sample, probe metadata, detect keyframes, decode waveform/audio,
           # and stream MJPEG preview frames. This catches missing runtime DLLs and
           # incompatible FFmpeg functionality beyond a simple -version check.
-          $env:PATH = "$bin;$env:PATH"
+          $env:PATH = "$ffmpegBin;$env:PATH"
           cargo test --locked -p blaze-engine --test ffmpeg_integration -- --nocapture
           if ($LASTEXITCODE -ne 0) { throw "Blaze FFmpeg integration tests failed with the staged shared build." }
 
