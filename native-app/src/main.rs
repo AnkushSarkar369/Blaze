@@ -99,6 +99,28 @@ fn with_required_extension(path: PathBuf, extension: &str) -> PathBuf {
     PathBuf::from(name)
 }
 
+/// GTK save dialogs do not append a selected filter extension. When Blaze
+/// appends it afterwards, the resulting path may differ from the path the
+/// user confirmed in the dialog. Ask before replacing that adjusted target.
+fn confirm_extension_adjusted_output(path: PathBuf, extension: &str) -> Option<PathBuf> {
+    let output = with_required_extension(path.clone(), extension);
+    if output != path && output.exists() {
+        let result = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title("Replace existing file?")
+            .set_description(format!(
+                "{} already exists. Replace it?",
+                output.display()
+            ))
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show();
+        if result != rfd::MessageDialogResult::Yes {
+            return None;
+        }
+    }
+    Some(output)
+}
+
 fn open_external_url(url: &str) -> Result<(), String> {
     open::that(url).map_err(|error| format!("Could not open the browser: {error}"))
 }
@@ -3364,7 +3386,9 @@ impl eframe::App for BlazeApp {
                                     .set_file_name(&filename)
                                     .save_file()
                                 {
-                                    self.start_blaze_export(with_required_extension(output, &extension), ui.ctx());
+                                    if let Some(output) = confirm_extension_adjusted_output(output, &extension) {
+                                        self.start_blaze_export(output, ui.ctx());
+                                    }
                                 }
                             }
                         }
@@ -3420,7 +3444,9 @@ impl eframe::App for BlazeApp {
                                         .set_file_name(&filename)
                                         .save_file();
                                     if let Some(output) = output {
-                                        self.start_interchange_export(format, with_required_extension(output, extension), ui.ctx());
+                                        if let Some(output) = confirm_extension_adjusted_output(output, extension) {
+                                            self.start_interchange_export(format, output, ui.ctx());
+                                        }
                                     }
                                 }
                             }
