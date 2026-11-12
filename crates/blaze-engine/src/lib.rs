@@ -536,7 +536,7 @@ impl MediaEngine {
             .args(["-map", "0:a:0", "-vn", "-ac", "2", "-ar", "48000", "-c:a", "pcm_s16le"])
             .arg(&output);
 
-        let result = output_tracked(command)
+        let result = output_tracked(&mut command)
             .map_err(|error| format!("Could not start FFmpeg: {error}"))?;
 
         if !result.status.success() {
