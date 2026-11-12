@@ -33,8 +33,15 @@ impl Drop for TestDir {
 }
 
 fn find_executable(name: &str) -> Option<PathBuf> {
+    // Windows executables carry the .exe suffix; PATH lookup does not add
+    // PATHEXT automatically when checking paths with Path::is_file().
+    let filename = if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_owned()
+    };
     env::split_paths(&env::var_os("PATH")?)
-        .map(|directory| directory.join(name))
+        .map(|directory| directory.join(&filename))
         .find(|candidate| candidate.is_file())
 }
 
@@ -44,11 +51,18 @@ fn read_u32(bytes: &[u8], offset: usize) -> u32 {
 
 #[test]
 fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
+    let require_tools = env::var_os("BLAZE_REQUIRE_FFMPEG_INTEGRATION").is_some();
     let Some(ffmpeg) = find_executable("ffmpeg") else {
+        if require_tools {
+            panic!("real-FFmpeg integration is required, but ffmpeg was not found on PATH");
+        }
         eprintln!("Skipping real-FFmpeg integration test: ffmpeg is not on PATH");
         return;
     };
     let Some(ffprobe) = find_executable("ffprobe") else {
+        if require_tools {
+            panic!("real-FFmpeg integration is required, but ffprobe was not found on PATH");
+        }
         eprintln!("Skipping real-FFmpeg integration test: ffprobe is not on PATH");
         return;
     };
@@ -131,6 +145,31 @@ fn real_ffmpeg_probe_keyframes_waveform_audio_and_mjpeg_stream() {
     let playback = fs::read(&playback_path).expect("read prepared WAV");
     assert!(playback.starts_with(b"RIFF"));
     assert!(playback.len() > 44);
+
+    // Exercise the real stream-copy export with its workspace in the output
+    // directory. Seed an existing destination so the test also verifies the
+    // final rename replaces a previously confirmed output file.
+    let export_dir = temp.0.join("exports");
+    fs::create_dir_all(&export_dir).expect("create export directory");
+    let export_path = export_dir.join("cut.mkv");
+    fs::write(&export_path, b"previous export").expect("seed existing export");
+    let report = blaze_engine::export::export_blaze_video(
+        &engine,
+        &media,
+        &export_path,
+        info.duration,
+        &[(0.4, 0.8)],
+    )
+    .expect("export cut video");
+    assert!(report.actual_duration > 0.0);
+    assert!(report.actual_duration < info.duration);
+    assert!(fs::metadata(&export_path).expect("read exported file").len() > 1_000);
+    assert!(
+        fs::read_dir(&export_dir)
+            .expect("list export directory")
+            .all(|entry| !entry.unwrap().file_name().to_string_lossy().contains("_blaze_export_")),
+        "temporary export workspace should be removed"
+    );
 
     let mut command = engine
         .preview_command(media_arg, 0.0, 25.0, 3)
