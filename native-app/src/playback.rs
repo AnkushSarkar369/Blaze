@@ -122,26 +122,13 @@ impl Playback {
             io::Error::other("Blaze requires eframe's OpenGL function loader for libmpv rendering")
         })?;
 
-        let mut builder = Mpv::builder()?.set_property("vo", "libmpv")?;
-
-        // Hardware decoding is platform specific. VA-API is Linux only; elsewhere
-        // mpv's conservative automatic selection is used and falls back to
-        // software decoding if no hardware decoder can be initialised.
-        #[cfg(target_os = "linux")]
-        {
-            builder = builder
-                .set_property("hwdec", "vaapi-copy")?
-                // Keep libmpv on the Intel VA-API path instead of probing
-                // unrelated NVIDIA/CUDA hardware backends.
-                .set_property("gpu-hwdec-interop", "vaapi")?
-                // Haswell VA-API exposes MPEG-2, H.264 and VC-1 decode profiles.
-                // HEVC and other unsupported codecs deliberately fall back to software.
-                .set_property("hwdec-codecs", "h264,mpeg2video,vc1")?;
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            builder = builder.set_property("hwdec", "auto-safe")?;
-        }
+        // Let mpv select a safe hardware decoder on each host. Hard-coding
+        // VA-API and an Intel/Haswell codec whitelist on every Linux machine
+        // disables acceleration on NVIDIA, AMD and other supported systems.
+        // auto-safe falls back to software decoding when no safe backend exists.
+        let builder = Mpv::builder()?
+            .set_property("vo", "libmpv")?
+            .set_property("hwdec", "auto-safe")?;
 
         let mpv = Arc::new(
             builder
